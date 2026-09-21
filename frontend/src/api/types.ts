@@ -36,8 +36,6 @@ export interface Entry {
   to_member_id: number | null
   statement_id: number | null
   statement_label: string | null
-  period_start: string | null
-  period_end: string | null
   bundle_id: number | null
   split_rule_json: Record<string, unknown>
   note: string
@@ -84,7 +82,5 @@ export interface EntryPayload {
   to_member_id?: number | null
   member_ids?: number[] | null
   rule?: Record<string, unknown> | null
-  period_start?: string | null
-  period_end?: string | null
   bundle_id?: number | null
 }

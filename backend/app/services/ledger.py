@@ -73,8 +73,6 @@ def create_entry(
     category_id: int | None = None,
     title: str = "",
     note: str = "",
-    period_start: dt.date | None = None,
-    period_end: dt.date | None = None,
     bundle_id: int | None = None,
 ) -> Entry:
     """记一笔，并把分摊结果**固化**成 entry_share。
@@ -110,8 +108,6 @@ def create_entry(
         category_id=category_id,
         payer_id=payer_id,
         to_member_id=to_member_id,
-        period_start=period_start,
-        period_end=period_end,
         bundle_id=bundle_id,
         split_rule_json=expanded,
         note=note,
@@ -239,7 +235,7 @@ def update_entry(
         )
     before = _snapshot(session, entry)
 
-    for key in ("title", "note", "category_id", "period_start", "period_end", "bundle_id"):
+    for key in ("title", "note", "category_id", "bundle_id"):
         if key in fields:
             setattr(entry, key, fields[key])
 

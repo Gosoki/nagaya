@@ -8,7 +8,7 @@
   * 5〜8 月各出过一张账单，9 月是当前草稿
   * 5/6/7 月三张钱都转完了 → 「已结清」；8 月那张只转了一笔 → 一个勾一个空
   * 固定费的日期一律是出账日（D30），日常开销保留真实日子
-  * 水道两个月一收，只出现在 6 月和 8 月，带计费期间 → 账单上标「含 4〜5月分」
+  * 水道两个月一收，只出现在 6 月和 8 月（备注里写着是哪两个月的）
   * 当前草稿的 ガス / 水道 空着 → 面板给灰色参考值
   * 一笔带调整额（Zen 少担 1,000）、一笔 1:1:0（Zen 出差没参与）
 """
@@ -113,8 +113,7 @@ def main() -> None:
 
         # ---------------------------------------------------------------- 6 月
         fixed(6, denki=8_900, gasu=3_900)
-        add(EntryKind.expense, d(6, 25), 11_800, "水道", "4〜5月分", go.id,
-            period_start=d(4, 1), period_end=d(5, 31))
+        add(EntryKind.expense, d(6, 25), 11_800, "水道", "4〜5月分", go.id)
         add(EntryKind.expense, d(6, 8), 1_780, "日用品", "ゴミ袋とラップ", kan.id)
         add(EntryKind.expense, d(6, 15), 6_400, "食費", "BBQ", go.id, rule=zen_less)
         add(EntryKind.income, d(6, 21), -4_500, None, "電気代キャッシュバック", go.id)
@@ -131,8 +130,7 @@ def main() -> None:
 
         # ---------------------------------------------------------------- 8 月
         fixed(8, denki=10_400, gasu=3_200, denki_note="エアコン代")
-        add(EntryKind.expense, d(8, 25), 12_600, "水道", "6〜7月分", go.id,
-            period_start=d(6, 1), period_end=d(7, 31))
+        add(EntryKind.expense, d(8, 25), 12_600, "水道", "6〜7月分", go.id)
         add(EntryKind.expense, d(8, 12), 8_900, "食費", "お盆の焼肉", go.id, rule=zen_less)
         add(EntryKind.expense, d(8, 20), 3_240, "日用品", "ハンドソープほか", zen.id)
         add(EntryKind.income, d(8, 25), -3_000, None, "電気代キャッシュバック", go.id)

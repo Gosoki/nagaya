@@ -72,26 +72,6 @@
             :seed-rule="row.rule"
             @change="(rule, valid, diff) => onRule(row, rule, valid, diff)"
           />
-          <div class="row items-center q-mt-sm q-gutter-sm">
-            <div class="text-caption text-grey-7">{{ t('monthly.coversPeriod') }}</div>
-            <q-btn dense flat no-caps size="sm" class="text-grey-8" :label="row.period_start ?? '—'">
-              <q-popup-proxy cover>
-                <q-date v-model="row.period_start" mask="YYYY-MM-DD" minimal @update:model-value="row.dirty = true" />
-              </q-popup-proxy>
-            </q-btn>
-            <span class="text-grey-5">〜</span>
-            <q-btn dense flat no-caps size="sm" class="text-grey-8" :label="row.period_end ?? '—'">
-              <q-popup-proxy cover>
-                <q-date v-model="row.period_end" mask="YYYY-MM-DD" minimal @update:model-value="row.dirty = true" />
-              </q-popup-proxy>
-            </q-btn>
-            <q-btn
-              v-if="row.period_start || row.period_end"
-              dense flat round size="sm" icon="close"
-              @click="row.period_start = null; row.period_end = null; row.dirty = true"
-            />
-          </div>
-
           <!-- 删除入口放在展开区里，不放行头：行头有金额输入框，误触成本太高。
                翻旧账单时不给删：那是归档整个分类，不是这一屏该干的事 -->
           <q-btn
@@ -150,8 +130,6 @@ interface ApiRow {
   amount: number | null
   version: number | null
   rule: Record<string, unknown> | null
-  period_start: string | null
-  period_end: string | null
   date: string | null
   hint: number | null
   hint_label: string | null
@@ -309,8 +287,6 @@ async function saveRow(row: Row) {
         `/api/entries/${row.entry_id}?version=${row.version}`,
         {
           amount_jpy: value,
-          period_start: row.period_start,
-          period_end: row.period_end,
           ...(row.rule_override
             ? { rule: row.rule_override, member_ids: meta.activeMembers.map((m) => m.id) }
             : {}),
@@ -328,8 +304,6 @@ async function saveRow(row: Row) {
           payer_id: defaultPayerId.value,
           category_id: row.category_id,
           title: row.name,
-          period_start: row.period_start,
-          period_end: row.period_end,
           rule: row.rule_override,
           // 和分摊预览用的是同一批人，避免预览与落库分摊到不同的人头上
           member_ids: meta.activeMembers.map((m) => m.id),

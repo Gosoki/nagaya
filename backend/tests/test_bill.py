@@ -134,15 +134,6 @@ def test_snapshot_is_never_overwritten(session: Session, members) -> None:
     assert st.snapshot_json["total_expense"] == 9_000
 
 
-def test_covers_annotation(session: Session, members) -> None:
-    a, *_ = members
-    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
-                 amount=12_000, payer_id=a.id, title="水道",
-                 period_start=dt.date(2026, 7, 1), period_end=dt.date(2026, 8, 31))
-    bill = build_bill(session, None)
-    assert [c["title"] for c in bill["covers"]] == ["水道"]
-
-
 def test_pairwise_mode(session: Session, members) -> None:
     a, b, c = members
     settings_svc.set_(session, "simplify_debts", False)
@@ -241,26 +232,6 @@ def test_cut_without_monthly_refuses_when_nothing_daily(session: Session, member
     with pytest.raises(BillError) as exc:
         cut_statement(session, actor_id=a.id, include_monthly=False)
     assert exc.value.code == "nothing_to_cut"
-
-
-def test_covers_only_when_billing_period_reaches_outside(session: Session, members) -> None:
-    """「含 7〜8 月水费」只在计费期间真的伸出本单范围时才标。
-
-    本期内的常规项也标的话，这句话会变成一长串，把「这个月为什么贵了一万二」
-    这个唯一有用的信号自己淹掉。
-    """
-    a, *_ = members
-    # 跨出去的：7〜8 月的水费，9 月这张单子上收到
-    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
-                 amount=12_000, payer_id=a.id, title="水道",
-                 period_start=dt.date(2026, 7, 1), period_end=dt.date(2026, 8, 31))
-    # 没跨出去的：期间就落在本单覆盖的日期里
-    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=dt.date(2026, 9, 12),
-                 amount=8_700, payer_id=a.id, title="電気",
-                 period_start=SEP, period_end=dt.date(2026, 9, 12))
-
-    bill = build_bill(session, None)
-    assert [c["title"] for c in bill["covers"]] == ["水道"]
 
 
 def test_bill_reports_previous_cut_time(session: Session, members) -> None:

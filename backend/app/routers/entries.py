@@ -89,8 +89,6 @@ def create_entry(
         category_id=body.category_id,
         title=body.title,
         note=body.note,
-        period_start=body.period_start,
-        period_end=body.period_end,
         bundle_id=body.bundle_id,
     )
     return to_entry_out(session, entry)

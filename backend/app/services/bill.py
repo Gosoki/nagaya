@@ -187,20 +187,6 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
         "members": rows,
         "transfers": [t._asdict() for t in transfers],
         "simplified": simplify,
-        # 「含 7〜8 月水费」这类标注**只收跨出本单覆盖范围的**。
-        # 本期内的常规项也标的话，这句话会变成一长串，把「这个月为什么贵了一万二」
-        # 这个唯一有用的信号自己淹掉。
-        "covers": [
-            {
-                "entry_id": e.id,
-                "title": e.title,
-                "category_id": e.category_id,
-                "period_start": e.period_start.isoformat() if e.period_start else None,
-                "period_end": e.period_end.isoformat() if e.period_end else None,
-            }
-            for e in entries
-            if _reaches_outside(e, dates)
-        ],
         # 出账之后又被改过的话要说出来，否则下一张的「上期结转」没人解释得清
         "edited_after_cut": _edited_after_cut(session, statement),
         # 这张单子上的转账记完了没有 —— 「转账按钮都点过了就显示结清」
@@ -390,8 +376,6 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
                 "amount": entry.amount_jpy if entry else None,
                 "version": entry.version if entry else None,
                 "rule": entry.split_rule_json if entry else c.default_rule_json,
-                "period_start": entry.period_start.isoformat() if entry and entry.period_start else None,
-                "period_end": entry.period_end.isoformat() if entry and entry.period_end else None,
                 "date": entry.date.isoformat() if entry else None,
                 "hint": hints.get(c.id),
                 "hint_label": hint_labels.get(c.id),
@@ -478,17 +462,3 @@ def settlement_progress(session: Session, statement: Statement | None) -> dict[s
         done.append(paid.get(key, 0) >= t["amount"])
     return {"settled": all(done), "settled_transfers": done}
 
-
-def _reaches_outside(entry: Entry, dates: list[dt.date]) -> bool:
-    """这条账目的计费期间是不是伸到了这张账单覆盖范围之外。
-
-    只有伸出去的才值得在账单上单独标一句（水费两个月一收、家賃前払い）。
-    本期内的常规项标了等于噪音。
-    """
-    if not (entry.period_start or entry.period_end) or not dates:
-        return False
-    lo, hi = min(dates), max(dates)
-    for bound in (entry.period_start, entry.period_end):
-        if bound is not None and not (lo <= bound <= hi):
-            return True
-    return False

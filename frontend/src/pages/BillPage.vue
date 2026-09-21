@@ -46,7 +46,6 @@
           </div>
           <div v-else class="text-warning">{{ dueText }}</div>
         </div>
-        <div v-if="coversText" class="text-caption text-grey-6 q-mt-xs">{{ coversText }}</div>
 
         <!-- 自己那笔摆在最显眼处。读账单的人要的就是这一个数字，
              埋在半屏之下的话，他先看到的全是别人的录入框 -->
@@ -305,7 +304,6 @@ interface Bill {
   members: BillRow[]
   transfers: BillTransfer[]
   simplified: boolean
-  covers: { title: string; category_id: number | null; period_start: string | null; period_end: string | null }[]
 }
 
 const { t } = useI18n()
@@ -358,23 +356,6 @@ const mineText = computed(() => {
 const dueText = computed(() => {
   const day = meta.setting<number | null>('settle_due_day', null)
   return day ? t('bill.dueBy', { date: `${day}` }) : t('bill.unsettled')
-})
-
-/** 「含 7–8 月水费」这类标注 */
-const coversText = computed(() => {
-  if (!bill.value?.covers.length) return ''
-  return bill.value.covers
-    .map((c) => {
-      const label =
-        c.title || (c.category_id === null ? '' : (meta.categoryById[c.category_id]?.name ?? ''))
-      // 日期压成 07/01〜08/31：标题多半已经写了「7〜8月分」，再跟一串完整日期太啰嗦
-      const span = [c.period_start, c.period_end]
-        .filter(Boolean)
-        .map((d) => d!.slice(5).replace('-', '/'))
-        .join('〜')
-      return t('bill.covers', { label: label ? `${label}（${span}）` : span })
-    })
-    .join(' · ')
 })
 
 /** 看哪一张完全由路由决定：/bill ＝本期草稿，/bill/3 ＝那张出过的 */
@@ -448,7 +429,6 @@ const billText = computed(() => {
   lines.push(`【${head}】 ${t('bill.total')} ${formatYen(b.total_expense)}`)
   if (b.covers_from) lines.push(t('bill.coversRange', { from: b.covers_from, to: b.covers_to }))
   lines.push(dueText.value)
-  if (coversText.value) lines.push(coversText.value)
   lines.push('')
   for (const r of b.members) {
     const bits = [`${t('bill.owed')} ${formatYen(r.owed)}`]

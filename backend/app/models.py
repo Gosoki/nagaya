@@ -156,8 +156,6 @@ class Entry(SQLModel, table=True):
     statement_id: Optional[int] = Field(default=None, foreign_key="statement.id", index=True)
 
     # 仅用于账单上标注「含 7–8 月水费」「10月分 家賃」，不参与任何计算（SPEC §4.4）
-    period_start: Optional[dt.date] = None
-    period_end: Optional[dt.date] = None
 
     bundle_id: Optional[int] = Field(default=None, foreign_key="bundle.id", index=True)
 

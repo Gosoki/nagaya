@@ -75,8 +75,6 @@ class EntryIn(SQLModel):
     to_member_id: Optional[int] = None
     member_ids: Optional[list[int]] = None
     rule: Optional[dict[str, Any]] = None
-    period_start: Optional[dt.date] = None
-    period_end: Optional[dt.date] = None
     bundle_id: Optional[int] = None
 
 
@@ -98,8 +96,6 @@ class EntryPatch(SQLModel):
     to_member_id: Optional[int] = None
     member_ids: Optional[list[int]] = None
     rule: Optional[dict[str, Any]] = None
-    period_start: Optional[dt.date] = None
-    period_end: Optional[dt.date] = None
     bundle_id: Optional[int] = None
 
 
@@ -114,8 +110,6 @@ class EntryOut(SQLModel):
     to_member_id: Optional[int]
     statement_id: Optional[int]
     statement_label: Optional[str]
-    period_start: Optional[dt.date]
-    period_end: Optional[dt.date]
     bundle_id: Optional[int]
     split_rule_json: dict[str, Any]
     note: str
