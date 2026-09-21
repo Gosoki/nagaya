@@ -16,18 +16,45 @@
       {{ t('entry.editBilled', { label: billedLabel }) }}
     </q-banner>
 
-    <q-tabs
+    <!-- 位置和高度跟账单那页的页签一致，但选中的是**实心色块**不是下划线：
+         选错记账类型的代价比选错账单页签大得多，值得给更硬的提示 -->
+    <q-btn-toggle
       v-model="kind"
-      dense
-      no-caps
-      class="kind-toggle text-grey-7"
-      :active-color="kindPalette"
-      :indicator-color="kindPalette"
-    >
-      <q-tab name="expense" :label="t('kind.expense')" />
-      <q-tab name="income" :label="t('kind.income')" />
-      <q-tab name="settlement" :label="t('kind.settlement')" />
-    </q-tabs>
+      spread no-caps unelevated
+      :toggle-color="kindPalette"
+      class="kind-toggle"
+      :options="[
+        { label: t('kind.expense'), value: 'expense' },
+        { label: t('kind.income'), value: 'income' },
+        { label: t('kind.settlement'), value: 'settlement' },
+      ]"
+    />
+
+    <!-- 备注和日期摆在最上面：它们是「这笔是什么、哪天的」，
+         先交代清楚再填钱，比夹在中间容易被忽略强 -->
+    <div class="q-px-md">
+      <div class="row items-center q-gutter-sm field top-field">
+        <q-input
+          v-model="title"
+          dense borderless
+          class="col"
+          :placeholder="t('entry.title')"
+          maxlength="40"
+        />
+        <q-btn dense flat no-caps icon="event" :label="dateLabel" class="text-grey-7">
+          <q-popup-proxy cover transition-show="scale">
+            <div>
+              <q-date v-model="date" mask="YYYY-MM-DD" today-btn minimal :options="dateAllowed" />
+              <!-- 已出过账的日期选不了：那张单子锁着，记进去也不会出现在上面，
+                   只会让人以为补上了。要补记就写在备注里 -->
+              <div v-if="minDate && editingId === null" class="text-caption text-grey-7 q-pa-sm date-hint">
+                {{ t('entry.dateLocked', { date: minDate }) }}
+              </div>
+            </div>
+          </q-popup-proxy>
+        </q-btn>
+      </div>
+    </div>
 
     <AmountInput ref="amountEl" v-model="amount" :color="kindInk" />
 
@@ -68,27 +95,6 @@
         <MemberPicker v-model="toMemberId" :members="meta.activeMembers.filter((m) => m.id !== payerId)" />
       </div>
 
-      <div class="row items-center q-gutter-sm field">
-        <q-input
-          v-model="title"
-          dense borderless
-          class="col"
-          :placeholder="t('entry.title')"
-          maxlength="40"
-        />
-        <q-btn dense flat no-caps icon="event" :label="dateLabel" class="text-grey-7">
-          <q-popup-proxy cover transition-show="scale">
-            <div>
-              <q-date v-model="date" mask="YYYY-MM-DD" today-btn minimal :options="dateAllowed" />
-              <!-- 已出过账的日期选不了：那张单子锁着，记进去也不会出现在上面，
-                   只会让人以为补上了。要补记就写在备注里 -->
-              <div v-if="minDate && editingId === null" class="text-caption text-grey-7 q-pa-sm date-hint">
-                {{ t('entry.dateLocked', { date: minDate }) }}
-              </div>
-            </div>
-          </q-popup-proxy>
-        </q-btn>
-      </div>
       </div>
 
       <!-- 不做折叠：日常网格只剩三个按钮之后竖向空间够用，
@@ -407,9 +413,13 @@ function reset(keepGoing: boolean) {
   padding-bottom: calc(var(--nagaya-footer-h) + 90px + env(safe-area-inset-bottom));
 }
 .kind-toggle { border-bottom: 1px solid rgba(0, 0, 0, 0.08); }
+/* 顶到屏幕边缘的东西不做圆角：首尾两段默认带 3px，贴着边看就是两个豁口 */
+.kind-toggle :deep(.q-btn) { border-radius: 0; }
 .label { font-size: 14px; }
 
 .fields { border-top: 1px solid rgba(0, 0, 0, 0.06); }
+/* 提到金额上面的那一行：上面紧挨着页签那条线了，自己只留下边线 */
+.top-field { border-bottom: 1px solid rgba(0, 0, 0, 0.06); }
 .field {
   min-height: 52px;                       /* 三行一样高，拇指点哪一行都一样 */
   border-bottom: 1px solid rgba(0, 0, 0, 0.06);

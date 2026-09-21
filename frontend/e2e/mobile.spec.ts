@@ -612,30 +612,35 @@ test('调整额输得进负数，比例是个能直接打的数字框', async ({
   expect((await shares()).sort((a, b) => a - b)).toEqual([0, 3750, 5250])
 })
 
-test('支出 / 收入 / 转账 三个页签跟账单那页一个样式，各有各的颜色', async ({ page }) => {
+test('支出 / 收入 / 转账 三等分，选中的是实心色块且三种颜色各不相同', async ({ page }) => {
   await login(page)
-  // 顶上是页签（下划线指示器），不是三个填色按钮 —— 跟账单页的「本期 / 以前」统一
-  const tabs = page.locator('.kind-toggle .q-tab')
-  await expect(tabs).toHaveCount(3)
-  const widths = await tabs.evaluateAll((els) =>
+  const segs = page.locator('.kind-toggle .q-btn')
+  await expect(segs).toHaveCount(3)
+  const widths = await segs.evaluateAll((els) =>
     els.map((e) => Math.round(e.getBoundingClientRect().width)),
   )
-  expect(new Set(widths).size, '三个页签宽度应当一样').toBe(1)
+  expect(new Set(widths).size, '三段宽度应当一样').toBe(1)
 
-  // 选中的颜色跟着账目类型走：支出蓝 / 收入绿 / 转账黄。
-  // 量的是**页签自己**的颜色 —— 量金额那个的话，写死 active-color 也照样绿，测不出来
-  const tabInk = new Set<string>()
+  // 顶到屏幕边缘，不许有圆角
+  const radii = await segs.evaluateAll((els) =>
+    els.map((e) => getComputedStyle(e).borderRadius),
+  )
+  expect([...new Set(radii)], '顶部三段不该有圆角').toEqual(['0px'])
+
+  // 量的是**选中那一段的背景色** —— 量金额的颜色没用，那是另一条线，
+  // 把 toggle-color 写死也照样能绿。
+  // 注意 Quasar 不给选中段加 q-btn--active，它是直接挂 bg-xxx 类，所以按文字定位
+  const fills = new Set<string>()
   const amountInk = new Set<string>()
   for (const label of ['支出', '收入', '转账']) {
-    await page.getByRole('tab', { name: label }).click()
+    const seg = page.getByRole('button', { name: label, exact: true })
+    await seg.click()
     await page.waitForTimeout(200)
-    tabInk.add(
-      await page.locator('.kind-toggle .q-tab--active').evaluate((el) => getComputedStyle(el).color),
-    )
+    fills.add(await seg.evaluate((el) => getComputedStyle(el).backgroundColor))
     amountInk.add(
       await page.locator('input.amount').evaluate((el) => getComputedStyle(el).color),
     )
   }
-  expect(tabInk.size, '三个页签选中时应当是三种颜色').toBe(3)
+  expect(fills.size, '选中色块应当是三种颜色').toBe(3)
   expect(amountInk.size, '金额也该跟着换三种颜色').toBe(3)
 })
