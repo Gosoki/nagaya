@@ -183,21 +183,34 @@
               {{ nameOf(row.member_id).slice(0, 1) }}
             </q-avatar>
           </q-item-section>
+          <!-- 名字和金额一行，明细在下面**占满整行**排成两列。
+               明细原来挤在名字那一列里（右边被金额占走近百 px），四项排不下，
+               折成 2+1+1 三行还把「上期结转」和「-¥38,262」拆两行去。
+               **「已收到」不能漏**：收过转账的人（这里是 Go）少了这一项，
+               剩下几个数怎么算都凑不出右边那个合计 -->
           <q-item-section>
-            <q-item-label>{{ nameOf(row.member_id) }}</q-item-label>
-            <q-item-label caption>
-              {{ t('bill.owed') }} {{ formatYen(row.owed) }}
-              <span v-if="row.paid"> · {{ t('bill.paid') }} {{ formatYen(row.paid) }}</span>
-              <span v-if="row.transferred_out"> · {{ t('bill.prepaid') }} {{ formatYen(row.transferred_out) }}</span>
-              <span v-if="row.opening"> · {{ t('bill.carried') }} {{ formatYen(row.opening) }}</span>
-            </q-item-label>
-          </q-item-section>
-          <q-item-section side>
-            <div class="text-weight-medium" :class="row.closing < 0 ? 'text-negative' : 'text-positive'">
-              {{ row.closing === 0 ? t('bill.settled') : formatYen(Math.abs(row.closing)) }}
+            <div class="row items-center no-wrap">
+              <div class="col">{{ nameOf(row.member_id) }}</div>
+              <div v-if="row.closing === 0" class="text-weight-medium text-positive">
+                {{ t('bill.settled') }}
+              </div>
+              <div v-else :class="row.closing < 0 ? 'text-negative' : 'text-positive'">
+                <span class="text-caption text-grey-6 q-mr-xs">
+                  {{ row.closing > 0 ? t('bill.toReceive') : t('bill.toPay') }}
+                </span>
+                <span class="text-weight-medium">{{ formatYen(Math.abs(row.closing)) }}</span>
+              </div>
             </div>
-            <div v-if="row.closing !== 0" class="text-caption text-grey-6">
-              {{ row.closing > 0 ? t('bill.toReceive') : t('bill.toPay') }}
+            <div class="breakdown text-caption text-grey-6">
+              <span>{{ t('bill.owed') }} {{ formatYen(row.owed) }}</span>
+              <span v-if="row.paid">{{ t('bill.paid') }} {{ formatYen(row.paid) }}</span>
+              <span v-if="row.transferred_out">
+                {{ t('bill.prepaid') }} {{ formatYen(row.transferred_out) }}
+              </span>
+              <span v-if="row.transferred_in">
+                {{ t('bill.received') }} {{ formatYen(row.transferred_in) }}
+              </span>
+              <span v-if="row.opening">{{ t('bill.carried') }} {{ formatYen(row.opening) }}</span>
             </div>
           </q-item-section>
         </q-item>
@@ -326,6 +339,7 @@ import { useRouter } from 'vue-router'
 import { ApiError, api } from 'src/api/client'
 import type { Bill, BillTransfer, Entry, Statement } from 'src/api/types'
 import MonthlyFixed from 'src/components/MonthlyFixed.vue'
+import { todayJst } from 'src/date'
 import { formatYen } from 'src/i18n'
 import { useAuth } from 'src/stores/auth'
 import { type BillKey, useBills } from 'src/stores/bills'
@@ -460,6 +474,7 @@ const billText = computed(() => {
     const bits = [`${t('bill.owed')} ${formatYen(r.owed)}`]
     if (r.paid) bits.push(`${t('bill.paid')} ${formatYen(r.paid)}`)
     if (r.transferred_out) bits.push(`${t('bill.prepaid')} ${formatYen(r.transferred_out)}`)
+    if (r.transferred_in) bits.push(`${t('bill.received')} ${formatYen(r.transferred_in)}`)
     if (r.opening) bits.push(`${t('bill.carried')} ${formatYen(r.opening)}`)
     const tail =
       r.closing === 0
@@ -506,7 +521,7 @@ function confirmReceived(tr: BillTransfer, index: number) {
       // 但记账的入口留在这张单子上，因为方案就在这儿。
       await ledger.create({
         kind: 'settlement',
-        date: new Date().toISOString().slice(0, 10),
+        date: todayJst(),
         amount_jpy: amount,
         payer_id: tr.from_id,
         to_member_id: tr.to_id,
@@ -567,6 +582,20 @@ function doCut() {
 </script>
 
 <style scoped>
+/* 每人那一行的明细：两列对齐，不是一串「·」连起来的长句。
+   列宽固定（1fr 1fr）而不是自动换行 —— 自动换行下每行塞几项要看字数，
+   三个人三个样，一列数字对不齐 */
+.breakdown {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 10px;
+  row-gap: 2px;
+  margin-top: 2px;
+  /* text-caption 自带 1.67 的行高，两行叠起来虚高 7px。
+     这里是一块密排的数字，收到 1.4 正好 */
+  line-height: 1.4;
+}
+.breakdown > span { white-space: nowrap; }
 /* 标题当按钮用，但看着还得是标题。
    **只中和浏览器给 button 的默认字体族**，别写 `font: inherit` ——
    那个简写会把 text-subtitle1 的 16px 一并盖成容器的 14px，标题小一号 */

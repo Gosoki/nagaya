@@ -53,7 +53,7 @@ export default {
   },
   bill: {
     title: '账单', open: '出账单',
-    owed: '应担', paid: '已垫付', prepaid: '已预付', carried: '上期结转',
+    owed: '应担', paid: '已垫付', prepaid: '已预付', received: '已收到', carried: '上期结转',
     toReceive: '应收', toPay: '应付', settled: '已结清',
     total: '合计', income: '收入', unsettled: '未结清',
     plan: '转账方案（{n} 笔）', planEmpty: '大家都平了，不用转账',

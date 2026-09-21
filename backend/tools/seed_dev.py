@@ -5,8 +5,10 @@
 密码统一 dev12345。**只在开发库上跑**，真用起来之前要删掉这些账号。
 
 数据照着现在的设计铺，一眼能看到这些事：
-  * 5〜8 月各出过一张账单，9 月是当前草稿
-  * 5/6/7 月三张钱都转完了 → 「已结清」；8 月那张只转了一笔 → 一个勾一个空
+  * 四张出过的账单 + 当前草稿。**出账日故意不规整**（5/30、7/2、7/28、8/30）——
+    出账是「谁想起来点一下」，不是月底自动跑，账单日期得经得起这个
+  * 每张单子的覆盖期从**上一次出账那天**算起，不是从这张单子里最早那笔算起
+  * 前三张钱都转完了 → 「已结清」；最近那张只转了一笔 → 一个勾一个空
   * 固定费的日期一律是出账日（D30），日常开销保留真实日子
   * 水费两个月一收，只出现在 6 月和 8 月
   * 当前草稿的 燃气 / 水费 空着 → 面板给灰色参考值
@@ -114,7 +116,7 @@ def main() -> None:
         add(EntryKind.expense, d(5, 3), 7_200, "伙食", "迎新烤肉", go.id)
         add(EntryKind.expense, d(5, 12), 2_480, "日用品", "洗衣液和卫生纸", zen.id)
         add(EntryKind.expense, d(5, 24), 3_900, "伙食", "披萨", kan.id)
-        may = finish_cut(s, go.id, "5/31 出账", utc(5, 31))
+        may = finish_cut(s, go.id, "5/30 出账", utc(5, 30))
         settle_plan(s, may, on=d(6, 2), at=utc(6, 2), how_many=None)
 
         # ---------------------------------------------------------------- 6 月
@@ -123,16 +125,17 @@ def main() -> None:
         add(EntryKind.expense, d(6, 8), 1_780, "日用品", "垃圾袋和保鲜膜", kan.id)
         add(EntryKind.expense, d(6, 15), 6_400, "伙食", "烧烤", go.id, rule=zen_less)
         add(EntryKind.income, d(6, 21), -4_500, None, "电费返现", go.id)
-        june = finish_cut(s, go.id, "6/30 出账", utc(6, 30))
-        settle_plan(s, june, on=d(7, 2), at=utc(7, 2), how_many=None)
+        # 这一张拖到 7 月初才出 —— 覆盖期于是是 5/30〜7/2，跨了个月
+        june = finish_cut(s, go.id, "7/2 出账", utc(7, 2))
+        settle_plan(s, june, on=d(7, 4), at=utc(7, 4), how_many=None)
 
         # ---------------------------------------------------------------- 7 月
         fixed(7, denki=9_200, gasu=3_800)
         add(EntryKind.expense, d(7, 6), 1_380, "日用品", "卫生纸", zen.id)
         add(EntryKind.expense, d(7, 18), 6_400, "伙食", "烤肉", kan.id)
         add(EntryKind.expense, d(7, 25), 4_200, "伙食", "夏日凉面", go.id)
-        july = finish_cut(s, go.id, "7/31 出账", utc(7, 31))
-        settle_plan(s, july, on=d(8, 3), at=utc(8, 3), how_many=None)
+        july = finish_cut(s, go.id, "7/28 出账", utc(7, 28))
+        settle_plan(s, july, on=d(8, 1), at=utc(8, 1), how_many=None)
 
         # ---------------------------------------------------------------- 8 月
         fixed(8, denki=10_400, gasu=3_200)
@@ -140,9 +143,9 @@ def main() -> None:
         add(EntryKind.expense, d(8, 12), 8_900, "伙食", "中元假期烤肉", go.id, rule=zen_less)
         add(EntryKind.expense, d(8, 20), 3_240, "日用品", "洗手液等", zen.id)
         add(EntryKind.income, d(8, 25), -3_000, None, "电费返现", go.id)
-        august = finish_cut(s, go.id, "8/31 出账", utc(8, 31))
+        august = finish_cut(s, go.id, "8/30 出账", utc(8, 30))
         # 只转了一笔 → 未结清，转账卡片上一个勾一个空
-        settle_plan(s, august, on=d(9, 2), at=utc(9, 2), how_many=1)
+        settle_plan(s, august, on=d(9, 1), at=utc(9, 1), how_many=1)
 
         # ------------------------------------------------ 当前草稿：固定费填了一半
         add(EntryKind.expense, d(9, 1), 120_000, "房租", "", go.id)
@@ -157,7 +160,8 @@ def main() -> None:
 
         total = len(s.exec(select(Entry)).all())
         print(f"建好 {len(PEOPLE)} 个成员（密码 {PASSWORD}）、4 张出过的账单、{total} 笔账")
-        print("  5/6/7 月已结清；8 月只转了一笔；当前草稿的 燃气 / 水费 空着")
+        print("  出账日 5/30 / 7/2 / 7/28 / 8/30 —— 故意不规整")
+        print("  前三张已结清；最近一张只转了一笔；当前草稿的 燃气 / 水费 空着")
 
 
 def finish_cut(s: Session, actor_id: int, label: str, at: dt.datetime):

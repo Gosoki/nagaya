@@ -153,6 +153,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
 import { ApiError, api } from 'src/api/client'
+import { todayJst } from 'src/date'
 import { formatYen } from 'src/i18n'
 import type { Entry, EntryKind } from 'src/api/types'
 import AmountInput from 'src/components/AmountInput.vue'
@@ -179,7 +180,7 @@ const categoryId = ref<number | null>(null)
 const payerId = ref<number | null>(null)
 const toMemberId = ref<number | null>(null)
 const title = ref('')
-const date = ref(new Date().toISOString().slice(0, 10))
+const date = ref(todayJst())
 const busy = ref(false)
 
 /** 路由带了 id ＝ 在改一笔已经记下的账（已出账的也算）。空 ＝ 记新的一笔 */
@@ -217,7 +218,7 @@ const dateAllowed = (d: string) =>
   editingId.value !== null || !minDate.value || d.replace(/\//g, '-') >= minDate.value
 
 const dateLabel = computed(() => {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayJst()
   return date.value === today ? t('common.today') : date.value.slice(5)
 })
 

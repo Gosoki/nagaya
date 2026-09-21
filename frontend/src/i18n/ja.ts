@@ -53,7 +53,7 @@ export default {
   },
   bill: {
     title: '請求書', open: '請求書を出す',
-    owed: '負担額', paid: '立替', prepaid: '前払い', carried: '前期繰越',
+    owed: '負担額', paid: '立替', prepaid: '前払い', received: '受取済み', carried: '前期繰越',
     toReceive: '受取', toPay: '支払', settled: '精算済み',
     total: '合計', income: '収入', unsettled: '未精算',
     plan: '送金プラン（{n} 件）', planEmpty: '全員ぴったり。送金不要です',
