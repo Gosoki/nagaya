@@ -95,6 +95,20 @@ async function setWeight(page: import('@playwright/test').Page, index: number, v
   await expect(page.locator('.weight-pick')).toHaveCount(0)
 }
 
+/**
+ * 加一项固定费。
+ *
+ * 入口在「更多 → 设置」里，不在账单那页的面板上 —— 面板只管这一期填多少钱，
+ * 有哪几项是配置，两件事分开。
+ */
+async function addFixedCost(page: import('@playwright/test').Page, name: string) {
+  await page.goto('/entries')
+  await page.getByRole('tab', { name: '设置' }).click()
+  await page.locator('.add-row .new-name').fill(name)
+  await page.getByRole('button', { name: '加一项固定费' }).click()
+  await expect(page.locator(`.fixed-row[data-name="${name}"]`)).toBeVisible()
+}
+
 /** 375px 下不许有横向滚动 —— 这条最容易被一个写死宽度的元素破掉 */
 async function expectNoHorizontalScroll(page: import('@playwright/test').Page) {
   const overflow = await page.evaluate(() => {
@@ -528,9 +542,11 @@ test('自己加一项固定费，它就留在这张表里', async ({ page }) => 
   await expect(page.locator('.amount-input').first()).toBeVisible()
   const before = await page.locator('.amount-input').count()
 
-  await page.locator('.new-name').fill('E2E受信料')
-  await page.getByRole('button', { name: '加一项固定费' }).click()
+  await addFixedCost(page, 'E2E受信料')
   await expect(page.locator('.q-notification')).toContainText('下个月')
+
+  // 加完就出现在填钱那一屏上
+  await page.goto('/monthly')
   await expect(page.locator('.amount-input')).toHaveCount(before + 1)
   await expect(page.getByText('E2E受信料')).toBeVisible()
 
@@ -545,11 +561,8 @@ test('自己加一项固定费，它就留在这张表里', async ({ page }) => 
 
 test('固定项可以删掉，而且删错了能撤销', async ({ page }) => {
   await login(page)
+  await addFixedCost(page, 'E2E受信料')
   await page.goto('/monthly')
-  await expect(page.locator('.amount-input').first()).toBeVisible()
-
-  await page.locator('.new-name').fill('E2E受信料')
-  await page.getByRole('button', { name: '加一项固定费' }).click()
   await expect(page.getByText('E2E受信料')).toBeVisible()
 
   // 删除入口在展开区里，不在行头 —— 行头有金额框，误触成本太高
@@ -881,6 +894,15 @@ test('固定费项目在设置里管：加、删、和上期一样', async ({ pa
   await page.getByRole('button', { name: '加一项固定费' }).click()
   await expect(page.locator('.fixed-row[data-name="E2E停车位"]')).toBeVisible()
   expect((await catOf('E2E停车位')).monthly, '加出来的得是固定费，不是日常分类').toBe(true)
+
+  // 图标和颜色也在这儿改
+  const parking = page.locator('.fixed-row[data-name="E2E停车位"]')
+  await parking.locator('.icon-btn').click()
+  await page.locator('.icon-cell').filter({ has: page.locator('.q-icon') }).nth(8).click()
+  await expect.poll(async () => (await catOf('E2E停车位')).icon).toBe('local_parking')
+  await parking.locator('.icon-btn').click()
+  await page.locator('.color-cell').nth(3).click()
+  await expect.poll(async () => (await catOf('E2E停车位')).color).toBe('#c62828')
 
   // 「和上期一样」默认关着 —— 这是「上次金额只作灰色占位」那条规矩的底线
   const rent = page.locator('.fixed-row[data-name="房租"]')

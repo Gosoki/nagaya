@@ -135,9 +135,6 @@
             <q-item-section side class="amount text-grey-9">{{ formatYen(e.amount_jpy) }}</q-item-section>
           </q-item>
         </q-list>
-        <!-- 未出账那页这个位置是「加一项固定费」。已出的账单加不了东西，
-             拿一行同高的空占位顶上 —— 两页的这一块于是一样高、一样收口 -->
-        <div v-if="monthlyEntries.length" class="fee-foot" aria-hidden="true"></div>
         <div v-else class="text-caption text-grey-6 q-px-md q-pb-md">{{ t('monthly.noneBilled') }}</div>
       </div>
 
@@ -638,11 +635,6 @@ function doCut() {
 .section-head .amount {
   font-size: var(--nagaya-fee-amount-fs);
   font-variant-numeric: tabular-nums;
-}
-/* 块尾那一行的占位：高度和边框都照着未出账那页的「加一项固定费」来 */
-.fee-foot {
-  min-height: var(--nagaya-fee-foot-h);
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
 }
 /* 自己那笔：这一屏最该一眼看到的东西 */
 .mine { font-size: 17px; font-weight: 600; }

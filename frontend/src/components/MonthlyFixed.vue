@@ -124,28 +124,6 @@
       </q-expansion-item>
     </q-list>
 
-    <!--
-      自己加一项。打字就是全部操作 —— 不用进什么「分类管理」。
-      加完之后它就是一项固定费：下个月自己出现在这张表里，还带着这次的金额当参考。
-    -->
-    <div v-if="!historic" class="row items-center q-px-md q-py-sm add-row">
-      <q-icon name="add" size="18px" class="text-grey-6 q-mr-sm" />
-      <input
-        v-model="newName"
-        class="new-name col"
-        type="text"
-        maxlength="20"
-        :placeholder="t('monthly.addPlaceholder')"
-        @keyup.enter="addItem"
-      />
-      <q-btn
-        dense flat no-caps color="primary"
-        :disable="!newName.trim()"
-        :loading="adding"
-        :label="t('monthly.addItem')"
-        @click="addItem"
-      />
-    </div>
   </div>
 </template>
 
@@ -512,8 +490,6 @@ function removeItem(row: Row) {
   })
 }
 
-const newName = ref('')
-const adding = ref(false)
 
 /**
  * 改这一笔算谁垫的。
@@ -554,26 +530,6 @@ async function setPayer(row: Row, payerId: number) {
   }
 }
 
-async function addItem() {
-  const name = newName.value.trim()
-  if (!name || adding.value) return
-  adding.value = true
-  try {
-    await api.post('/api/categories', {
-      name,
-      monthly: true,
-      display_order: 100 + rows.value.length,
-    })
-    newName.value = ''
-    await meta.load()
-    await load() // load 会保住还没保存的输入，不会把整屏清空
-    $q.notify({ type: 'positive', message: t('monthly.added'), timeout: 2000 })
-  } catch (e) {
-    $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e) })
-  } finally {
-    adding.value = false
-  }
-}
 
 defineExpose({ reload: load })
 </script>
@@ -626,17 +582,4 @@ defineExpose({ reload: load })
   text-decoration: underline;
   cursor: pointer;
 }
-.add-row {
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
-  min-height: var(--nagaya-fee-foot-h);
-}
-.new-name {
-  border: none;
-  outline: none;
-  background: transparent;
-  font-size: 14px;
-  padding: 6px 0;
-  color: inherit;
-}
-.new-name::placeholder { color: #bbb; }
 </style>

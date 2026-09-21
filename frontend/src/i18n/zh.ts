@@ -32,6 +32,7 @@ export default {
     notBalanced: '还差 {n}，不平不能存',
   },
   monthly: {
+    icon: '图标', color: '颜色',
     settingsTitle: '固定费项目',
     carried: '按上期金额记上了：{list}',
     sameAsLast: '和上期一样', sameAsLastHint: '打开的项，出账前会自动按上期金额记上。只给每期真的不变的项打开 —— 电费燃气这种开了，某个月忘了改就会带着上月的数出账。',

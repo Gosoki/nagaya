@@ -238,7 +238,7 @@ function removeMemo(m: Memo) {
   color: inherit;
 }
 .memo-title::placeholder { color: #bbb; }
-.add-row { border-top: 1px solid rgba(0, 0, 0, 0.06); min-height: var(--nagaya-fee-foot-h); }
+.add-row { border-top: 1px solid rgba(0, 0, 0, 0.06); min-height: var(--nagaya-add-row-h); }
 .new-name {
   border: none;
   outline: none;

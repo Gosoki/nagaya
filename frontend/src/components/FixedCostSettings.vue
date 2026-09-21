@@ -16,9 +16,41 @@
     <q-list separator>
       <q-item v-for="c in items" :key="c.id" class="fixed-row" :data-name="c.name">
         <q-item-section avatar>
-          <q-avatar size="30px" :style="{ background: c.color }" text-color="white">
-            <q-icon :name="c.icon" size="16px" />
-          </q-avatar>
+          <!-- 点图标就能换。图标和颜色摆在一个弹层里：这一格显示的就是它俩合起来的样子，
+               分两处改的话要来回试 -->
+          <button class="icon-btn" :aria-label="t('monthly.icon')">
+            <q-avatar size="30px" :style="{ background: c.color }" text-color="white">
+              <q-icon :name="c.icon" size="16px" />
+            </q-avatar>
+            <q-menu>
+              <div class="picker q-pa-sm">
+                <div class="text-caption text-grey-6 q-mb-xs">{{ t('monthly.icon') }}</div>
+                <div class="icons">
+                  <button
+                    v-for="name in ICONS"
+                    :key="name"
+                    class="icon-cell"
+                    :class="{ on: c.icon === name }"
+                    @click="save(c, { icon: name })"
+                  >
+                    <q-icon :name="name" size="20px" />
+                  </button>
+                </div>
+                <div class="text-caption text-grey-6 q-mt-sm q-mb-xs">{{ t('monthly.color') }}</div>
+                <div class="colors">
+                  <button
+                    v-for="hex in COLORS"
+                    :key="hex"
+                    class="color-cell"
+                    :class="{ on: c.color.toLowerCase() === hex }"
+                    :style="{ background: hex }"
+                    :aria-label="hex"
+                    @click="save(c, { color: hex })"
+                  />
+                </div>
+              </div>
+            </q-menu>
+          </button>
         </q-item-section>
         <q-item-section>
           <q-item-label class="row items-center no-wrap">
@@ -102,6 +134,18 @@ import { ApiError, api } from 'src/api/client'
 import type { Category } from 'src/api/types'
 import { useMeta } from 'src/stores/meta'
 
+/** 图标候选：合租里真会出现的那些项。够用就行，不做成一个图标库浏览器 */
+const ICONS = [
+  'home', 'bolt', 'local_fire_department', 'water_drop', 'wifi',
+  'router', 'propane_tank', 'ac_unit', 'local_parking', 'directions_car',
+  'tv', 'subscriptions', 'phone_iphone', 'local_laundry_service', 'cleaning_services',
+  'key', 'shopping_basket', 'receipt_long',
+]
+const COLORS = [
+  '#3d4785', '#26a69a', '#ef6c00', '#c62828', '#6a1b9a',
+  '#00838f', '#2e7d32', '#ad1457', '#4e342e', '#455a64',
+]
+
 const { t } = useI18n()
 const $q = useQuasar()
 const meta = useMeta()
@@ -183,6 +227,31 @@ function remove(c: Category) {
 
 <style scoped>
 .fixed-row { padding-top: 8px; padding-bottom: 8px; }
+.icon-btn { border: none; background: none; padding: 0; cursor: pointer; line-height: 0; }
+.picker { width: 232px; }
+.icons { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+.icon-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  border: none;
+  border-radius: 6px;
+  background: #f2f2f5;
+  color: #555;
+  cursor: pointer;
+}
+.icon-cell.on { background: var(--q-primary); color: #fff; }
+.colors { display: flex; flex-wrap: wrap; gap: 6px; }
+.color-cell {
+  width: 26px;
+  height: 26px;
+  border-radius: 13px;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.color-cell.on { box-shadow: 0 0 0 2px #fff inset, 0 0 0 2px rgba(0, 0, 0, 0.55); }
 .name,
 .new-name {
   border: none;
@@ -195,5 +264,5 @@ function remove(c: Category) {
 }
 .new-name { padding: 6px 0; }
 .new-name::placeholder { color: #bbb; }
-.add-row { border-top: 1px solid rgba(0, 0, 0, 0.06); min-height: var(--nagaya-fee-foot-h); }
+.add-row { border-top: 1px solid rgba(0, 0, 0, 0.06); min-height: var(--nagaya-add-row-h); }
 </style>
