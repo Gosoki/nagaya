@@ -8,6 +8,7 @@
 <template>
   <div>
     <ProfileCard />
+    <FixedCostSettings />
     <!-- 系统设置默认收起来：这些是「定一次就不再动」的规矩，
          而这一页天天要来的是上面的个人设置。摊开着只会把它挤到屏幕外 -->
     <div class="bill-section">
@@ -160,6 +161,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { ApiError, api } from 'src/api/client'
+import FixedCostSettings from 'src/components/FixedCostSettings.vue'
 import ProfileCard from 'src/components/ProfileCard.vue'
 import type { Setting } from 'src/api/types'
 import { useMeta } from 'src/stores/meta'

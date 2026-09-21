@@ -43,6 +43,20 @@ def monthly(
     return bill_svc.monthly_rows(session, st)
 
 
+@router.post("/monthly/carry")
+def carry_monthly(
+    session: Session = Depends(get_session),
+    member: Member = Depends(current_member),
+) -> dict:
+    """把「和上期一样」的固定费按上期金额记进当前草稿。
+
+    只动明确开了那个开关的项，已经录过的一律不碰。
+    返回这次记了哪几笔 —— **自动记的钱必须让人看见**，这是那条
+    「上次金额只作灰色占位」的规矩留下的唯一出口。
+    """
+    return {"created": bill_svc.carry_same_as_last(session, actor_id=member.id)}
+
+
 @router.get("/statements", response_model=list[StatementOut])
 def list_statements(session: Session = Depends(get_session), _: Member = Depends(current_member)):
     """出过的账单，新的在前。带上金额和结清状态 —— 列表页每行都要显示。"""

@@ -11,7 +11,7 @@ import datetime as dt
 from sqlmodel import Session
 
 from app.models import Category, EntryKind
-from app.services.bill import cut_statement, monthly_rows
+from app.services.bill import carry_same_as_last, cut_statement, monthly_rows
 from app.services.ledger import create_entry, delete_entry
 
 AUG = dt.date(2026, 8, 10)
@@ -134,7 +134,7 @@ def test_monthly_rows_of_a_past_statement_only_lists_what_is_on_it(session, memb
 
     空行会诱人往里填，而填出来的是**新账目**，落进当前草稿，根本不会进这张单子。
     """
-    from app.services.bill import cut_statement, monthly_rows
+    from app.services.bill import carry_same_as_last, cut_statement, monthly_rows
 
     a, *_ = members
     rent = Category(name="家賃", monthly=True, display_order=0)
@@ -195,3 +195,44 @@ def test_monthly_rows_carry_the_standing_payer(session: Session, members) -> Non
     assert by_name["家賃"]["default_payer_id"] == a.id
     assert by_name["電気"]["default_payer_id"] == b.id
     assert by_name["水道"]["default_payer_id"] is None, "没定的就留空，由前端回退到全局设置"
+
+
+def test_carry_only_touches_items_that_opted_in(session: Session, members) -> None:
+    """「和上期一样」只搬明确开了开关的那几项。
+
+    这条规矩的另一半是**默认不搬**：电费燃气每期都不一样，自动按上期记上，
+    就等于「某个月忘了改，带着上月的电费把账单发出去」—— 那正是灰色占位
+    当初要防的事。
+    """
+    a, *_ = members
+    c = cats(session)
+    for name, amount in [("家賃", 120_000), ("電気", 8_000)]:
+        create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG,
+                     amount=amount, payer_id=a.id, category_id=c[name].id)
+    cut_statement(session, actor_id=a.id)
+
+    c["家賃"].same_as_last = True          # 房租每期一样，开
+    c["家賃"].default_payer_id = a.id
+    session.add(c["家賃"])
+    session.commit()
+
+    made = carry_same_as_last(session, actor_id=a.id)
+    assert [m["name"] for m in made] == ["家賃"]
+    assert made[0]["amount"] == 120_000
+    rows = {r["name"]: r for r in monthly_rows(session)["rows"]}
+    assert rows["家賃"]["amount"] == 120_000, "搬过来的是真值"
+    assert rows["電気"]["amount"] is None, "没开开关的一分都不许自动记"
+    assert rows["電気"]["hint"] == 8_000, "它继续只给灰色参考"
+
+    # 再跑一次不会重复记
+    assert carry_same_as_last(session, actor_id=a.id) == []
+
+
+def test_carry_skips_items_that_never_had_an_amount(session: Session, members) -> None:
+    """从来没出过账的项没有「上期」可抄，跳过 —— 不能凭空记一笔 0 元。"""
+    a, *_ = members
+    c = cats(session)
+    c["家賃"].same_as_last = True
+    session.add(c["家賃"])
+    session.commit()
+    assert carry_same_as_last(session, actor_id=a.id) == []

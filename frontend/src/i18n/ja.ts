@@ -32,6 +32,9 @@ export default {
     notBalanced: '{n} 合いません。合わないと保存できません',
   },
   monthly: {
+    settingsTitle: '固定費の項目',
+    carried: '前期の金額で記帳しました：{list}',
+    sameAsLast: '前期と同じ', sameAsLastHint: 'オンにした項目は、請求前に前期の金額で自動記帳されます。毎期変わらない項目にだけ使ってください。',
     title: '今期の固定費',
     save: '{n} 件を保存',
     unsaved: '{n} 件未保存',

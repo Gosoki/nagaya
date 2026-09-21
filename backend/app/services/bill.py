@@ -36,6 +36,7 @@ from app.models import (
     jst_date,
     today_jst,
 )
+from app.services import ledger
 from app.services import settings as settings_svc
 
 
@@ -430,6 +431,8 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
                 "default_rule_json": c.default_rule_json,
                 #: 这一项默认谁垫。面板据此预填「谁付的」，不再是「谁填的算谁」
                 "default_payer_id": c.default_payer_id,
+                #: 每期金额都一样 —— 打开的话出账前会自动按上期金额记上
+                "same_as_last": c.same_as_last,
                 "entry_id": entry.id if entry else None,
                 "amount": entry.amount_jpy if entry else None,
                 "version": entry.version if entry else None,
@@ -449,6 +452,49 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
         # 会少算一笔，而账单上的「本期固定费」是全算的，两个数当场对不上
         "total": total,
     }
+
+
+def carry_same_as_last(session: Session, *, actor_id: int | None) -> list[dict[str, Any]]:
+    """把「和上期一样」的固定费按上期金额记进当前草稿。
+
+    **只动明确开了这个开关的项**。默认全是关的：「上次的金额只作灰色占位」
+    这条规矩就是为了防「某个月忘了改，带着上月的电费把账单发出去」——
+    电费燃气水费恰恰每期都不一样，给它们开这个等于把那条规矩废掉。
+
+    已经录过的一律不碰；从来没出过账的（没有上期金额可抄）跳过。
+    返回这次记了哪几笔，界面要把它说出来 —— 自动记的钱必须看得见。
+    """
+    categories = list(
+        session.exec(
+            select(Category).where(
+                Category.monthly == True,  # noqa: E712
+                Category.archived == False,  # noqa: E712
+                Category.same_as_last == True,  # noqa: E712
+            )
+        )
+    )
+    if not categories:
+        return []
+    already = {e.category_id for e in unbilled(session) if e.category_id is not None}
+    hints, _ = _last_billed_amount(session, [c.id for c in categories])
+
+    made: list[dict[str, Any]] = []
+    for c in categories:
+        amount = hints.get(c.id)
+        if c.id in already or not amount:
+            continue
+        entry = ledger.create_entry(
+            session,
+            actor_id=actor_id,
+            kind=EntryKind.expense,
+            on=today_jst(),
+            amount=amount,
+            payer_id=c.default_payer_id or actor_id,
+            category_id=c.id,
+            category_rule=c.default_rule_json,
+        )
+        made.append({"category_id": c.id, "name": c.name, "amount": entry.amount_jpy})
+    return made
 
 
 def _last_billed_amount(

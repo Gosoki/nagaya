@@ -121,6 +121,15 @@ class Category(SQLModel, table=True):
             "账本当场错一整笔房租的钱，而屏幕上一点提示都没有。"
         ),
     )
+    same_as_last: bool = Field(
+        default=False,
+        description=(
+            "这一项每期金额都一样（房租、网费这种），出账前自动按上期的金额记上。"
+            "**默认关着**，而且必须一项一项地开 —— 「上次的金额只作灰色占位」这条规矩"
+            "就是为了防「某个月忘了改，带着上月的电费把账单发出去」。"
+            "电费燃气水费恰恰是每期都不一样的，给它们开这个等于把那条规矩废掉。"
+        ),
+    )
     note: str = Field(
         default="",
         description=(

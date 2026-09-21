@@ -275,8 +275,37 @@ onMounted(() => {
     build(cached)
     void hydratePayers()
   }
-  void load()
+  void load().then(carry)
 })
+
+/**
+ * 把「和上期一样」的那几项按上期金额记进来。
+ *
+ * **记了就得说出来。**「上次的金额只作灰色占位」那条规矩的全部理由，就是
+ * 「预填的数字长得跟亲手填的一模一样，某个月忘了改也没人看得出」。
+ * 这个开关是那条规矩唯一的出口，所以自动记的每一笔都当场报出来。
+ * 翻旧账单时不碰：那张单子早就出过了。
+ */
+async function carry() {
+  if (historic.value) return
+  try {
+    const { created } = await api.post<{ created: { name: string; amount: number }[] }>(
+      '/api/monthly/carry',
+    )
+    if (!created.length) return
+    await load()
+    emit('saved')
+    $q.notify({
+      type: 'info',
+      timeout: 6000,
+      message: t('monthly.carried', {
+        list: created.map((c) => `${c.name} ${formatYen(c.amount)}`).join('、'),
+      }),
+    })
+  } catch {
+    /* 搬不过来就照旧留灰色占位，不打断填账 */
+  }
+}
 
 /** 去账目页看这个分类本期的全部几笔 —— 面板上只显示得下一笔 */
 function openCategoryEntries(row: Row) {

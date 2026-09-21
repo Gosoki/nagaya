@@ -861,6 +861,73 @@ test('固定费谁垫的：跟着分类走，不是「谁填的算谁」', async
     { headers, data: { payer_id: payer } })
 })
 
+test('固定费项目在设置里管：加、删、和上期一样', async ({ page }) => {
+  await login(page)
+  const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
+  // 分类名不唯一，而每轮 E2E 都会留下一个归档掉的同名项 —— 优先取还活着的那个，
+  // 否则这条用例会去断言上一轮的残骸
+  const catOf = async (name: string) => {
+    const all = (await (await page.request.get('/api/categories?include_archived=true', { headers })).json())
+      .filter((c: { name: string }) => c.name === name)
+    return all.find((c: { archived: boolean }) => !c.archived) ?? all.at(-1)
+  }
+
+  await page.getByRole('tab', { name: '更多' }).click()
+  await page.getByRole('tab', { name: '设置' }).click()
+  await expect(page.locator('.fixed-row[data-name="房租"]')).toBeVisible()
+
+  // 加一项
+  await page.locator('.add-row .new-name').fill('E2E停车位')
+  await page.getByRole('button', { name: '加一项固定费' }).click()
+  await expect(page.locator('.fixed-row[data-name="E2E停车位"]')).toBeVisible()
+  expect((await catOf('E2E停车位')).monthly, '加出来的得是固定费，不是日常分类').toBe(true)
+
+  // 「和上期一样」默认关着 —— 这是「上次金额只作灰色占位」那条规矩的底线
+  const rent = page.locator('.fixed-row[data-name="房租"]')
+  expect((await catOf('房租')).same_as_last, '默认必须是关的').toBe(false)
+  await rent.locator('.q-toggle').click()
+  await expect.poll(async () => (await catOf('房租')).same_as_last).toBe(true)
+
+  // 删一项（归档，历史账目还要显示原名）
+  // 行里有两个按钮（删除、谁付的），按 aria-label 精确点删除那个
+  await page.locator('.fixed-row[data-name="E2E停车位"]')
+    .getByRole('button', { name: '删掉这一项' }).click()
+  await page.getByRole('button', { name: '确定' }).click()
+  await expect(page.locator('.fixed-row[data-name="E2E停车位"]')).toHaveCount(0)
+  expect((await catOf('E2E停车位')).archived).toBe(true)
+
+  // 收尾：房租那个开关关回去，别影响后面的用例
+  await page.request.patch(`/api/categories/${(await catOf('房租')).id}`,
+    { headers, data: { same_as_last: false } })
+})
+
+test('「和上期一样」：只搬开了开关的那几项，而且要说出来', async ({ page }) => {
+  await login(page)
+  const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
+  const cats = await (await page.request.get('/api/categories', { headers })).json()
+  const rent = cats.find((c: { name: string }) => c.name === '房租')
+  const gas = cats.find((c: { name: string }) => c.name === '燃气')
+  const draftOf = async (id: number) =>
+    (await (await page.request.get('/api/entries?unbilled_only=true&limit=100', { headers })).json())
+      .find((e: { category_id: number }) => e.category_id === id)
+
+  // 房租开、燃气不开；把两者本期的记录都清掉
+  await page.request.patch(`/api/categories/${rent.id}`, { headers, data: { same_as_last: true } })
+  for (const id of [rent.id, gas.id]) {
+    const e = await draftOf(id)
+    if (e) await page.request.delete(`/api/entries/${e.id}`, { headers })
+  }
+
+  await page.goto('/bill')
+  // 自动记的钱必须当场报出来 —— 悄悄填上正是那条规矩要防的事
+  await expect(page.locator('.q-notification')).toContainText('按上期金额记上了')
+  await expect(page.locator('.q-notification')).toContainText('房租')
+  await expect.poll(async () => (await draftOf(rent.id))?.amount_jpy).toBeTruthy()
+  expect(await draftOf(gas.id), '没开开关的一分都不许自动记').toBeFalsy()
+
+  await page.request.patch(`/api/categories/${rent.id}`, { headers, data: { same_as_last: false } })
+})
+
 test('账单两页：未出账 / 已出账，更早的从标题那个名字翻', async ({ page }) => {
   await login(page)
   await page.getByRole('tab', { name: '账单' }).click()

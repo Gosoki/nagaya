@@ -39,6 +39,8 @@ export interface Category {
   note: string
   /** 这一项固定费默认谁垫。分类的常驻属性，不是每期临时决定的 */
   default_payer_id: number | null
+  /** 每期金额都一样：出账前自动按上期金额记上。默认关 */
+  same_as_last: boolean
 }
 
 export interface Entry {
@@ -127,6 +129,8 @@ export interface MonthlyRow {
   default_rule_json: Record<string, unknown> | null
   /** 这一项默认谁垫 */
   default_payer_id: number | null
+  /** 每期金额都一样 */
+  same_as_last: boolean
   entry_id: number | null
   amount: number | null
   version: number | null

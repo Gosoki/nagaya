@@ -60,6 +60,7 @@ class CategoryIn(SQLModel):
     archived: Optional[bool] = None
     note: Optional[str] = None
     default_payer_id: Optional[int] = None
+    same_as_last: Optional[bool] = None
 
 
 class CategoryOut(SQLModel):
@@ -73,6 +74,7 @@ class CategoryOut(SQLModel):
     archived: bool
     note: str
     default_payer_id: Optional[int]
+    same_as_last: bool
 
 
 class MemoIn(SQLModel):
