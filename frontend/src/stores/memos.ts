@@ -17,15 +17,17 @@ import { ref, watch } from 'vue'
 import { api } from 'src/api/client'
 import type { Memo } from 'src/api/types'
 
-export type EntriesTab = 'ledger' | 'memo'
+export type EntriesTab = 'ledger' | 'memo' | 'settings'
 const TAB_KEY = 'nagaya.entriesTab'
 
 function savedTab(): EntriesTab {
   try {
-    return sessionStorage.getItem(TAB_KEY) === 'memo' ? 'memo' : 'ledger'
+    const v = sessionStorage.getItem(TAB_KEY)
+    if (v === 'memo' || v === 'settings') return v
   } catch {
-    return 'ledger'
+    /* 隐私模式下读不了 */
   }
+  return 'ledger'
 }
 
 export const useMemos = defineStore('memos', () => {

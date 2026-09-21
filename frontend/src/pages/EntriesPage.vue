@@ -5,6 +5,7 @@
 <template>
   <q-page class="q-pb-xl">
     <MemoPanel v-if="memos.tab === 'memo'" />
+    <SettingsPanel v-else-if="memos.tab === 'settings'" />
     <template v-else>
     <!-- 筛选条吸顶：列表很长，翻到一半想换个筛法不该先滚回去 -->
     <div class="filter-bar row items-center no-wrap q-gutter-xs q-px-md q-py-sm">
@@ -108,6 +109,7 @@ import type { Entry, EntryKind, Statement } from 'src/api/types'
 import { jstDateOf } from 'src/date'
 import { formatYen } from 'src/i18n'
 import MemoPanel from 'src/components/MemoPanel.vue'
+import SettingsPanel from 'src/components/SettingsPanel.vue'
 import { useLedger } from 'src/stores/ledger'
 import { useMemos } from 'src/stores/memos'
 import { KIND_COLOR } from 'src/theme'

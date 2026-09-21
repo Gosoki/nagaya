@@ -19,11 +19,21 @@ export class ApiError extends Error {
     this.name = 'ApiError'
   }
 
-  /** 翻成给人看的话。认不出的 code 退回后端那句 message，总比空白强。 */
+  /**
+   * 翻成给人看的话。认不出的 code 退回后端那句 message，总比空白强。
+   *
+   * `unknown` 要**显式排除在查表之外**：errors.unknown 这个键本身是存在的，
+   * 不排除的话它会走进查表那一支，拿 detail 当命名参数 —— 而 FastAPI 的
+   * HTTPException 返的是 `{detail: "一句话"}`，detail 是个**字符串**，
+   * `{message}` 什么都插不进去，于是所有 404 / 409 / 400 都显示成一句
+   * 空的「出错了：」。
+   */
   get text(): string {
     const key = `errors.${this.code}`
     const t = i18n.global.t
-    if (i18n.global.te(key)) return t(key, this.detail as Record<string, unknown>)
+    if (this.code !== 'unknown' && i18n.global.te(key)) {
+      return t(key, this.detail as Record<string, unknown>)
+    }
     return t('errors.unknown', { message: this.message })
   }
 }
@@ -64,7 +74,10 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const data = await res.json().catch(() => null)
   if (!res.ok) {
     const code = data?.code ?? 'unknown'
-    throw new ApiError(code, data?.message ?? data?.detail ?? res.statusText, data?.detail ?? {}, res.status)
+    // detail 只有是对象时才是「命名参数」。HTTPException 返的 detail 是一句话，
+    // 当参数用会把文案插成空的
+    const detail = typeof data?.detail === 'object' && data.detail !== null ? data.detail : {}
+    throw new ApiError(code, data?.message ?? data?.detail ?? res.statusText, detail, res.status)
   }
   return data as T
 }

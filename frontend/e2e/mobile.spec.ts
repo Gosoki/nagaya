@@ -212,7 +212,7 @@ test('账单 Tab 与账目列表', async ({ page }) => {
   await expectNoHorizontalScroll(page)
   await page.screenshot({ path: 'e2e/shots/05-balance.png', fullPage: true })
 
-  await page.getByRole('tab', { name: '账目' }).click()
+  await page.getByRole('tab', { name: '更多' }).click()
   await expect(page.locator('.q-page .q-item').first()).toBeVisible()
   await expectNoHorizontalScroll(page)
   await page.screenshot({ path: 'e2e/shots/06-entries.png', fullPage: true })
@@ -862,8 +862,8 @@ test('结清了的账单：绿标就占状态那一格，自己那笔划掉', as
 
 test('备忘：固定费那几项常驻，自己也能加；两页共用一个地址', async ({ page }) => {
   await login(page)
-  await page.getByRole('tab', { name: '账目' }).click()
-  await expect(page.locator('.bill-tabs .q-tab')).toHaveText(['流水', '备忘'])
+  await page.getByRole('tab', { name: '更多' }).click()
+  await expect(page.locator('.bill-tabs .q-tab')).toHaveText(['流水', '备忘', '设置'])
   await expect(page).toHaveURL(/\/entries$/)
 
   await page.getByRole('tab', { name: '备忘' }).click()
@@ -901,6 +901,43 @@ test('备忘：固定费那几项常驻，自己也能加；两页共用一个�
   await page.getByRole('tab', { name: '流水' }).click()
   await expect(page.locator('.filter-bar')).toBeVisible()
   await expect(page).toHaveURL(/\/entries$/)
+})
+
+test('设置面板：照后端的声明渲染，改完当场落库', async ({ page }) => {
+  await login(page)
+  const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
+  const valueOf = async (key: string) =>
+    (await (await page.request.get('/api/settings', { headers })).json())
+      .find((s: { key: string }) => s.key === key)?.value
+
+  await page.getByRole('tab', { name: '更多' }).click()
+  await page.getByRole('tab', { name: '设置' }).click()
+  // 面板不写死项目：后端声明里有几条就渲染几条
+  const spec = await (await page.request.get('/api/settings', { headers })).json()
+  await expect(page.locator('.setting-row')).toHaveCount(spec.length)
+  // 说明是后端给的，里面的 **强调** 不该把星号露在界面上
+  const shown = await page.locator('.setting-row').allTextContents()
+  expect(shown.some((x) => x.includes('**')), '后端说明里的星号不该露在界面上').toBe(false)
+
+  // 改一条：当场落库
+  await page.locator('[data-key="monthly_gap_days"] .num').fill('35')
+  await page.locator('[data-key="monthly_gap_days"] .num').blur()
+  await expect.poll(() => valueOf('monthly_gap_days')).toBe(35)
+
+  // 越界要说清楚哪儿不对 —— 原来这类错会显示成一句空的「出错了：」
+  await page.locator('[data-key="monthly_gap_days"] .num').fill('999')
+  await page.locator('[data-key="monthly_gap_days"] .num').blur()
+  await expect(page.locator('.q-notification')).toContainText('0〜90')
+  expect(await valueOf('monthly_gap_days'), '越界的值不许写进去').toBe(35)
+
+  // 枚举项点得动
+  await page.locator('[data-key="remainder_to"] .q-btn').click()
+  await page.locator('.q-menu .q-item').filter({ hasText: '按成员顺序' }).click()
+  await expect.poll(() => valueOf('remainder_to')).toBe('order')
+
+  // 收尾：改回默认，免得影响后面的用例
+  await page.request.put('/api/settings/remainder_to', { headers, data: { value: 'payer' } })
+  await page.request.put('/api/settings/monthly_gap_days', { headers, data: { value: 20 } })
 })
 
 test('账目筛选：按分类/付款人筛，并给出筛选后的合计', async ({ page }) => {
