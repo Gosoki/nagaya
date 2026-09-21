@@ -18,12 +18,18 @@
          调整额原来藏在下面一个折叠里，看不见它是加在比例结果之上的 -->
     <div class="head-row text-caption text-grey-6">
       <div />
-      <div class="text-right">{{ t('split.weight') }}</div>
+      <!-- 比例那格是块居中的药丸，不是右对齐的数字，表头跟着它居中 -->
+      <div class="text-center">{{ t('split.weight') }}</div>
       <div class="text-right">{{ t('split.adjustment') }}</div>
       <div class="text-right">{{ t('split.share') }}</div>
     </div>
 
-    <div v-for="m in members" :key="m.id" class="member-row">
+    <div
+      v-for="m in members"
+      :key="m.id"
+      class="member-row"
+      :class="{ out: weightOf(m.id) === 0 }"
+    >
       <div class="name-col row items-center no-wrap">
         <q-avatar size="30px" :style="{ background: m.color }" text-color="white" class="q-mr-sm">
           {{ m.display_name.slice(0, 1) }}
@@ -31,17 +37,27 @@
         <div class="name ellipsis">{{ m.display_name }}</div>
       </div>
 
+      <!-- 比例不用输入框：真机 iOS 上 type=number 没有上下箭头，
+           改个 0/1 得弹出数字键盘挡半屏。点一下直接选，全程不碰键盘 -->
       <div class="weight-col">
-        <input
-          class="num-input weight-input"
-            type="number"
-            inputmode="numeric"
-            min="0"
-            step="1"
-            :value="weights[String(m.id)] ?? 0"
-            @input="onWeightInput(m.id, $event)"
-          />
-        </div>
+        <button class="weight-pill" :class="{ off: weightOf(m.id) === 0 }">
+          {{ weightOf(m.id) }}
+          <q-popup-proxy cover transition-show="jump-down">
+            <div class="weight-pick row no-wrap">
+              <button
+                v-for="n in WEIGHT_CHOICES"
+                :key="n"
+                v-close-popup
+                class="pick"
+                :class="{ on: weightOf(m.id) === n }"
+                @click="setWeight(m.id, n)"
+              >
+                {{ n }}
+              </button>
+            </div>
+          </q-popup-proxy>
+        </button>
+      </div>
         <div class="adj-col">
           <input
             class="num-input"
@@ -210,9 +226,13 @@ watch(
   { immediate: true, deep: true },
 )
 
-function onWeightInput(id: number, e: Event) {
+/** 三四个室友，权重再高也就是「谁用得多一倍」。给到 3 足够，多了反而挑花眼 */
+const WEIGHT_CHOICES = [0, 1, 2, 3]
+
+const weightOf = (id: number) => weights.value[String(id)] ?? 0
+
+function setWeight(id: number, n: number) {
   touched.value = true
-  const n = Math.max(0, Math.floor(Number((e.target as HTMLInputElement).value) || 0))
   weights.value = { ...weights.value, [String(id)]: n }
 }
 
@@ -252,12 +272,15 @@ defineExpose({
 
 <style scoped>
 
-/* 名字 / 比例 / 调整 / 应担 四等分。原来是「名字自适应 + 50/92/78」四个不同宽度，
-   数字落在各不相同的位置上，看着就是歪的。表头和下面的值共用同一套列，天然对齐。 */
+/* 列宽按内容的体量分，不是一刀切四等分：
+     · 调整和应担都是钱，必须等宽 —— 数字对不齐一眼就看出来歪
+     · 比例只装一位数，给 56px 刚好放下那颗药丸；等分的话是个大空框
+     · 剩下的全给名字
+   表头和下面的值共用同一套 grid 列，所以不可能错位。 */
 .head-row,
 .member-row {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: minmax(0, 1.1fr) 56px minmax(0, 1fr) minmax(0, 1fr);
   align-items: center;
   column-gap: 6px;
 }
@@ -272,10 +295,46 @@ defineExpose({
 .share-col { text-align: right; font-variant-numeric: tabular-nums; font-size: 15px; }
 
 .member-row { min-height: 48px; }
+/* 权重 0 ＝ 这个人这笔不参与。整行压灰，1:1:0 一眼就认得出来 */
+.member-row.out .name,
+.member-row.out .share-col { color: #bdbdbd; }
+.member-row.out .q-avatar { opacity: 0.45; }
 .name { font-size: 15px; }
 /* 数字框本身要够高：44px 说的是**可点区域**，输入框太矮拇指点不准 */
-/* 三个数字列一律右对齐（.num-input 里定的），比例也不例外 —— 钱的表就该这么读 */
-.weight-input { padding-right: 0; }
+/* 比例那颗药丸：44px 是可点区域的底线，拇指点得准 */
+.weight-pill {
+  width: 100%;
+  min-height: 44px;                    /* 拇指的底线 */
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 8px;
+  background: #fff;
+  color: #222;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.weight-pill.off {
+  border-color: rgba(0, 0, 0, 0.1);
+  color: #bdbdbd;
+}
+.weight-pick {
+  padding: 4px;
+}
+.weight-pick .pick {
+  min-width: 46px;
+  min-height: 46px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #333;
+  font-size: 17px;
+  cursor: pointer;
+}
+.weight-pick .pick.on {
+  background: #3d4785;
+  color: #fff;
+  font-weight: 600;
+}
 .weight-input::-webkit-outer-spin-button,
 .weight-input::-webkit-inner-spin-button {
   opacity: 1;                 /* 桌面上把上下箭头显出来，手机上本来就没有 */

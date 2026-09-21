@@ -60,6 +60,17 @@ async function deleteLatestEntry(page: import('@playwright/test').Page) {
   if (rows.length) await page.request.delete(`/api/entries/${rows[0].id}`, { headers })
 }
 
+/**
+ * 设某个人的比例。比例是「点药丸 → 在弹层里选数字」，不是输入框 ——
+ * 真机 iOS 上输入框会弹出数字键盘挡半屏，为一个只在 0/1 之间变的值不值当。
+ */
+async function setWeight(page: import('@playwright/test').Page, index: number, value: number) {
+  await page.locator('.weight-pill').nth(index).click()
+  await page.locator('.weight-pick .pick').filter({ hasText: String(value) }).first().click()
+  // 等弹层真的关掉再往下走：它的遮罩会吃掉下一次点击，而报错跟「找不到元素」长得一样
+  await expect(page.locator('.weight-pick')).toHaveCount(0)
+}
+
 /** 375px 下不许有横向滚动 —— 这条最容易被一个写死宽度的元素破掉 */
 async function expectNoHorizontalScroll(page: import('@playwright/test').Page) {
   const overflow = await page.evaluate(() => {
@@ -150,16 +161,17 @@ test('权重全填 0：把缺口报出来，而且存不了', async ({ page }) =
 
   // 比例模式几乎永远自动配平 —— 调整额再怎么填都会从基数里扣回来。
   // 唯一的例外就是所有人权重都 0：这笔钱没人担，整笔悬空，必须当场说清缺多少
-  const weights = page.locator('.weight-input')
-  const n = await weights.count()
-  for (let i = 0; i < n; i++) await weights.nth(i).fill('0')
+  const n = await page.locator('.weight-pill').count()
+  for (let i = 0; i < n; i++) await setWeight(page, i, 0)
+  // 比例那一列不许再有输入框：有的话手机上就会弹数字键盘
+  await expect(page.locator('.weight-col input')).toHaveCount(0)
 
   await expect(page.locator('.diff-line')).toBeVisible()
   await expect(page.locator('.diff-line')).toContainText('12,000')
   await expect(page.getByRole('button', { name: '保存', exact: true })).toBeDisabled()
   await page.screenshot({ path: 'e2e/shots/08-all-zero.png' })
 
-  await weights.nth(0).fill('1')          // 只要有一个人担，就自动配平
+  await setWeight(page, 0, 1)             // 只要有一个人担，就自动配平
   await expect(page.locator('.diff-line')).toHaveCount(0)
   await expect(page.getByRole('button', { name: '保存', exact: true })).toBeEnabled()
 })
@@ -587,7 +599,7 @@ test('账目里点固定费去固定费那一屏，点日常开销才进单笔�
   await expect(page.getByText('改这一笔')).toBeVisible()
 })
 
-test('调整额输得进负数，比例是个能直接打的数字框', async ({ page }) => {
+test('调整额输得进负数，比例点一下就能选', async ({ page }) => {
   await login(page)
   await page.locator('input.amount').fill('9000')
   await page.getByRole('button', { name: '日用品' }).click()
@@ -607,8 +619,8 @@ test('调整额输得进负数，比例是个能直接打的数字框', async ({
       .then((ts) => ts.map((t) => Number(t.replace(/[^\d-]/g, ''))))
   expect((await shares()).sort((a, b) => a - b)).toEqual([2000, 3500, 3500])
 
-  // 比例直接打数字，不用左右加减
-  await page.locator('.weight-input').nth(2).fill('0')
+  // 比例点一下弹出 0/1/2/3
+  await setWeight(page, 2, 0)
   expect((await shares()).sort((a, b) => a - b)).toEqual([0, 3750, 5250])
 })
 
