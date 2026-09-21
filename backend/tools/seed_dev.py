@@ -158,6 +158,11 @@ def main() -> None:
         add(EntryKind.expense, d(9, 14), 5_200, "伙食", "火锅食材", go.id)
         add(EntryKind.income, d(9, 20), -2_400, None, "乐天积分返现", kan.id)
 
+        # 每项固定费谁垫，是**分类的常驻属性** —— 房租从 Go 的卡扣，网费是 Kan 的
+        for name, who in [("房租", go), ("电费", go), ("燃气", go), ("水费", go), ("网费", kan)]:
+            cats[name].default_payer_id = who.id
+            s.add(cats[name])
+
         # 备忘：固定费那几项各写一条，再加两条清单之外的
         notes = {
             "房租": "每月 1 号房东自动从 Go 的卡扣，别再手动转一次",

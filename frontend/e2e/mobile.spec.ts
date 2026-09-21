@@ -814,6 +814,53 @@ test('同一分类本期有两笔：面板说得出来，也点得进去，合�
   await expect(page.getByText('E2E重复房租')).toBeVisible()
 })
 
+test('固定费谁垫的：跟着分类走，不是「谁填的算谁」', async ({ page }) => {
+  await login(page)
+  const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
+  const catOf = async (name: string) =>
+    (await (await page.request.get('/api/categories', { headers })).json())
+      .find((c: { name: string }) => c.name === name)
+  const draftEntryOf = async (categoryId: number) =>
+    (await (await page.request.get('/api/entries?unbilled_only=true&limit=100', { headers })).json())
+      .find((e: { category_id: number }) => e.category_id === categoryId)
+
+  // **自己准备前提**：前面的「出账单」用例会把草稿清空，靠种子数据活着的断言
+  // 红的时候看起来跟这一屏毫无关系
+  const wifiCat = await catOf('网费')
+  const payer = wifiCat.default_payer_id
+  expect(payer, '种子里网费该定好了默认垫付人').toBeTruthy()
+  if (!(await draftEntryOf(wifiCat.id))) {
+    await page.request.post('/api/entries', {
+      headers,
+      data: {
+        kind: 'expense', date: '2026-09-21', amount_jpy: 5_500,
+        payer_id: payer, category_id: wifiCat.id, title: '',
+      },
+    })
+  }
+
+  await page.goto('/bill')
+  // 行头上看得见谁垫的 —— 这是这一屏唯一会悄悄出错的地方
+  const wifi = page.locator('.q-expansion-item').filter({ hasText: '网费' })
+  await expect(wifi).toContainText('Kan')
+
+  // 改成别人：分类的常驻默认和本期那笔要一起变
+  await wifi.locator('[role="button"]').first().click()
+  await wifi.locator('.pick').filter({ hasText: 'Zen' }).click()
+  await expect.poll(async () => (await catOf('网费')).default_payer_id).not.toBe(payer)
+  const moved = await catOf('网费')
+  await expect
+    .poll(async () => (await draftEntryOf(wifiCat.id))?.payer_id)
+    .toBe(moved.default_payer_id)
+
+  // 收尾：改回去，别把开发库留在一个跟种子不一样的状态
+  await page.request.patch(`/api/categories/${wifiCat.id}`,
+    { headers, data: { default_payer_id: payer } })
+  const back = await draftEntryOf(wifiCat.id)
+  await page.request.patch(`/api/entries/${back.id}?version=${back.version}`,
+    { headers, data: { payer_id: payer } })
+})
+
 test('账单两页：未出账 / 已出账，更早的从标题那个名字翻', async ({ page }) => {
   await login(page)
   await page.getByRole('tab', { name: '账单' }).click()

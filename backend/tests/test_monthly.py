@@ -177,3 +177,21 @@ def test_archived_category_still_shows_on_old_bills(session: Session, members) -
     assert "家賃" in old, "旧账单上那一行不能因为归档就消失"
     draft = {r["name"] for r in monthly_rows(session)["rows"]}
     assert "家賃" not in draft, "草稿里归档的项不该再占位置"
+
+
+def test_monthly_rows_carry_the_standing_payer(session: Session, members) -> None:
+    """每项固定费默认谁垫，要跟着分类走。
+
+    不定这个的话，面板上就是「谁填的算谁」：别人刷的卡被随手填进去，
+    账本当场错一整笔房租的钱，而屏幕上一点提示都没有。
+    """
+    a, b, _ = members
+    c = cats(session)
+    c["家賃"].default_payer_id = a.id
+    c["電気"].default_payer_id = b.id
+    session.add(c["家賃"]); session.add(c["電気"]); session.commit()
+
+    by_name = {r["name"]: r for r in monthly_rows(session)["rows"]}
+    assert by_name["家賃"]["default_payer_id"] == a.id
+    assert by_name["電気"]["default_payer_id"] == b.id
+    assert by_name["水道"]["default_payer_id"] is None, "没定的就留空，由前端回退到全局设置"

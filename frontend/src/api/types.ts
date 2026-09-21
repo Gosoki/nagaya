@@ -37,6 +37,8 @@ export interface Category {
   archived: boolean
   /** 这一项的常驻备忘：什么时候收、从谁的卡扣、合同哪天到期 */
   note: string
+  /** 这一项固定费默认谁垫。分类的常驻属性，不是每期临时决定的 */
+  default_payer_id: number | null
 }
 
 export interface Entry {
@@ -123,6 +125,8 @@ export interface MonthlyRow {
   icon: string
   color: string
   default_rule_json: Record<string, unknown> | null
+  /** 这一项默认谁垫 */
+  default_payer_id: number | null
   entry_id: number | null
   amount: number | null
   version: number | null

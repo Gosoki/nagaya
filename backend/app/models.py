@@ -110,6 +110,17 @@ class Category(SQLModel, table=True):
     )
     display_order: int = Field(default=0, index=True)
     archived: bool = Field(default=False, index=True)
+    default_payer_id: Optional[int] = Field(
+        default=None,
+        foreign_key="member.id",
+        description=(
+            "这一项固定费默认谁垫。**这是分类的常驻属性，不是每期临时决定的** —— "
+            "房租永远从同一张卡扣，网费永远是另一个人。留空则回退到全局的「默认垫付人」，"
+            "再没有就算当前登录的人。"
+            "不这么定的话，固定费面板上就是「谁填的算谁」：别人刷的卡被随手填进去，"
+            "账本当场错一整笔房租的钱，而屏幕上一点提示都没有。"
+        ),
+    )
     note: str = Field(
         default="",
         description=(

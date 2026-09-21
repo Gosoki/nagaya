@@ -59,6 +59,7 @@ class CategoryIn(SQLModel):
     display_order: Optional[int] = None
     archived: Optional[bool] = None
     note: Optional[str] = None
+    default_payer_id: Optional[int] = None
 
 
 class CategoryOut(SQLModel):
@@ -71,6 +72,7 @@ class CategoryOut(SQLModel):
     display_order: int
     archived: bool
     note: str
+    default_payer_id: Optional[int]
 
 
 class MemoIn(SQLModel):

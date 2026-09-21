@@ -57,8 +57,14 @@
               {{ row.name }}
               <!-- 同一分类本期有好几笔时，这一行只显示得下一笔。**得给条路进去** ——
                    否则多出来的那几笔在界面上既打不开也删不掉，钱却实实在在算在账单里 -->
+              <!-- 已经录了的行状态位本来就是空的（黑色实数自己说明了「录了」），
+                   正好用来说清**这笔算谁垫的** —— 这是这一屏唯一会悄悄出错的地方 -->
+              <span
+                v-if="!stateText(row) && payerName(row)"
+                class="state text-grey-6"
+              >{{ payerName(row) }}</span>
               <button
-                v-if="row.entry_count > 1"
+                v-else-if="row.entry_count > 1"
                 class="state dup-link"
                 :class="stateClass(row)"
                 @click.stop="openCategoryEntries(row)"
@@ -88,10 +94,20 @@
         </template>
 
         <div class="q-px-md q-pb-md">
+          <!-- 谁付的。改它 ＝ 定下「这一项以后都算谁垫的」，同时把本期已录的那笔
+               一并改过来 —— 这两件事在固定费上本来就是一回事 -->
+          <div v-if="!historic" class="row items-center q-mb-sm">
+            <div class="text-caption text-grey-7 q-mr-sm">{{ t('entry.payer') }}</div>
+            <MemberPicker
+              :model-value="payerOf(row)"
+              :members="meta.activeMembersSelfFirst"
+              @update:model-value="(id: number) => setPayer(row, id)"
+            />
+          </div>
           <SplitEditor
             :amount="valueOf(row)"
             :members="meta.activeMembersSelfFirst"
-            :payer-id="row.payer_id ?? defaultPayerId"
+            :payer-id="payerOf(row)"
             :seed-rule="row.rule"
             @change="(rule, valid, diff) => onRule(row, rule, valid, diff)"
           />
@@ -140,7 +156,8 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 
 import { ApiError, api } from 'src/api/client'
-import type { MonthlyData, MonthlyRow } from 'src/api/types'
+import type { Category, MonthlyData, MonthlyRow } from 'src/api/types'
+import MemberPicker from 'src/components/MemberPicker.vue'
 import SplitEditor from 'src/components/SplitEditor.vue'
 import { formatYen } from 'src/i18n'
 import { useAuth } from 'src/stores/auth'
@@ -174,9 +191,29 @@ const data = ref<MonthlyData | null>(null)
 const rows = ref<Row[]>([])
 const busy = ref(false)
 
-const defaultPayerId = computed(
+/** 没给这一项定过、也没有全局设置时的兜底 */
+const fallbackPayerId = computed(
   () => meta.setting<number | null>('default_payer_id', null) ?? auth.me?.id ?? null,
 )
+
+/**
+ * 这一笔算谁垫的。按「谁最有发言权」排：
+ *   1. 本期已经录了 → 就是当初记的那个人，谁也别动它
+ *   2. 这一项定过默认垫付人 → 用它（房租永远从同一张卡扣）
+ *   3. 全局的「默认垫付人」设置
+ *   4. 当前登录的人
+ *
+ * 少了第 2 条的话，这一屏就是「谁填的算谁」：别人刷的卡被随手填进去，
+ * 账本当场错一整笔房租的钱，而屏幕上一点提示都没有。
+ */
+function payerOf(row: Row): number | null {
+  return row.payer_id ?? row.default_payer_id ?? fallbackPayerId.value
+}
+
+const payerName = (row: Row) => {
+  const id = payerOf(row)
+  return id === null ? '' : (meta.byId[id]?.display_name ?? '')
+}
 
 const formatPlain = (n: number) => n.toLocaleString('en-US')
 const valueOf = (row: Row) => Number(row.text.replace(/\D/g, '')) || 0
@@ -365,7 +402,7 @@ async function saveRow(row: Row) {
           kind: 'expense',
           date: data.value!.default_date,
           amount_jpy: value,
-          payer_id: defaultPayerId.value,
+          payer_id: payerOf(row),
           category_id: row.category_id,
           title: row.name,
           rule: row.rule_override,
@@ -448,6 +485,39 @@ function removeItem(row: Row) {
 
 const newName = ref('')
 const adding = ref(false)
+
+/**
+ * 定下这一项谁垫。
+ *
+ * 两件事一起做：改分类的常驻默认（以后都按它），以及改本期已经录的那一笔
+ * （不改的话，屏幕上写着 Kan、库里还是 Go，两边对不上）。
+ */
+async function setPayer(row: Row, payerId: number) {
+  if (payerOf(row) === payerId) return
+  busy.value = true
+  try {
+    const saved = await api.patch<Category>(`/api/categories/${row.category_id}`, {
+      default_payer_id: payerId,
+    })
+    meta.categories = meta.categories.map((c) => (c.id === saved.id ? saved : c))
+    row.default_payer_id = payerId
+
+    if (row.entry_id !== null) {
+      const e = await api.patch<{ version: number }>(
+        `/api/entries/${row.entry_id}?version=${row.version}`,
+        { payer_id: payerId },
+      )
+      row.version = e.version
+      row.payer_id = payerId
+      emit('saved')             // 谁垫的变了，账单上的应收应付跟着变
+    }
+  } catch (e) {
+    $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e), timeout: 5000 })
+    await load().catch(() => {})
+  } finally {
+    busy.value = false
+  }
+}
 
 async function addItem() {
   const name = newName.value.trim()

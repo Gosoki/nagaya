@@ -428,6 +428,8 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
                 "icon": c.icon,
                 "color": c.color,
                 "default_rule_json": c.default_rule_json,
+                #: 这一项默认谁垫。面板据此预填「谁付的」，不再是「谁填的算谁」
+                "default_payer_id": c.default_payer_id,
                 "entry_id": entry.id if entry else None,
                 "amount": entry.amount_jpy if entry else None,
                 "version": entry.version if entry else None,
