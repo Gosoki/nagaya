@@ -1,7 +1,7 @@
 export default {
   app: { name: '長屋', tagline: '合租记账' },
   common: {
-    save: '保存', cancel: '取消', delete: '删除', edit: '编辑', confirm: '确定',
+    save: '保存', undo: '撤销', cancel: '取消', delete: '删除', edit: '编辑', confirm: '确定',
     back: '返回', loading: '加载中…', yen: '¥{n}', today: '今天', retry: '重试',
     required: '必填', none: '无', all: '全部',
   },
@@ -9,7 +9,7 @@ export default {
     title: '登录', name: '用户名', password: '密码', submit: '进入',
     failed: '用户名或密码不对',
   },
-  nav: { add: '记一笔', balance: '余额', entries: '账目', settings: '设置' },
+  nav: { add: '记一笔', bill: '账单', entries: '账目', settings: '设置' },
   kind: { expense: '支出', income: '收入', settlement: '转账' },
   entry: {
     amount: '金额', category: '分类', payer: '谁付的', receiver: '谁收的',
@@ -42,6 +42,10 @@ export default {
     addItem: '加一项固定费',
     addPlaceholder: '名字，比如 NHK受信料',
     added: '加好了，下个月它会自己出现在这儿',
+    removeItem: '删掉这一项',
+    removeConfirm: '「{name}」以后不再出现在固定费里。历史账目不受影响，随时能加回来。',
+    removeKeepsEntry: '本期已录的 {amount} 会留在账单上。',
+    removed: '已删掉「{name}」',
     closedHint: '这一期已关账，要改先解锁',
   },
   bill: {

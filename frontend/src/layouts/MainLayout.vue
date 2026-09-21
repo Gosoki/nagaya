@@ -29,9 +29,9 @@
           :label="t('nav.add')"
         />
         <q-route-tab
-          :to="{ name: 'balance' }"
-          icon="account_balance_wallet"
-          :label="t('nav.balance')"
+          :to="{ name: 'bill' }"
+          icon="receipt"
+          :label="t('nav.bill')"
         />
         <q-route-tab
           :to="{ name: 'entries' }"

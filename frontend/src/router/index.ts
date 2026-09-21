@@ -12,11 +12,11 @@ export const router = createRouter({
       children: [
         // D16：PWA 打开的默认页就是「记一笔」，启动即光标就位
         { path: '', name: 'add', component: () => import('src/pages/AddEntryPage.vue') },
-        { path: 'balance', name: 'balance', component: () => import('src/pages/BalancePage.vue') },
         { path: 'entries', name: 'entries', component: () => import('src/pages/EntriesPage.vue') },
         // 固定费独立一屏：账单来了随时填，不用等到出账单
         { path: 'monthly', name: 'monthly', component: () => import('src/pages/MonthlyPage.vue') },
-        // 账单从余额页 / 固定费页进，不占底部 Tab —— 三个已经够了，第四个会挤手指
+        // 账单就是第二个 Tab。它已经包含了每人的应担/已垫付/应收应付和转账方案，
+        // 原来的「余额」页是它的子集，留着只会让人问「这两个有什么区别」
         { path: 'bill/:periodId?', name: 'bill', component: () => import('src/pages/BillPage.vue') },
       ],
     },

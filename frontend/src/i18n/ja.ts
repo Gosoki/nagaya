@@ -1,7 +1,7 @@
 export default {
   app: { name: '長屋', tagline: 'シェアハウス家計簿' },
   common: {
-    save: '保存', cancel: 'キャンセル', delete: '削除', edit: '編集', confirm: 'OK',
+    save: '保存', undo: '元に戻す', cancel: 'キャンセル', delete: '削除', edit: '編集', confirm: 'OK',
     back: '戻る', loading: '読み込み中…', yen: '{n}円', today: '今日', retry: '再試行',
     required: '必須', none: 'なし', all: 'すべて',
   },
@@ -9,7 +9,7 @@ export default {
     title: 'ログイン', name: 'ユーザー名', password: 'パスワード', submit: '入る',
     failed: 'ユーザー名またはパスワードが違います',
   },
-  nav: { add: '記帳', balance: '残高', entries: '明細', settings: '設定' },
+  nav: { add: '記帳', bill: '請求書', entries: '明細', settings: '設定' },
   kind: { expense: '支出', income: '収入', settlement: '精算' },
   entry: {
     amount: '金額', category: 'カテゴリ', payer: '支払者', receiver: '受取者',
@@ -42,6 +42,10 @@ export default {
     addItem: '固定費を追加',
     addPlaceholder: '名称（例：NHK受信料）',
     added: '追加しました。来月から自動で表示されます',
+    removeItem: 'この項目を削除',
+    removeConfirm: '「{name}」は今後この一覧に表示されません。過去の明細はそのまま残ります。',
+    removeKeepsEntry: '今期に記録済みの {amount} は請求書に残ります。',
+    removed: '「{name}」を削除しました',
     closedHint: 'この期間は締め済みです。編集するには解除してください',
   },
   bill: {

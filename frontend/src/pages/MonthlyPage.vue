@@ -6,18 +6,6 @@
   <q-page class="q-pb-xl">
     <div v-if="period">
       <MonthlyFixed :period-id="period.id" :readonly="period.status === 'closed'" @saved="noop" />
-      <div class="q-pa-md">
-        <q-btn
-          class="full-width"
-          color="primary"
-          size="lg"
-          no-caps
-          outline
-          icon="receipt"
-          :label="t('bill.open')"
-          :to="{ name: 'bill' }"
-        />
-      </div>
     </div>
     <div v-else class="text-center text-grey-6 q-mt-xl">{{ t('bill.noPeriod') }}</div>
   </q-page>

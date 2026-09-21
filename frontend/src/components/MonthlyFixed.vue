@@ -94,6 +94,15 @@
                 @click="row.period_start = null; row.period_end = null; row.dirty = true"
               />
             </div>
+
+            <!-- 删除入口放在展开区里，不放行头：行头有金额输入框，误触成本太高 -->
+            <q-btn
+              dense flat no-caps size="sm" color="negative" icon="delete_outline"
+              class="q-mt-sm"
+              :disable="readonly"
+              :label="t('monthly.removeItem')"
+              @click="removeItem(row)"
+            />
           </div>
         </q-expansion-item>
       </template>
@@ -299,6 +308,53 @@ async function save() {
   await load()
   emit('saved')
   if (failed) $q.notify({ type: 'warning', message: t('monthly.partialFail', { n: failed }) })
+}
+
+/**
+ * 删掉一项固定费 —— **归档，不是真删**。
+ *
+ * 真删不行：这个分类底下可能已经有历史账目，外键会挡住；就算绕过去，
+ * 账目页也会失名（归档过的分类，反查表里还留着名字和图标）。
+ * 归档只是「以后不再出现在这张表里」，历史一个数字都不动，而且随时能加回来。
+ *
+ * 本期已经录了金额的话要说清楚：那笔账**不会跟着消失**，仍然算在账单里。
+ * 想连账一起去掉，是把金额清空再保存（那条路是软删账目）。
+ */
+function removeItem(row: Row) {
+  const extra =
+    row.amount !== null
+      ? ` ${t('monthly.removeKeepsEntry', { amount: formatPlain(row.amount) })}`
+      : ''
+  $q.dialog({
+    title: t('monthly.removeItem'),
+    message: t('monthly.removeConfirm', { name: row.name }) + extra,
+    cancel: true,
+  }).onOk(async () => {
+    try {
+      await api.patch(`/api/categories/${row.category_id}`, { archived: true })
+      await meta.load()
+      await load()
+      $q.notify({
+        type: 'positive',
+        message: t('monthly.removed', { name: row.name }),
+        timeout: 6000,
+        // 给条后悔路：手滑删掉家賃只要点一下就回来
+        actions: [
+          {
+            label: t('common.undo'),
+            color: 'white',
+            handler: async () => {
+              await api.patch(`/api/categories/${row.category_id}`, { archived: false })
+              await meta.load()
+              await load()
+            },
+          },
+        ],
+      })
+    } catch (e) {
+      $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e) })
+    }
+  })
 }
 
 const newName = ref('')

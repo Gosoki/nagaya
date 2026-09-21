@@ -162,13 +162,13 @@ test('固定金额模式：合计对不上就红字报差额且存不了', async
   await expect(page.getByRole('button', { name: '保存', exact: true })).toBeEnabled()
 })
 
-test('余额看板与账目列表', async ({ page }) => {
+test('账单 Tab 与账目列表', async ({ page }) => {
   await login(page)
 
-  await page.getByRole('tab', { name: '余额' }).click()
-  await expect(page.locator('.text-h4')).toBeVisible()
+  await page.getByRole('tab', { name: '账单' }).click()
+  await expect(page.getByText(/转账方案/)).toBeVisible()
   // 底部 tab 的高亮要跟着路由走（q-tab 换成 q-route-tab 之前这里是坏的）
-  await expect(page.getByRole('tab', { name: '余额' })).toHaveClass(/q-tab--active/)
+  await expect(page.getByRole('tab', { name: '账单' })).toHaveClass(/q-tab--active/)
   await expect(page.getByRole('tab', { name: '记一笔' })).toHaveClass(/q-tab--inactive/)
   await expectNoHorizontalScroll(page)
   await page.screenshot({ path: 'e2e/shots/05-balance.png', fullPage: true })
@@ -188,9 +188,8 @@ test('切日语：界面文案跟着换，用户录的分类名不翻译', async
 
 test('账单：期初/应担/应付对得上，转账方案能把人清零', async ({ page }) => {
   await login(page)
-  await page.getByRole('tab', { name: '余额' }).click()
-  // q-btn 带 :to 会渲染成 <a>，getByRole('button') 找不到它，按文本定位
-  await page.getByText('出账单').click()
+  // 账单现在就是第二个 Tab，不用再从余额页绕一道
+  await page.getByRole('tab', { name: '账单' }).click()
   await expect(page.locator('.q-item').first()).toBeVisible()
 
   // 每人的「应收/应付」加起来必须是 0 —— 账单上直接看得见的那条恒等式
@@ -428,8 +427,8 @@ test('固定费不必等到出账单：记一笔那屏就有入口', async ({ pa
   await expect(page).toHaveURL(/\/monthly$/)
   await expect(page.getByText('本期固定费')).toBeVisible()
   await expect(page.locator('.amount-input').first()).toBeVisible()
-  // 这一屏自己就能通到账单，不用绕回余额页
-  await expect(page.getByText('出账单')).toBeVisible()
+  // 账单在 Tab 上，一点就到，这屏不用再放一个重复的入口
+  await expect(page.getByRole('tab', { name: '账单' })).toBeVisible()
   await expectNoHorizontalScroll(page)
   await page.screenshot({ path: 'e2e/shots/14-monthly-standalone.png' })
 })
@@ -453,4 +452,65 @@ test('自己加一项固定费，它就留在这张表里', async ({ page }) => 
   await page.goto('/')
   await expect(page.locator('.cat')).toHaveCount(3)
   await page.screenshot({ path: 'e2e/shots/15-custom-monthly.png' })
+})
+
+test('固定项可以删掉，而且删错了能撤销', async ({ page }) => {
+  await login(page)
+  await page.goto('/monthly')
+  await expect(page.locator('.amount-input').first()).toBeVisible()
+
+  await page.locator('.new-name').fill('E2E受信料')
+  await page.getByRole('button', { name: '加一项固定费' }).click()
+  await expect(page.getByText('E2E受信料')).toBeVisible()
+
+  // 删除入口在展开区里，不在行头 —— 行头有金额框，误触成本太高
+  await page.locator('.q-expansion-item').filter({ hasText: 'E2E受信料' }).locator('[role="button"]').first().click()
+  await page.getByRole('button', { name: '删掉这一项' }).click()
+  await page.getByRole('button', { name: 'OK' }).click()
+  await expect(page.locator('.q-dialog')).toHaveCount(0)
+  // 断言收窄到列表：删除后的通知文案里也含项目名（「已删掉「E2E受信料」」），
+  // 用 getByText 扫全页会把通知也数进去
+  const inList = (name: string) => page.locator('.q-expansion-item').filter({ hasText: name })
+  await expect(inList('E2E受信料')).toHaveCount(0)
+
+  // 后悔路：点撤销它得回来
+  await page.getByRole('button', { name: '撤销' }).click()
+  await expect(inList('E2E受信料')).toHaveCount(1)
+})
+
+test('删掉一项固定费，本期已录的那笔账仍然留在账单上', async ({ page }) => {
+  await login(page)
+  const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
+  const before = (await (await page.request.get('/api/balances', { headers })).json()).balances
+
+  // 拿一个已经录了金额的固定项（种子数据里 ガス 是 4,200）
+  await page.goto('/monthly')
+  const row = page.locator('.q-expansion-item').filter({ hasText: 'ガス' })
+  await expect(row.locator('.amount-input')).toHaveValue('4,200')
+
+  await row.locator('[role="button"]').first().click()
+  await page.getByRole('button', { name: '删掉这一项' }).click()
+  // 有已录金额时要说清楚那笔账不会跟着消失
+  await expect(page.locator('.q-dialog')).toContainText('4,200')
+  await page.getByRole('button', { name: 'OK' }).click()
+  await expect(page.locator('.q-dialog')).toHaveCount(0)
+  await expect(page.locator('.q-expansion-item').filter({ hasText: 'ガス' })).toHaveCount(0)
+
+  // 账没动：余额一分不差，account 也还在账目里
+  const after = (await (await page.request.get('/api/balances', { headers })).json()).balances
+  expect(after, '删一项固定费不该动到任何人的余额').toEqual(before)
+
+  await page.getByRole('button', { name: '撤销' }).click()
+  await expect(page.locator('.q-expansion-item').filter({ hasText: 'ガス' })).toHaveCount(1)
+})
+
+test('账单 Tab 上就能看到并填固定费', async ({ page }) => {
+  await login(page)
+  await page.getByRole('tab', { name: '账单' }).click()
+  // 固定费和账单在同一屏：钱的数字和分摊结果一眼都在
+  await expect(page.getByText('本期固定费')).toBeVisible()
+  await expect(page.locator('.amount-input').first()).toBeVisible()
+  await expect(page.getByText(/转账方案/)).toBeVisible()
+  await expectNoHorizontalScroll(page)
+  await page.screenshot({ path: 'e2e/shots/16-bill-tab.png', fullPage: true })
 })
