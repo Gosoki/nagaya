@@ -102,9 +102,9 @@ def main() -> None:
 
         # ---------------------------------------------------------------- 5 月
         fixed(5, denki=7_800, gasu=4_600)
-        add(EntryKind.expense, d(5, 3), 7_200, "外食", "歓迎会の焼肉", go.id)
+        add(EntryKind.expense, d(5, 3), 7_200, "食費", "歓迎会の焼肉", go.id)
         add(EntryKind.expense, d(5, 12), 2_480, "日用品", "洗剤とトイレットペーパー", zen.id)
-        add(EntryKind.expense, d(5, 24), 3_900, "外食", "ピザ", kan.id)
+        add(EntryKind.expense, d(5, 24), 3_900, "食費", "ピザ", kan.id)
         may = finish_cut(s, go.id, "5/31 出账", utc(5, 31))
         settle_plan(s, may, on=d(6, 2), at=utc(6, 2), how_many=None)
 
@@ -121,7 +121,7 @@ def main() -> None:
         # ---------------------------------------------------------------- 7 月
         fixed(7, denki=9_200, gasu=3_800)
         add(EntryKind.expense, d(7, 6), 1_380, "日用品", "トイレットペーパー", zen.id)
-        add(EntryKind.expense, d(7, 18), 6_400, "外食", "焼肉", kan.id)
+        add(EntryKind.expense, d(7, 18), 6_400, "食費", "焼肉", kan.id)
         add(EntryKind.expense, d(7, 25), 4_200, "食費", "そうめん大会", go.id)
         july = finish_cut(s, go.id, "7/31 出账", utc(7, 31))
         settle_plan(s, july, on=d(8, 3), at=utc(8, 3), how_many=None)
@@ -130,7 +130,7 @@ def main() -> None:
         fixed(8, denki=10_400, gasu=3_200, denki_note="エアコン代")
         add(EntryKind.expense, d(8, 25), 12_600, "水道", "6〜7月分", go.id,
             period_start=d(6, 1), period_end=d(7, 31))
-        add(EntryKind.expense, d(8, 12), 8_900, "外食", "お盆の焼肉", go.id, rule=zen_less)
+        add(EntryKind.expense, d(8, 12), 8_900, "食費", "お盆の焼肉", go.id, rule=zen_less)
         add(EntryKind.expense, d(8, 20), 3_240, "日用品", "ハンドソープほか", zen.id)
         add(EntryKind.income, d(8, 25), -3_000, None, "電気代キャッシュバック", go.id)
         august = finish_cut(s, go.id, "8/31 出账", utc(8, 31))
@@ -142,7 +142,7 @@ def main() -> None:
         add(EntryKind.expense, d(9, 18), 8_700, "電気", "", go.id)
         add(EntryKind.expense, d(9, 19), 5_500, "ネット", "", kan.id)
         # ガス 和 水道 故意不填：面板要显示成灰色参考值，不是预填的真值
-        add(EntryKind.expense, d(9, 3), 4_600, "外食", "ピザ（Zen 出張中）", kan.id,
+        add(EntryKind.expense, d(9, 3), 4_600, "食費", "ピザ（Zen 出張中）", kan.id,
             rule=without_zen)
         add(EntryKind.expense, d(9, 10), 1_980, "日用品", "トイレットペーパー", kan.id)
         add(EntryKind.expense, d(9, 14), 5_200, "食費", "鍋の材料", go.id)
