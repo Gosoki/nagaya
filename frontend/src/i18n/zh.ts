@@ -30,7 +30,6 @@ export default {
     weight: '比例', adjustment: '调整', share: '应担',
     total: '合计', diff: '差额', balanced: '刚好平',
     notBalanced: '还差 {n}，不平不能存',
-    hint: '权重 0 ＝ 不参与。调整额是在按比例算完之后再加减的。',
   },
   monthly: {
     title: '本期固定费',

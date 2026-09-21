@@ -80,8 +80,6 @@
       </div>
     </div>
 
-    <div class="text-caption text-grey-6 q-mt-xs">{{ t('split.hint') }}</div>
-
     <q-separator class="q-my-sm" />
 
     <div class="row items-center total-bar">

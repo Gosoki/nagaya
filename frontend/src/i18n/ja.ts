@@ -30,7 +30,6 @@ export default {
     weight: '比率', adjustment: '調整', share: '負担額',
     total: '合計', diff: '差額', balanced: 'ぴったり',
     notBalanced: '{n} 合いません。合わないと保存できません',
-    hint: '比率 0 ＝ 参加しない。調整額は比率で割ったあとに加減します。',
   },
   monthly: {
     title: '今期の固定費',
