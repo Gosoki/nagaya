@@ -611,3 +611,31 @@ test('调整额输得进负数，比例是个能直接打的数字框', async ({
   await page.locator('.weight-input').nth(2).fill('0')
   expect((await shares()).sort((a, b) => a - b)).toEqual([0, 3750, 5250])
 })
+
+test('支出 / 收入 / 转账 三个页签跟账单那页一个样式，各有各的颜色', async ({ page }) => {
+  await login(page)
+  // 顶上是页签（下划线指示器），不是三个填色按钮 —— 跟账单页的「本期 / 以前」统一
+  const tabs = page.locator('.kind-toggle .q-tab')
+  await expect(tabs).toHaveCount(3)
+  const widths = await tabs.evaluateAll((els) =>
+    els.map((e) => Math.round(e.getBoundingClientRect().width)),
+  )
+  expect(new Set(widths).size, '三个页签宽度应当一样').toBe(1)
+
+  // 选中的颜色跟着账目类型走：支出蓝 / 收入绿 / 转账黄。
+  // 量的是**页签自己**的颜色 —— 量金额那个的话，写死 active-color 也照样绿，测不出来
+  const tabInk = new Set<string>()
+  const amountInk = new Set<string>()
+  for (const label of ['支出', '收入', '转账']) {
+    await page.getByRole('tab', { name: label }).click()
+    await page.waitForTimeout(200)
+    tabInk.add(
+      await page.locator('.kind-toggle .q-tab--active').evaluate((el) => getComputedStyle(el).color),
+    )
+    amountInk.add(
+      await page.locator('input.amount').evaluate((el) => getComputedStyle(el).color),
+    )
+  }
+  expect(tabInk.size, '三个页签选中时应当是三种颜色').toBe(3)
+  expect(amountInk.size, '金额也该跟着换三种颜色').toBe(3)
+})

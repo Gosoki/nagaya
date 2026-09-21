@@ -16,17 +16,18 @@
       {{ t('entry.editBilled', { label: billedLabel }) }}
     </q-banner>
 
-    <q-btn-toggle
+    <q-tabs
       v-model="kind"
-      spread no-caps unelevated
-      :toggle-color="kindPalette"
-      class="kind-toggle"
-      :options="[
-        { label: t('kind.expense'), value: 'expense' },
-        { label: t('kind.income'), value: 'income' },
-        { label: t('kind.settlement'), value: 'settlement' },
-      ]"
-    />
+      dense
+      no-caps
+      class="kind-toggle text-grey-7"
+      :active-color="kindPalette"
+      :indicator-color="kindPalette"
+    >
+      <q-tab name="expense" :label="t('kind.expense')" />
+      <q-tab name="income" :label="t('kind.income')" />
+      <q-tab name="settlement" :label="t('kind.settlement')" />
+    </q-tabs>
 
     <AmountInput ref="amountEl" v-model="amount" :color="kindInk" />
 
