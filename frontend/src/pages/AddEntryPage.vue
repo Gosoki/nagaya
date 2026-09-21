@@ -128,6 +128,7 @@ import AmountInput from 'src/components/AmountInput.vue'
 import MemberPicker from 'src/components/MemberPicker.vue'
 import SplitEditor from 'src/components/SplitEditor.vue'
 import { useAuth } from 'src/stores/auth'
+import { useDrafts } from 'src/stores/drafts'
 import { useLedger } from 'src/stores/ledger'
 import { useMeta } from 'src/stores/meta'
 
@@ -136,6 +137,7 @@ const $q = useQuasar()
 const meta = useMeta()
 const auth = useAuth()
 const ledger = useLedger()
+const drafts = useDrafts()
 
 const kind = ref<EntryKind>('expense')
 const amount = ref(0)
@@ -198,8 +200,7 @@ function onSplitChange(next: Record<string, unknown> | null, valid: boolean, dif
 async function save(keepGoing: boolean) {
   if (!canSave.value || payerId.value === null) return
   busy.value = true
-  try {
-    await ledger.create({
+  const payload = {
       kind: kind.value,
       date: date.value,
       amount_jpy: signedAmount.value,
@@ -208,15 +209,25 @@ async function save(keepGoing: boolean) {
       category_id: kind.value === 'settlement' ? null : categoryId.value,
       title: title.value,
       rule: kind.value === 'settlement' ? null : rule.value,
-    })
+  }
+  try {
+    await ledger.create(payload)
     $q.notify({ type: 'positive', message: t('entry.saved'), timeout: 1200 })
     reset(keepGoing)
   } catch (e) {
-    $q.notify({
-      type: 'negative',
-      message: e instanceof ApiError ? e.text : String(e),
-      timeout: 4000,
-    })
+    // 只有「连不上服务器」才转存草稿。金额方向错、账期已关这类是**服务器明确拒绝**，
+    // 存成草稿只会让人以后反复补交同一笔失败的账（D15）
+    if (e instanceof ApiError && e.code === 'network') {
+      drafts.add(payload)
+      $q.notify({ type: 'warning', message: t('draft.savedOffline'), timeout: 2500 })
+      reset(keepGoing)
+    } else {
+      $q.notify({
+        type: 'negative',
+        message: e instanceof ApiError ? e.text : String(e),
+        timeout: 4000,
+      })
+    }
   } finally {
     busy.value = false
   }

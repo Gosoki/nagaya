@@ -49,6 +49,19 @@
       </div>
     </div>
 
+    <div class="q-mt-lg">
+      <q-btn
+        class="full-width"
+        color="primary"
+        size="lg"
+        no-caps
+        unelevated
+        icon="receipt"
+        :label="t('bill.open')"
+        :to="{ name: 'bill' }"
+      />
+    </div>
+
     <div class="text-center text-caption text-grey-6 q-mt-lg">
       <div v-if="currentPeriod">
         {{ t('balance.periodTotal', { label: currentPeriod.label }) }}

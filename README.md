@@ -29,6 +29,11 @@
 3. **分摊算法前后端各一份实现**，靠 `tests/fixtures/` 下的共享用例锁住不漂。
    前端要本地即时预览，后端绝不信任客户端传来的金额。
 
+## 进度
+
+**M1（记账 / 分摊 / 余额）与 M2（账单 / 结算 / 关账 / 离线草稿）已完成。**
+下一步 M3：光熱費套餐、复制上月、模板、审计日志页、备份、部署。
+
 ## 跑起来
 
 ```bash
@@ -54,6 +59,8 @@ cd backend  && .venv/bin/python -m pytest      # 算法 / 账本 / API
 cd frontend && npm test                        # 前端分摊引擎 vs 后端 fixture
 cd frontend && npx playwright test             # 375px 手机视口 E2E
 ```
+
+测试数量：后端 103 · 前端 27 · 手机 E2E 13。E2E 会真的往库里写，所以它自己负责收拾。
 
 分摊算法改动之后**必须**重跑 `cd backend && .venv/bin/python -m tools.gen_random_cases`，
 否则后端那条「随机用例文件过期」的测试会红 —— 那正是前端还在按旧算法预览的危险时刻。

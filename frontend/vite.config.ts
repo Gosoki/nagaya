@@ -33,14 +33,10 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // API 一律走网络，绝不能缓存 —— 账本读到旧数据比读不到更糟
+        // API 一律走网络，绝不能缓存 —— 账本读到旧数据比读不到更糟。
+        // 不另写 runtimeCaching 的 NetworkOnly 规则：没匹配上的请求本来就直接走网络，
+        // 多一条规则等于多一层可能出问题的东西。
         navigateFallbackDenylist: [/^\/api/],
-        runtimeCaching: [
-          {
-            urlPattern: /^\/api\//,
-            handler: 'NetworkOnly',
-          },
-        ],
       },
     }),
   ],

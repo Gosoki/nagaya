@@ -15,6 +15,10 @@ export default defineConfig({
     ...devices['iPhone SE'],
     viewport: { width: 375, height: 667 },
     deviceScaleFactor: 2,
+    // 测试里关掉 service worker：SW 一旦接管 fetch，请求就不经过 Playwright 的
+    // page.route，模拟断网那类测试会静默失效（看起来像"拦截没生效"，很难查）。
+    // PWA 本身的产物另有一条用例直接拉 sw.js / manifest 来验。
+    serviceWorkers: 'block',
   },
   reporter: [['list']],
 })

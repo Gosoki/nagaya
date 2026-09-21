@@ -1,4 +1,4 @@
-import { Quasar, Notify } from 'quasar'
+import { Dialog, Notify, Quasar } from 'quasar'
 import { createPinia } from 'pinia'
 import { createApp } from 'vue'
 
@@ -10,7 +10,7 @@ import { i18n } from './i18n'
 import { router } from './router'
 
 createApp(App)
-  .use(Quasar, { plugins: { Notify }, config: { notify: { position: 'top' } } })
+  .use(Quasar, { plugins: { Notify, Dialog }, config: { notify: { position: 'top' } } })
   .use(createPinia())
   .use(i18n)
   .use(router)

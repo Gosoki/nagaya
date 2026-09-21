@@ -147,3 +147,132 @@ test('切日语：界面文案跟着换，用户录的分类名不翻译', async
   await expect(page.getByRole('button', { name: '入る' })).toBeVisible()
   await page.screenshot({ path: 'e2e/shots/07-login-ja.png', fullPage: true })
 })
+
+test('账单：期初/应担/应付对得上，转账方案能把人清零', async ({ page }) => {
+  await login(page)
+  await page.getByRole('tab', { name: '余额' }).click()
+  // q-btn 带 :to 会渲染成 <a>，getByRole('button') 找不到它，按文本定位
+  await page.getByText('出账单').click()
+  await expect(page.locator('.q-item').first()).toBeVisible()
+
+  // 每人的「应收/应付」加起来必须是 0 —— 账单上直接看得见的那条恒等式
+  const signed = await page.locator('.q-item').evaluateAll((items) =>
+    items.map((el) => {
+      const amount = Number((el.querySelector('.text-weight-medium')?.textContent ?? '0').replace(/[^\d]/g, ''))
+      const isPay = el.textContent?.includes('应付')
+      return isPay ? -amount : amount
+    }),
+  )
+  expect(signed.reduce((a, b) => a + b, 0), '账单上应收与应付对不上').toBe(0)
+
+  await expect(page.getByText(/转账方案/)).toBeVisible()
+  await expectNoHorizontalScroll(page)
+  await page.screenshot({ path: 'e2e/shots/09-bill.png' })
+})
+
+test('账单：关账后转账按钮锁住，解锁后恢复', async ({ page }) => {
+  await login(page)
+  await page.goto('/bill')
+  await expect(page.getByText(/转账方案/)).toBeVisible()
+
+  const received = page.getByRole('button', { name: '已收到' }).first()
+  await expect(received).toBeEnabled()
+
+  await page.getByText('关账').click()
+  await page.getByRole('button', { name: 'OK' }).click()
+  // 等对话框收干净再往下走：遮罩还在的时候点什么都点不到，
+  // 报错却长得像「找不到这个元素」，很容易把人带偏
+  await expect(page.locator('.q-dialog')).toHaveCount(0)
+  await expect(page.getByText('已关账')).toBeVisible()
+  await expect(received).toBeDisabled()
+  await page.screenshot({ path: 'e2e/shots/10-bill-closed.png' })
+
+  // 收拾干净：解锁回去，别让下一次跑测试撞上锁着的账期
+  await page.getByText('解锁').click()
+  await expect(page.getByText(/未结清|请于/)).toBeVisible()
+  await expect(page.getByRole('button', { name: '已收到' }).first()).toBeEnabled()
+})
+
+test('离线草稿：断网能填完，回来点一下补交', async ({ page }) => {
+  await login(page)
+  await page.evaluate(() => localStorage.removeItem('nagaya.drafts'))
+
+  // 掐断写接口，模拟超市地下一层
+  await page.route('**/api/entries', (route) =>
+    route.request().method() === 'POST' ? route.abort() : route.continue(),
+  )
+  await page.locator('input.amount').fill('777')
+  await page.getByRole('button', { name: '日用品' }).click()
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+
+  await expect(page.locator('.q-notification')).toContainText('先存在本地')
+  await expect(page.getByText('有 1 笔没提交')).toBeVisible()
+  await page.screenshot({ path: 'e2e/shots/11-draft.png' })
+
+  // 回到有网
+  await page.unroute('**/api/entries')
+  await page.getByRole('button', { name: '补交' }).click()
+  await expect(page.getByText('有 1 笔没提交')).toHaveCount(0)
+
+  const saved = await (await page.request.get('/api/entries?limit=1', {
+    headers: { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` },
+  })).json()
+  expect(saved[0].amount_jpy, '补交的金额对不上').toBe(777)
+
+  await deleteLatestEntry(page)
+})
+
+test('服务器明确拒绝的不该存成草稿', async ({ page }) => {
+  await login(page)
+  await page.evaluate(() => localStorage.removeItem('nagaya.drafts'))
+
+  // 400 是「这笔账本身有问题」，存成草稿只会让人反复补交同一笔失败的账
+  await page.route('**/api/entries', (route) =>
+    route.request().method() === 'POST'
+      ? route.fulfill({ status: 400, contentType: 'application/json',
+                        body: JSON.stringify({ code: 'bad_sign', message: 'x', detail: {} }) })
+      : route.continue(),
+  )
+  await page.locator('input.amount').fill('555')
+  await page.getByRole('button', { name: '日用品' }).click()
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+
+  await expect(page.locator('.q-notification')).toContainText('金额方向不对')
+  await expect(page.getByText(/笔没提交/)).toHaveCount(0)
+})
+
+test('PWA 产物齐全：manifest 与 service worker 都在', async ({ page }) => {
+  // 用 page.request 直接拉，绕开被 block 掉的 SW
+  const manifest = await page.request.get('/manifest.webmanifest')
+  expect(manifest.ok()).toBe(true)
+  const m = await manifest.json()
+  expect(m.display, '不是 standalone 就不会全屏，跟普通网页没区别').toBe('standalone')
+  expect(m.icons.some((i: { purpose?: string }) => i.purpose === 'maskable'),
+    '缺 maskable 图标，Android 裁圆时会把字切掉').toBe(true)
+
+  expect((await page.request.get('/sw.js')).ok()).toBe(true)
+  expect((await page.request.get('/icons/apple-touch-icon.png')).ok()).toBe(true)
+})
+
+test('完整闭环：出账单 → 点「已收到」→ 那个人归零', async ({ page }) => {
+  await login(page)
+  await page.goto('/bill')
+  await expect(page.getByText(/转账方案/)).toBeVisible()
+
+  const firstCard = page.locator('.q-card').first()
+  const who = (await firstCard.locator('.text-weight-medium').first().textContent())!.trim()
+  const amount = Number((await firstCard.locator('.text-h6').textContent())!.replace(/[^\d]/g, ''))
+  expect(amount).toBeGreaterThan(0)
+
+  await firstCard.getByRole('button', { name: '已收到' }).click()
+  await page.locator('.q-dialog input').fill(String(amount))
+  await page.getByRole('button', { name: 'OK' }).click()
+  await expect(page.locator('.q-dialog')).toHaveCount(0)
+
+  // 结清之后这个人应该显示「已结清」，而且账单上应收应付仍然相抵
+  const row = page.locator('.q-item').filter({ hasText: who })
+  await expect(row.getByText('已结清')).toBeVisible()
+  await page.screenshot({ path: 'e2e/shots/12-bill-settled.png' })
+
+  await deleteLatestEntry(page)      // 把这笔转账撤掉，别把开发库越跑越脏
+})
