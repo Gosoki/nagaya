@@ -1,16 +1,17 @@
-"""开发用种子数据：三个室友 + 两张出过的账单 + 一张当前草稿。
+"""开发用种子数据：三个室友 + 五个月的账。
 
     .venv/bin/python -m tools.seed_dev
 
 密码统一 dev12345。**只在开发库上跑**，真用起来之前要删掉这些账号。
 
-数据是照着现在的设计铺的，一眼能看到这几件事：
-  * 7 月那张已经全部转完钱 → 「已结清」
-  * 8 月那张只转了一笔 → 未结清，转账卡片上一个勾一个空
-  * 当前草稿里固定费只填了一半，ガス / 水道 空着 → 面板给灰色参考值
-  * 水道带计费期间 7/1〜8/31 → 账单上标「含 7〜8月分」
+数据照着现在的设计铺，一眼能看到这些事：
+  * 5〜8 月各出过一张账单，9 月是当前草稿
+  * 5/6/7 月三张钱都转完了 → 「已结清」；8 月那张只转了一笔 → 一个勾一个空
+  * 固定费的日期一律是出账日（D30），日常开销保留真实日子
+  * 水道两个月一收，只出现在 6 月和 8 月，带计费期间 → 账单上标「含 4〜5月分」
+  * NHK受信料 是 7 月才加进来的固定项，5/6 月那两张上没有
+  * 当前草稿的 ガス / 水道 空着 → 面板给灰色参考值
   * 一笔带调整额（Zen 少担 1,000）、一笔 1:1:0（Zen 出差没参与）
-  * 上一张没转完的钱变成下一张的「上期结转」
 """
 
 from __future__ import annotations
@@ -63,6 +64,11 @@ def main() -> None:
         settings_svc.set_(s, "default_payer_id", go.id)
         settings_svc.set_(s, "settle_due_day", 10)
 
+        # 自己加的固定项：7 月才开始交，所以 5/6 月那两张账单上没有它
+        nhk = Category(name="NHK受信料", icon="tv", color="#7e57c2", monthly=True, display_order=5)
+        s.add(nhk)
+        s.commit()
+
         cats = {c.name: c for c in s.exec(select(Category))}
         # 家賃走固定金额（D12：房间大小不同，不是比例）
         rent = cats["家賃"]
@@ -73,11 +79,14 @@ def main() -> None:
         s.add(rent)
         s.commit()
 
-        equal_minus_zen = {"mode": "ratio", "weights": {str(go.id): 1, str(kan.id): 1, str(zen.id): 0}}
-        zen_pays_less = {
+        zen_less = {
             "mode": "ratio",
             "weights": {str(m.id): 1 for m in members},
             "adjustments": {str(zen.id): -1_000},
+        }
+        without_zen = {
+            "mode": "ratio",
+            "weights": {str(go.id): 1, str(kan.id): 1, str(zen.id): 0},
         }
 
         def add(kind, on, amount, cat_name, title, payer, **kw) -> Entry:
@@ -90,48 +99,68 @@ def main() -> None:
                 title=title, **kw
             )
 
-        # ---------------------------------------------- 第一张：7 月分，全部转完
-        add(EntryKind.expense, d(7, 1), 120_000, "家賃", "", go.id)
-        add(EntryKind.expense, d(7, 10), 1_380, "日用品", "トイレットペーパー", zen.id)
+        def fixed(month: int, denki: int, gasu: int, *, nhk_yen: int | None = None,
+                  denki_note: str = "") -> None:
+            """这个月的固定费。日期随便填，出账时会统一盖成出账日（D30）。"""
+            add(EntryKind.expense, d(month, 1), 120_000, "家賃", "", go.id)
+            add(EntryKind.expense, d(month, 25), denki, "電気", denki_note, go.id)
+            add(EntryKind.expense, d(month, 25), gasu, "ガス", "", go.id)
+            add(EntryKind.expense, d(month, 25), 5_500, "ネット", "", kan.id)
+            if nhk_yen:
+                add(EntryKind.expense, d(month, 25), nhk_yen, "NHK受信料", "", go.id)
+
+        # ---------------------------------------------------------------- 5 月
+        fixed(5, denki=7_800, gasu=4_600)
+        add(EntryKind.expense, d(5, 3), 7_200, "食費", "歓迎会の焼肉", go.id)
+        add(EntryKind.expense, d(5, 12), 2_480, "日用品", "洗剤とトイレットペーパー", zen.id)
+        add(EntryKind.expense, d(5, 24), 3_900, "食費", "ピザ", kan.id)
+        may = finish_cut(s, go.id, "5/31 出账", utc(5, 31))
+        settle_plan(s, may, on=d(6, 2), at=utc(6, 2), how_many=None)
+
+        # ---------------------------------------------------------------- 6 月
+        fixed(6, denki=8_900, gasu=3_900)
+        add(EntryKind.expense, d(6, 25), 11_800, "水道", "4〜5月分", go.id,
+            period_start=d(4, 1), period_end=d(5, 31))
+        add(EntryKind.expense, d(6, 8), 1_780, "日用品", "ゴミ袋とラップ", kan.id)
+        add(EntryKind.expense, d(6, 15), 6_400, "食費", "BBQ", go.id, rule=zen_less)
+        add(EntryKind.income, d(6, 21), -4_500, None, "電気代キャッシュバック", go.id)
+        june = finish_cut(s, go.id, "6/30 出账", utc(6, 30))
+        settle_plan(s, june, on=d(7, 2), at=utc(7, 2), how_many=None)
+
+        # ---------------------------------------------------------------- 7 月
+        fixed(7, denki=9_200, gasu=3_800, nhk_yen=2_220)
+        add(EntryKind.expense, d(7, 6), 1_380, "日用品", "トイレットペーパー", zen.id)
         add(EntryKind.expense, d(7, 18), 6_400, "食費", "焼肉", kan.id)
-        add(EntryKind.expense, d(7, 28), 9_200, "電気", "", go.id)   # 日期会被出账日盖掉
-        add(EntryKind.expense, d(7, 28), 3_800, "ガス", "", go.id)
-        add(EntryKind.expense, d(7, 28), 5_500, "ネット", "", kan.id)
-        add(EntryKind.expense, d(8, 2), 2_180, "日用品", "洗剤とゴミ袋", go.id)
-        july = finish_cut(s, go.id, "8/5 出账", utc(8, 5))
+        add(EntryKind.expense, d(7, 25), 4_200, "食費", "そうめん大会", go.id)
+        july = finish_cut(s, go.id, "7/31 出账", utc(7, 31))
+        settle_plan(s, july, on=d(8, 3), at=utc(8, 3), how_many=None)
 
-        # 照着方案全转完 → 这张显示「已结清」
-        settle_plan(s, july, on=d(8, 6), at=utc(8, 6), how_many=None)
-
-        # ---------------------------------------------- 第二张：8 月分，只转了一笔
-        add(EntryKind.expense, d(8, 5), 120_000, "家賃", "", go.id)
-        add(EntryKind.expense, d(8, 12), 8_900, "食費", "お盆の焼肉", go.id, rule=zen_pays_less)
+        # ---------------------------------------------------------------- 8 月
+        fixed(8, denki=10_400, gasu=3_200, nhk_yen=2_220, denki_note="エアコン代")
+        add(EntryKind.expense, d(8, 25), 12_600, "水道", "6〜7月分", go.id,
+            period_start=d(6, 1), period_end=d(7, 31))
+        add(EntryKind.expense, d(8, 12), 8_900, "食費", "お盆の焼肉", go.id, rule=zen_less)
         add(EntryKind.expense, d(8, 20), 3_240, "日用品", "ハンドソープほか", zen.id)
-        add(EntryKind.expense, d(8, 28), 10_400, "電気", "エアコン代", go.id)
-        add(EntryKind.expense, d(8, 28), 3_200, "ガス", "", go.id)
-        add(EntryKind.expense, d(8, 28), 5_500, "ネット", "", kan.id)
         add(EntryKind.income, d(8, 25), -3_000, None, "電気代キャッシュバック", go.id)
-        add(EntryKind.expense, d(8, 28), 12_600, "水道", "7〜8月分", go.id,
-            period_start=d(7, 1), period_end=d(8, 31))
         august = finish_cut(s, go.id, "8/31 出账", utc(8, 31))
-
         # 只转了一笔 → 未结清，转账卡片上一个勾一个空
         settle_plan(s, august, on=d(9, 2), at=utc(9, 2), how_many=1)
 
-        # ---------------------------------------------- 当前草稿：固定费只填了一半
+        # ------------------------------------------------ 当前草稿：固定费填了一半
         add(EntryKind.expense, d(9, 1), 120_000, "家賃", "", go.id)
+        add(EntryKind.expense, d(9, 18), 8_700, "電気", "", go.id)
+        add(EntryKind.expense, d(9, 18), 2_220, "NHK受信料", "", go.id)
+        add(EntryKind.expense, d(9, 19), 5_500, "ネット", "", kan.id)
+        # ガス 和 水道 故意不填：面板要显示成灰色参考值，不是预填的真值
         add(EntryKind.expense, d(9, 3), 4_600, "食費", "ピザ（Zen 出張中）", kan.id,
-            rule=equal_minus_zen)
+            rule=without_zen)
         add(EntryKind.expense, d(9, 10), 1_980, "日用品", "トイレットペーパー", kan.id)
         add(EntryKind.expense, d(9, 14), 5_200, "食費", "鍋の材料", go.id)
-        add(EntryKind.expense, d(9, 18), 8_700, "電気", "", go.id)
-        add(EntryKind.expense, d(9, 19), 5_500, "ネット", "", kan.id)
         add(EntryKind.income, d(9, 20), -2_400, None, "楽天ポイント還元", kan.id)
-        # ガス 和 水道 故意不填：面板要显示成灰色参考值，不是预填的真值
 
         total = len(s.exec(select(Entry)).all())
-        print(f"建好 {len(PEOPLE)} 个成员（密码 {PASSWORD}）、2 张出过的账单、{total} 笔账")
-        print("  7 月那张已结清；8 月那张只转了一笔；当前草稿的 ガス / 水道 空着")
+        print(f"建好 {len(PEOPLE)} 个成员（密码 {PASSWORD}）、4 张出过的账单、{total} 笔账")
+        print("  5/6/7 月已结清；8 月只转了一笔；当前草稿的 ガス / 水道 空着")
 
 
 def finish_cut(s: Session, actor_id: int, label: str, at: dt.datetime):

@@ -50,7 +50,7 @@ export default {
     removeConfirm: '「{name}」は今後この一覧に表示されません。過去の明細はそのまま残ります。',
     removeKeepsEntry: '今期に記録済みの {amount} は請求書に残ります。',
     removed: '「{name}」を削除しました',
-    closedHint: 'この期間は締め済みです。編集するには解除してください',
+    noneBilled: 'この請求書に固定費はありません',
   },
   bill: {
     title: '請求書', open: '請求書を出す',

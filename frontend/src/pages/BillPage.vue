@@ -60,6 +60,28 @@
       <!-- 本期固定费：出账单时顺手把家賃/水电煤网填了，账单跟着重算 -->
       <MonthlyFixed v-if="bill.is_draft" @saved="load" />
 
+      <!-- 已出的账单没有那个面板（它只管当前草稿），可固定费往往是这张单子上最大的
+           一笔钱。不摆出来的话，点进一张旧账单只看得见日用品，家賃 12 万凭空消失。 -->
+      <div v-else class="others">
+        <div class="text-subtitle2 q-px-md q-pt-md q-pb-xs">{{ t('monthly.title') }}</div>
+        <q-list v-if="monthlyEntries.length" separator>
+          <q-item v-for="e in monthlyEntries" :key="e.id" dense clickable @click="editEntry(e.id)">
+            <q-item-section avatar>
+              <q-avatar size="26px" :style="{ background: colorOfEntry(e) }" text-color="white">
+                <q-icon :name="iconOfEntry(e)" size="14px" />
+              </q-avatar>
+            </q-item-section>
+            <q-item-section>
+              <q-item-label>{{ categoryOfEntry(e)?.name ?? labelOfEntry(e) }}</q-item-label>
+              <q-item-label v-if="e.title" caption>{{ e.title }}</q-item-label>
+            </q-item-section>
+            <q-item-section side class="text-grey-9">{{ formatYen(e.amount_jpy) }}</q-item-section>
+            <q-item-section side><q-icon name="chevron_right" color="grey-5" size="18px" /></q-item-section>
+          </q-item>
+        </q-list>
+        <div v-else class="text-caption text-grey-6 q-px-md q-pb-md">{{ t('monthly.noneBilled') }}</div>
+      </div>
+
       <!-- 固定费之下，把这期其他的开销也摆出来：
            不然账单上只看得见固定项，日用品/食費那些钱是从哪来的就说不清 -->
       <div class="others">
@@ -372,6 +394,21 @@ async function load() {
     id ? `/api/entries?statement_id=${id}&limit=200` : '/api/entries?unbilled_only=true&limit=200',
   )
 }
+
+/** 这张账单上的固定费。已出的账单用它代替那个可编辑面板 */
+const monthlyEntries = computed(() =>
+  draftEntries.value
+    .filter((e) => {
+      if (e.kind === 'settlement' || e.category_id === null) return false
+      return Boolean(meta.categoryById[e.category_id]?.monthly)
+    })
+    // 跟可编辑面板同一个顺序（家賃在最上面）。按日期排的话全是出账日，等于没排
+    .sort(
+      (a, b) =>
+        (meta.categoryById[a.category_id!]?.display_order ?? 0) -
+        (meta.categoryById[b.category_id!]?.display_order ?? 0),
+    ),
+)
 
 /** 这张账单上非固定费的明细（日用品/食費/收入之类）。转账不算，它们在下面的方案里 */
 const others = computed(() =>

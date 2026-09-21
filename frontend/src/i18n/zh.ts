@@ -50,7 +50,7 @@ export default {
     removeConfirm: '「{name}」以后不再出现在固定费里。历史账目不受影响，随时能加回来。',
     removeKeepsEntry: '本期已录的 {amount} 会留在账单上。',
     removed: '已删掉「{name}」',
-    closedHint: '这一期已关账，要改先解锁',
+    noneBilled: '这张账单上没有固定费',
   },
   bill: {
     title: '账单', open: '出账单',
