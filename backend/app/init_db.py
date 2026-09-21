@@ -12,18 +12,18 @@ from app.db import engine
 from app.models import Category, Member
 from app.services.settings import seed_settings
 
-#: 默认分类。名字按日本账单上印的写 —— 抄数字的时候眼睛好对。
+#: 默认分类，中文。
 #: 这些是**用户数据**，不做双语，面板里随时可以改名/增删（SPEC §7.5）。
 #: 第四列 monthly＝每月一次的固定项，不在日常记账那屏占按钮，出账单时顺手填。
 DEFAULT_CATEGORIES = [
-    ("家賃", "home", "#5c6bc0", True),
-    ("電気", "bolt", "#ffa726", True),
-    ("ガス", "local_fire_department", "#ef5350", True),
-    ("水道", "water_drop", "#29b6f6", True),
-    ("ネット", "wifi", "#26a69a", True),
+    ("房租", "home", "#5c6bc0", True),
+    ("电费", "bolt", "#ffa726", True),
+    ("燃气", "local_fire_department", "#ef5350", True),
+    ("水费", "water_drop", "#29b6f6", True),
+    ("网费", "wifi", "#26a69a", True),
     ("日用品", "shopping_basket", "#8d6e63", False),
-    ("食費", "restaurant", "#66bb6a", False),
-    ("その他", "more_horiz", "#78909c", False),
+    ("伙食", "restaurant", "#66bb6a", False),
+    ("其他", "more_horiz", "#78909c", False),
 ]
 
 

@@ -1,5 +1,5 @@
 <!--
-  当前账单上的「固定费」—— 家賃/電気/ガス/水道/ネット 在这里一次填完。
+  当前账单上的「固定费」—— 房租/电费/燃气/水费/网费 在这里一次填完。
 
   账单来了随时填，不用等到出账单。点「出账单」只是划一条线，把这一刻之前记的
   全部归到那张单子上。
@@ -34,7 +34,7 @@
         :key="row.category_id"
         dense
         expand-icon-class="text-grey-5"
-        header-style="min-height:52px"
+        header-style="min-height:40px"
         @update:model-value="(open: boolean) => !open && saveRow(row)"
       >
         <template #header>
@@ -419,7 +419,10 @@ defineExpose({ reload: load })
      跟 #c8c8c8 的占位只差一档。而「正常已录不显示标签」的全部理由
      就是「实数本身看得出录了」—— 前提是它真的够黑 */
   color: rgba(0, 0, 0, 0.87);
-  height: 44px;              /* 触控目标；原来 33px，相邻两行之间留出一条会误展开的带 */
+  /* 行高压到和账单上「本期其他」一样（40px）。输入框跟着收到 34px ——
+     当初写 44px 是因为行有 52px 高、上下各留出一条点了会误展开的带；
+     行矮下来之后那条带只剩几像素，真正的解法本来就是压行而不是撑框 */
+  height: 34px;
   padding: 0 2px;
 }
 /* 灰色占位＝上次的参考，不是值。改过的才变实色 */

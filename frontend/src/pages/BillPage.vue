@@ -11,7 +11,7 @@
     <!-- 本期和以前分成两页：看本期问的是「还要填什么、该出账了没」，
          翻旧单子问的是「上个月多少、谁转了没」，混一页两边都别扭 -->
     <BillTabs v-if="statementId === null" />
-    <div v-else class="row items-center back-head">
+    <div v-else class="page-head">
       <q-btn dense flat round icon="arrow_back" @click="backToPast" />
       <div class="col text-weight-medium">{{ t('bill.tabPast') }}</div>
     </div>

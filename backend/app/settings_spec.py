@@ -58,7 +58,7 @@ SETTINGS_SPEC: dict[str, dict[str, Any]] = {
         "type": "int_or_null",
         "default": None,
         "note_zh": "兜底分类。记支出时没点分类、但写了备注，就记到这个分类下"
-                   "（默认是「その他」）。留空则每次都会弹框问。",
+                   "（默认是「其他」）。留空则每次都会弹框问。",
         "note_ja": "既定カテゴリ。カテゴリ未選択でも備考があればここに記帳します（既定は「その他」）。",
     },
     "monthly_gap_days": {
@@ -74,7 +74,7 @@ SETTINGS_SPEC: dict[str, dict[str, Any]] = {
     },
     "settlement_methods": {
         "type": "string_list",
-        "default": ["現金"],
+        "default": ["现金"],
         "note_zh": "结算方式候选。现在只用现金；以后改用 PayPay 或银行振込，在这里加一行就行。",
         "note_ja": "精算方法の選択肢。追加・削除は自由です。",
     },

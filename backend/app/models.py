@@ -67,7 +67,7 @@ class Member(SQLModel, table=True):
 
 
 class Category(SQLModel, table=True):
-    """分类。词表进数据库、面板可改，代码里不写死（家賃/电/煤/水/网/日用品…）。"""
+    """分类。词表进数据库、面板可改，代码里不写死（房租/电/煤/水/网/日用品…）。"""
 
     __tablename__ = "category"
 
@@ -84,9 +84,9 @@ class Category(SQLModel, table=True):
         default=False,
         index=True,
         description=(
-            "每月一次的固定项（家賃/電気/ガス/水道/ネット）。"
+            "每月一次的固定项（房租/电费/燃气/水费/网费）。"
             "这类不在日常「记一笔」的分类网格里占位置，改到出账单那一页顺手填。"
-            "**这是个用户可改的字段，不是代码里的名字列表** —— 以后加「NHK受信料」"
+            "**这是个用户可改的字段，不是代码里的名字列表** —— 以后加「停车位」"
             "也能自己勾上。"
         ),
     )
@@ -155,7 +155,7 @@ class Entry(SQLModel, table=True):
     #: 出账时一次性打上，之后不再变 —— 账单是对「那一刻」的陈述。
     statement_id: Optional[int] = Field(default=None, foreign_key="statement.id", index=True)
 
-    # 仅用于账单上标注「含 7–8 月水费」「10月分 家賃」，不参与任何计算（SPEC §4.4）
+    # 仅用于账单上标注「含 7–8 月水费」「10月分 房租」，不参与任何计算（SPEC §4.4）
 
     bundle_id: Optional[int] = Field(default=None, foreign_key="bundle.id", index=True)
 
@@ -190,7 +190,7 @@ class EntryShare(SQLModel, table=True):
 
 
 class Template(SQLModel, table=True):
-    """模板：家賃这种固定额一键生成；光熱費套餐存 items_json。"""
+    """模板：房租这种固定额一键生成；光熱費套餐存 items_json。"""
 
     __tablename__ = "template"
 
@@ -199,7 +199,7 @@ class Template(SQLModel, table=True):
     kind: EntryKind = Field(default=EntryKind.expense)
     category_id: Optional[int] = Field(default=None, foreign_key="category.id")
     payer_default_id: Optional[int] = Field(default=None, foreign_key="member.id")
-    amount_default: Optional[int] = Field(default=None, description="家賃这种固定额")
+    amount_default: Optional[int] = Field(default=None, description="房租这种固定额")
     rule_json: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
     items_json: Optional[list[dict[str, Any]]] = Field(
         default=None, sa_column=Column(JSON), description="套餐模板：电/煤/水/网各一项"

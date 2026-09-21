@@ -3,7 +3,6 @@
      以前是「上个月到底多少、谁转了没」，混在一页里两边都别扭。 -->
 <template>
   <q-tabs
-    dense
     no-caps
     class="bill-tabs text-grey-7"
     active-color="primary"
@@ -24,5 +23,10 @@ const { t } = useI18n()
 <style scoped>
 .bill-tabs {
   border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+/* 跟记一笔那屏的顶栏一样高，也跟底部 Tab 那一栏呼应 */
+.bill-tabs :deep(.q-tab) {
+  min-height: var(--nagaya-head-h);
+  font-size: 16px;
 }
 </style>

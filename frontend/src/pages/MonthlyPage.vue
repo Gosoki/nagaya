@@ -6,7 +6,7 @@
 -->
 <template>
   <q-page class="q-pb-xl">
-    <div v-if="statementId !== null" class="row items-center q-px-sm q-pt-xs">
+    <div v-if="statementId !== null" class="page-head">
       <q-btn dense flat round icon="arrow_back" @click="goBack" />
       <div class="col text-weight-medium">{{ label }}</div>
     </div>

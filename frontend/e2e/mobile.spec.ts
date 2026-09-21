@@ -91,12 +91,12 @@ test('登录页在 375px 下正常', async ({ page }) => {
 test('记一笔：默认页就是它，且主操作在拇指区', async ({ page }) => {
   await login(page)
   await expect(page).toHaveURL(/\/$/)                       // D16：PWA 打开即记一笔
-  // 日常那屏只放天天会用的。家賃/電気/ガス/水道/ネット 一个月才碰一次，
+  // 日常那屏只放天天会用的。房租/电费/燃气/水费/网费 一个月才碰一次，
   // 已经挪到账单页顺手填，不在这里占按钮。
   // 不写死个数（加个「外食」就得改测试没意义），钉的是真正的规矩：
   // 固定费一个都不许出现，而且总数一行放得下 —— 这一屏的价值就在于按钮少。
   await expect(page.getByRole('button', { name: '日用品' })).toBeVisible()
-  for (const monthly of ['家賃', '電気', 'ガス', '水道', 'ネット']) {
+  for (const monthly of ['房租', '电费', '燃气', '水费', '网费']) {
     await expect(page.getByRole('button', { name: monthly })).toHaveCount(0)
   }
   expect(await page.locator('.cat').count(), '日常分类超过一行了').toBeLessThanOrEqual(4)
@@ -231,7 +231,7 @@ test('出账单：划一条线，之后记的账进下一张', async ({ page }) 
   expect(draftTotal).toBeGreaterThan(0)
 
   await page.getByRole('button', { name: '出账单' }).click()
-  await page.getByRole('button', { name: 'OK' }).click()
+  await page.getByRole('button', { name: '确定' }).click()
   await expect(page.locator('.q-dialog')).toHaveCount(0)
 
   // 出完账草稿就空了，之后记的账进下一张
@@ -332,7 +332,7 @@ test('完整闭环：出账单 → 点「已完成」→ 那个人归零', async
 
   await firstCard.getByRole('button', { name: '已完成' }).click()
   await page.locator('.q-dialog input').fill(String(amount))
-  await page.getByRole('button', { name: 'OK' }).click()
+  await page.getByRole('button', { name: '确定' }).click()
   await expect(page.locator('.q-dialog')).toHaveCount(0)
 
   // 结清之后这个人应该显示「已结清」，而且账单上应收应付仍然相抵
@@ -375,9 +375,9 @@ test('账单页固定费：填一项存下去，账单跟着涨且留在这张�
   await page.request.post('/api/statements', { headers })   // 清出一张空草稿
   await page.goto('/bill')
   await expect(page.getByText('本期固定费')).toBeVisible()
-  // 填「電気」而不是第一行的「家賃」：家賃的分类规则是固定金额 45000/40000/35000，
+  // 填「电费」而不是第一行的「房租」：房租的分类规则是固定金额 45000/40000/35000，
   // 总额一改就和每人金额对不上，会被正确拦下 —— 那是另一条用例要验的事
-  const denki = page.locator('.q-expansion-item').filter({ hasText: '電気' }).locator('.amount-input')
+  const denki = page.locator('.q-expansion-item').filter({ hasText: '电费' }).locator('.amount-input')
   await denki.fill('9100')
   await denki.blur()                                  // 离开输入框就存，没有保存按钮
   await expect(page.getByText('改完自动保存')).toBeVisible({ timeout: 10_000 })
@@ -396,7 +396,7 @@ test('归档一个分类，它名下的历史账目仍然显示原来的名字',
   const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
 
   const cats = await (await page.request.get('/api/categories', { headers })).json()
-  const target = cats.find((c: { name: string }) => c.name === '食費')
+  const target = cats.find((c: { name: string }) => c.name === '伙食')
   const made = await (await page.request.post('/api/entries', {
     headers,
     data: { kind: 'expense', date: '2026-09-15', amount_jpy: 905, payer_id: 1, category_id: target.id, title: '' },
@@ -405,7 +405,7 @@ test('归档一个分类，它名下的历史账目仍然显示原来的名字',
   await page.request.patch(`/api/categories/${target.id}`, { headers, data: { archived: true } })
   await page.goto('/entries')
   // 归档之后前端若只拿未归档列表反查名字，这条会掉成默认标题和默认图标
-  await expect(page.getByText('食費').first()).toBeVisible()
+  await expect(page.getByText('伙食').first()).toBeVisible()
 
   await page.request.patch(`/api/categories/${target.id}`, { headers, data: { archived: false } })
   await page.request.delete(`/api/entries/${made.id}`, { headers })
@@ -435,13 +435,29 @@ test('记一笔：分摊一直摆在那儿，不用点开', async ({ page }) => 
 
 test('账单页在固定费下面也列出本期其他开销', async ({ page }) => {
   await login(page)
+  const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
+
+  // **自己准备前提**：前面的「出账单」用例会把种子数据全出账，草稿就空了。
+  // 靠种子数据活着的断言，红的时候看起来跟这一屏毫无关系
+  const cats = await (await page.request.get('/api/categories', { headers })).json()
+  const daily = cats.find((c: { name: string; monthly: boolean }) => c.name === '日用品')
+  const fixed = cats.find((c: { name: string }) => c.name === '房租')
+  for (const [cat, title, amount] of [[daily, 'E2E日用品', 1_980], [fixed, '', 120_000]] as const) {
+    await page.request.post('/api/entries', {
+      headers,
+      data: {
+        kind: 'expense', date: '2026-09-21', amount_jpy: amount,
+        payer_id: 1, category_id: cat.id, title,
+      },
+    })
+  }
+
   await page.getByRole('tab', { name: '账单' }).click()
   await expect(page.getByText('本期其他')).toBeVisible()
-  // 种子数据里有日用品和返现，都不是固定费，应当出现在这一块
-  await expect(page.getByText('トイレットペーパー')).toBeVisible()
-  // 固定费不该在这里重复出现
+  await expect(page.getByText('E2E日用品')).toBeVisible()
+  // 固定费不该在这里重复出现 —— 它在上面那块
   const others = page.locator('.others')
-  await expect(others.getByText('家賃')).toHaveCount(0)
+  await expect(others.getByText('房租')).toHaveCount(0)
   await expectNoHorizontalScroll(page)
   await page.screenshot({ path: 'e2e/shots/17-bill-others.png', fullPage: true })
 })
@@ -479,7 +495,7 @@ test('固定项可以删掉，而且删错了能撤销', async ({ page }) => {
   // 删除入口在展开区里，不在行头 —— 行头有金额框，误触成本太高
   await page.locator('.q-expansion-item').filter({ hasText: 'E2E受信料' }).locator('[role="button"]').first().click()
   await page.getByRole('button', { name: '删掉这一项' }).click()
-  await page.getByRole('button', { name: 'OK' }).click()
+  await page.getByRole('button', { name: '确定' }).click()
   await expect(page.locator('.q-dialog')).toHaveCount(0)
   // 断言收窄到列表：删除后的通知文案里也含项目名（「已删掉「E2E受信料」」），
   // 用 getByText 扫全页会把通知也数进去
@@ -495,39 +511,39 @@ test('删掉一项固定费，本期已录的那笔账仍然留在账单上', as
   await login(page)
   const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
 
-  // **自己准备前提**：前面的「出账单」用例会把种子数据全出账，这时 ガス 会退回未录状态。
+  // **自己准备前提**：前面的「出账单」用例会把种子数据全出账，这时 燃气 会退回未录状态。
   // 依赖别的用例留下的状态就是在赌执行顺序，迟早会红在无关的地方。
   const cats = await (await page.request.get('/api/categories', { headers })).json()
-  const gas = cats.find((c: { name: string }) => c.name === 'ガス')
+  const gas = cats.find((c: { name: string }) => c.name === '燃气')
   const existing = await (await page.request.get('/api/entries?unbilled_only=true', { headers })).json()
   for (const e of existing.filter((x: { category_id: number }) => x.category_id === gas.id)) {
     await page.request.delete(`/api/entries/${e.id}`, { headers })
   }
   await page.request.post('/api/entries', {
     headers,
-    data: { kind: 'expense', date: '2026-09-21', amount_jpy: 4_200, payer_id: 1, category_id: gas.id, title: 'E2Eガス' },
+    data: { kind: 'expense', date: '2026-09-21', amount_jpy: 4_200, payer_id: 1, category_id: gas.id, title: 'E2E燃气' },
   })
 
   const before = (await (await page.request.get('/api/balances', { headers })).json()).balances
 
   await page.goto('/monthly')
-  const row = page.locator('.q-expansion-item').filter({ hasText: 'ガス' })
+  const row = page.locator('.q-expansion-item').filter({ hasText: '燃气' })
   await expect(row.locator('.amount-input')).toHaveValue('4,200')
 
   await row.locator('[role="button"]').first().click()
   await page.getByRole('button', { name: '删掉这一项' }).click()
   // 有已录金额时要说清楚那笔账不会跟着消失
   await expect(page.locator('.q-dialog')).toContainText('4,200')
-  await page.getByRole('button', { name: 'OK' }).click()
+  await page.getByRole('button', { name: '确定' }).click()
   await expect(page.locator('.q-dialog')).toHaveCount(0)
-  await expect(page.locator('.q-expansion-item').filter({ hasText: 'ガス' })).toHaveCount(0)
+  await expect(page.locator('.q-expansion-item').filter({ hasText: '燃气' })).toHaveCount(0)
 
   // 账没动：余额一分不差，account 也还在账目里
   const after = (await (await page.request.get('/api/balances', { headers })).json()).balances
   expect(after, '删一项固定费不该动到任何人的余额').toEqual(before)
 
   await page.getByRole('button', { name: '撤销' }).click()
-  await expect(page.locator('.q-expansion-item').filter({ hasText: 'ガス' })).toHaveCount(1)
+  await expect(page.locator('.q-expansion-item').filter({ hasText: '燃气' })).toHaveCount(1)
 })
 
 test('账单 Tab 上就能看到并填固定费', async ({ page }) => {
@@ -586,15 +602,15 @@ test('账目里点固定费去固定费那一屏，点日常开销才进单笔�
   await login(page)
 
   // 固定费是一整屏一起看的东西 —— 从账目点开也得是那一屏，
-  // 否则同一个 家賃 从账单点和从账目点会落到两套界面上
+  // 否则同一个 房租 从账单点和从账目点会落到两套界面上
   await page.goto('/entries')
-  await page.locator('.q-item').filter({ hasText: '家賃' }).first().click()
+  await page.locator('.q-item').filter({ hasText: '房租' }).first().click()
   await expect(page).toHaveURL(/\/monthly/)
   await expect(page.getByText('本期固定费')).toBeVisible()
 
   // 日常开销一笔就是一笔，还是进单笔编辑页
   await page.goto('/entries')
-  await page.locator('.q-item').filter({ hasText: '鍋の材料' }).first().click()
+  await page.locator('.q-item').filter({ hasText: '火锅食材' }).first().click()
   await expect(page).toHaveURL(/\/entry\/\d+/)
   await expect(page.getByText('改这一笔')).toBeVisible()
 })
@@ -680,7 +696,7 @@ test('没选分类：写了备注就记成兜底分类，两样都没有才弹�
   const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
   const cats = await (await page.request.get('/api/categories', { headers })).json()
 
-  // ① 有备注、没点分类 → 直接存，落到兜底分类上（设置里指定，默认 その他）
+  // ① 有备注、没点分类 → 直接存，落到兜底分类上（设置里指定，默认 其他）
   await page.locator('input.amount').fill('1234')
   await page.getByPlaceholder('备注（选填）').fill('E2E没选分类')
   await page.getByRole('button', { name: '保存', exact: true }).click()
@@ -688,7 +704,7 @@ test('没选分类：写了备注就记成兜底分类，两样都没有才弹�
   let rows = await (await page.request.get('/api/entries?limit=5', { headers })).json()
   const a = rows.find((e: { title: string }) => e.title === 'E2E没选分类')
   expect(a.category_id, '备注写了就该落到兜底分类，不能留空').not.toBeNull()
-  expect(cats.find((c: { id: number }) => c.id === a.category_id).name).toBe('その他')
+  expect(cats.find((c: { id: number }) => c.id === a.category_id).name).toBe('其他')
 
   // ② 备注和分类都没有 → 不许直接进库，弹框问清楚这笔是什么
   await page.goto('/')

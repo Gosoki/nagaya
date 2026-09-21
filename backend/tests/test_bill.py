@@ -29,7 +29,7 @@ def row_of(bill: dict, member_id: int) -> dict:
 def test_draft_bill_is_everything_not_yet_billed(session: Session, members) -> None:
     a, b, c = members
     create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
-                 amount=120_000, payer_id=a.id, title="家賃")
+                 amount=120_000, payer_id=a.id, title="房租")
     bill = build_bill(session, None)
 
     assert bill["is_draft"] is True
@@ -93,7 +93,7 @@ def test_income_and_prepayment_show_up(session: Session, members) -> None:
     create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
                  amount=120_000, payer_id=a.id)
     create_entry(session, actor_id=a.id, kind=EntryKind.income, on=SEP,
-                 amount=-3_000, payer_id=a.id, title="キャッシュバック")
+                 amount=-3_000, payer_id=a.id, title="返现")
 
     bill = build_bill(session, None)
     assert bill["total_income"] == -3_000
@@ -200,7 +200,7 @@ def test_cut_without_monthly_leaves_fixed_costs_in_draft(session: Session, membe
     from app.models import Category
 
     a, *_ = members
-    rent = Category(name="家賃", monthly=True)
+    rent = Category(name="房租", monthly=True)
     daily = Category(name="日用品", monthly=False)
     session.add(rent)
     session.add(daily)
@@ -215,14 +215,14 @@ def test_cut_without_monthly_leaves_fixed_costs_in_draft(session: Session, membe
 
     st = cut_statement(session, actor_id=a.id, include_monthly=False)
     assert build_bill(session, st)["total_expense"] == 1_380       # 只出了日常
-    assert build_bill(session, None)["total_expense"] == 120_000   # 家賃还在草稿里
+    assert build_bill(session, None)["total_expense"] == 120_000   # 房租还在草稿里
 
 
 def test_cut_without_monthly_refuses_when_nothing_daily(session: Session, members) -> None:
     from app.models import Category
 
     a, *_ = members
-    rent = Category(name="家賃", monthly=True)
+    rent = Category(name="房租", monthly=True)
     session.add(rent)
     session.commit()
     session.refresh(rent)
@@ -347,11 +347,11 @@ def test_overpayment_comes_back_in_the_next_bill(session: Session, members) -> N
 def test_cut_stamps_monthly_entries_with_the_cut_date(session: Session, members) -> None:
     """固定费的日期在出账那一刻统一盖成出账日。
 
-    家賃这种根本没有「填入日」—— 它不是某天发生的事，就是这张账单的一项。
+    房租这种根本没有「填入日」—— 它不是某天发生的事，就是这张账单的一项。
     日常开销不动：几号买的日用品是真事。
     """
     a, *_ = members
-    rent, daily = Category(name="家賃", monthly=True), Category(name="日用品", monthly=False)
+    rent, daily = Category(name="房租", monthly=True), Category(name="日用品", monthly=False)
     session.add(rent)
     session.add(daily)
     session.commit()
@@ -378,7 +378,7 @@ def test_cut_stamps_monthly_entries_with_the_cut_date(session: Session, members)
 def test_cut_without_monthly_leaves_their_dates_alone(session: Session, members) -> None:
     """不勾「包括固定费」时固定费留在草稿里，日期当然也不该被盖。"""
     a, *_ = members
-    rent, daily = Category(name="家賃", monthly=True), Category(name="日用品", monthly=False)
+    rent, daily = Category(name="房租", monthly=True), Category(name="日用品", monthly=False)
     session.add(rent)
     session.add(daily)
     session.commit()

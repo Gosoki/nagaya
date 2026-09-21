@@ -49,7 +49,7 @@ def test_settlement_zeroes_out_the_debt(session, members) -> None:
     """A 垫 120000 三人平分 → B 把钱还给 A → B 归零、A 少收那么多。"""
     a, b, c = members
     create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
-                 amount=120_000, payer_id=a.id, title="家賃")
+                 amount=120_000, payer_id=a.id, title="房租")
     before = balances(session)
     assert before[a.id] == 80_000 and before[b.id] == -40_000
 
@@ -65,7 +65,7 @@ def test_income_flips_the_direction(session, members) -> None:
     """返现 3000 进了 A 的卡、三人平分 → A 欠 B、C 各 1000。"""
     a, b, c = members
     e = create_entry(session, actor_id=a.id, kind=EntryKind.income, on=SEP,
-                     amount=-3_000, payer_id=a.id, title="電気代キャッシュバック")
+                     amount=-3_000, payer_id=a.id, title="电费返现")
     assert shares_of(session, e.id) == {a.id: -1000, b.id: -1000, c.id: -1000}
     bal = balances(session)
     assert bal[a.id] == -2_000 and bal[b.id] == 1_000 and bal[c.id] == 1_000
@@ -112,7 +112,7 @@ def test_category_rule_beats_global(session, members) -> None:
     a, b, c = members
     e = create_entry(
         session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
-        amount=120_000, payer_id=a.id, title="家賃",
+        amount=120_000, payer_id=a.id, title="房租",
         category_rule={"mode": "exact", "exact": {str(a.id): 45_000, str(b.id): 40_000, str(c.id): 35_000}},
     )
     assert shares_of(session, e.id) == {a.id: 45_000, b.id: 40_000, c.id: 35_000}

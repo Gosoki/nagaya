@@ -8,7 +8,7 @@
   <q-page class="page">
     <!-- 编辑模式：顶上一条返回 + 这笔在哪张账单上。
          「已出账也能改」这件事必须当场说清楚差额去哪了，否则没人敢按保存 -->
-    <div v-if="editingId !== null" class="edit-head">
+    <div v-if="editingId !== null" class="page-head">
       <q-btn dense flat round icon="arrow_back" @click="goBack" />
       <div class="col text-weight-medium">{{ t('entry.editTitle') }}</div>
     </div>
@@ -206,7 +206,7 @@ const splitDiff = ref(0)
 const amountEl = ref<InstanceType<typeof AmountInput> | null>(null)
 const splitEl = ref<InstanceType<typeof SplitEditor> | null>(null)
 
-/** 改一笔电费时，网格里得有「電気」这个分类可选，所以编辑模式不筛掉固定费 */
+/** 改一笔电费时，网格里得有「电费」这个分类可选，所以编辑模式不筛掉固定费 */
 const gridCategories = computed(() =>
   editingId.value === null ? meta.dailyCategories : meta.categories.filter((c) => !c.archived),
 )
@@ -237,8 +237,8 @@ const canSave = computed(
     amount.value > 0 &&
     payerId.value !== null &&
     splitValid.value &&
-    // 分类不再是硬门槛：没选但写了备注就记「その他」，两个都没有时按保存会弹框问。
-    // 收入本来就没有分类（返现、給付金套不上「日用品/食費」，写备注更清楚）。
+    // 分类不再是硬门槛：没选但写了备注就记「其他」，两个都没有时按保存会弹框问。
+    // 收入本来就没有分类（返现、給付金套不上「日用品/伙食」，写备注更清楚）。
     (kind.value !== 'settlement' || (toMemberId.value !== null && toMemberId.value !== payerId.value)),
 )
 
@@ -342,13 +342,13 @@ function onSplitChange(next: Record<string, unknown> | null, valid: boolean, dif
   splitDiff.value = diff
 }
 
-/** 兜底分类（默认「その他」）。哪一个由设置说了算，代码里不写死名字 */
+/** 兜底分类（默认「其他」）。哪一个由设置说了算，代码里不写死名字 */
 const fallbackCategoryId = computed(() => meta.setting<number | null>('fallback_category_id', null))
 
 /**
  * 支出没选分类时怎么办。
  *
- * 写了备注就记进「その他」—— 备注已经说清这笔是什么了，再逼人点一下分类是多余的。
+ * 写了备注就记进「其他」—— 备注已经说清这笔是什么了，再逼人点一下分类是多余的。
  * 两样都没有就弹框问：这种账过三个月自己都认不出来，不该让它这么进库。
  * 弹框里填了备注就直接存，想选分类就取消回去点。
  */
@@ -424,13 +424,6 @@ function reset(keepGoing: boolean) {
 </script>
 
 <style scoped>
-/* 编辑模式的头：返回 + 标题，跟内容同一层，不额外占一条 header */
-.edit-head {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-}
 .edit-note {
   margin: 0 16px 4px;
   border-radius: 6px;
@@ -443,8 +436,13 @@ function reset(keepGoing: boolean) {
   padding-bottom: calc(var(--nagaya-footer-h) + 90px + env(safe-area-inset-bottom));
 }
 .kind-toggle { border-bottom: 1px solid rgba(0, 0, 0, 0.08); }
-/* 顶到屏幕边缘的东西不做圆角：首尾两段默认带 3px，贴着边看就是两个豁口 */
-.kind-toggle :deep(.q-btn) { border-radius: 0; }
+/* 顶到屏幕边缘的东西不做圆角：首尾两段默认带 3px，贴着边看就是两个豁口。
+   高度对齐底部 Tab 那一栏（57px）—— 默认的 37px 上轻下重，不像个 app */
+.kind-toggle :deep(.q-btn) {
+  border-radius: 0;
+  min-height: var(--nagaya-head-h);
+  font-size: 16px;
+}
 .label { font-size: 14px; }
 
 .fields { border-top: 1px solid rgba(0, 0, 0, 0.06); }
