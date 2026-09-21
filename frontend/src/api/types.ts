@@ -81,7 +81,13 @@ export interface Bill {
   cut_at: string | null
   covers_from: string | null
   covers_to: string | null
-  edited_after_cut: { count: number; frozen_total: number | null; live_total: number } | null
+  edited_after_cut: {
+    count: number
+    frozen_total: number | null
+    live_total: number
+    /** 这张单子自己一笔没动，是更早那张被改了才漂的 */
+    from_earlier: boolean
+  } | null
   prev_cut_at: string | null
   prev_label: string | null
   days_since_prev_cut: number | null

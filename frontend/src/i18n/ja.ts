@@ -86,6 +86,7 @@ export default {
     tabDraft: '未請求', tabOpen: '請求済み',
     noOpen: 'まだ請求書がありません。「未請求」から発行してください',
     editedAfterCut: '作成後に {n} 件変更されています（当時 {frozen} → 現在 {live}）',
+    driftedFromEarlier: 'これより前の請求書が修正されたため、この請求書の「前期繰越」も変わっています。金額の計算は正しいままです。',
     coversRange: '{from} 〜 {to}',
     noPeriod: 'まだ明細がありません',
   },

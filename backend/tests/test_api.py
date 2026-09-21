@@ -171,3 +171,38 @@ def test_patch_does_not_touch_fields_you_did_not_send(client, auth, members):
     after = client.get("/api/balances", headers=auth).json()["balances"]
     assert (after[str(b.id)] - before[str(b.id)]) > 0, "改大金额后垫付人的债权应当变多"
     assert sum(after.values()) == 0
+
+
+def test_bad_ids_are_400_not_500(client, auth, members) -> None:
+    """引用到不存在的成员/分类，要给结构化的 400，不能撞穿到外键约束上变成 500。
+
+    500 对客户端是「服务器坏了」：既看不出是哪个字段，也不知道该不该重试。
+    """
+    base = {"kind": "expense", "date": "2026-09-10", "amount_jpy": 1000}
+    assert client.post("/api/entries", headers=auth, json={**base, "payer_id": 9999}).status_code == 400
+    r = client.post("/api/entries", headers=auth, json={**base, "payer_id": 1, "category_id": 9999})
+    assert r.status_code == 400 and r.json()["code"] == "unknown_category"
+
+
+def test_password_is_yours_alone(client, auth, members) -> None:
+    """密码只能自己改 —— 「互相信任」不等于「谁都能把别人锁在门外」。"""
+    me, other, *_ = members
+    assert client.patch(f"/api/members/{other.id}", headers=auth,
+                        json={"password": "hijacked"}).status_code == 403
+    assert client.patch(f"/api/members/{me.id}", headers=auth,
+                        json={"password": "my-own-new-one"}).status_code == 200
+
+
+def test_left_on_can_be_cleared(client, auth, members) -> None:
+    """退出日填错了要能清掉，不然那个人永远回不来。"""
+    _, other, *_ = members
+    assert client.patch(f"/api/members/{other.id}", headers=auth,
+                        json={"left_on": "2026-08-31"}).json()["left_on"] == "2026-08-31"
+    assert client.patch(f"/api/members/{other.id}", headers=auth,
+                        json={"left_on": None}).json()["left_on"] is None
+
+
+def test_renaming_to_a_taken_name_is_409_like_create(client, auth, members) -> None:
+    me, other, *_ = members
+    r = client.patch(f"/api/members/{other.id}", headers=auth, json={"name": me.name})
+    assert r.status_code == 409, "重名在 POST 那边是 409，PATCH 不该是 500"

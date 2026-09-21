@@ -220,7 +220,7 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
         "transfers": [t._asdict() for t in transfers],
         "simplified": simplify,
         # 出账之后又被改过的话要说出来，否则下一张的「上期结转」没人解释得清
-        "edited_after_cut": _edited_after_cut(session, statement),
+        "edited_after_cut": _edited_after_cut(session, statement, rows),
         # 这张单子上的转账记完了没有 —— 「转账按钮都点过了就显示结清」
         **settlement_progress(session, statement),
     }
@@ -244,11 +244,19 @@ def _pair_debts(session: Session, entries: list[Entry]) -> dict[tuple[int, int],
     return debts
 
 
-def _edited_after_cut(session: Session, statement: Statement | None) -> dict[str, Any] | None:
-    """这张账单出完之后有没有被动过。
+def _edited_after_cut(
+    session: Session, statement: Statement | None, rows: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    """这张账单出完之后，数字还是不是当初那份。
 
     不锁定历史（余额全局累计，改了也不会算错钱），但**必须让改动可见** ——
     否则下一张账单上冒出来的「上期结转」没人解释得清。
+
+    两种都要认：
+      * 改的是**这张单子上的账** —— 合计当场变了
+      * 改的是**更早那张单子上的账** —— 这张一笔没动，可「上期结转」跟着变，
+        于是每个人的结余都不一样了。只盯前一种的话，六月的账单会在七月的
+        账被改之后悄悄换一组数字，而它上面什么提示都没有
     """
     if statement is None:
         return None
@@ -266,11 +274,21 @@ def _edited_after_cut(session: Session, statement: Statement | None) -> dict[str
         and (session.get(Entry, l.target_id) is not None)
         and session.get(Entry, l.target_id).statement_id == statement.id
     }
-    if not touched:
+
+    snapshot = statement.snapshot_json or {}
+    frozen_closing = {r["member_id"]: r["closing"] for r in snapshot.get("members", [])}
+    live_closing = {r["member_id"]: r["closing"] for r in rows}
+    drifted = any(live_closing.get(mid, 0) != c for mid, c in frozen_closing.items())
+
+    if not touched and not drifted:
         return None
-    frozen = (statement.snapshot_json or {}).get("total_expense")
-    live = build_total_expense(session, statement)
-    return {"count": len(touched), "frozen_total": frozen, "live_total": live}
+    return {
+        "count": len(touched),
+        "frozen_total": snapshot.get("total_expense"),
+        "live_total": build_total_expense(session, statement),
+        # 这张单子自己一笔没动，是更早那张被改了才漂的
+        "from_earlier": not touched and drifted,
+    }
 
 
 def build_total_expense(session: Session, statement: Statement) -> int:

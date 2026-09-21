@@ -9,12 +9,14 @@ import datetime as dt
 from typing import Any, Iterable, Sequence
 
 from sqlalchemy import func
+from sqlalchemy import update as sa_update
 from sqlmodel import Session, select
 
 from app.core.rules import expand, mkey, participants, pick_rule
 from app.core.split import split
 from app.models import (
     AuditLog,
+    Category,
     Entry,
     EntryKind,
     EntryShare,
@@ -58,6 +60,29 @@ def _validate_amount(kind: EntryKind, amount: int) -> None:
         raise LedgerError("bad_sign", "转账金额要填正数；方向反了就把转出/转入对调")
 
 
+def _check_refs(
+    session: Session,
+    *,
+    payer_id: int | None = None,
+    to_member_id: int | None = None,
+    member_ids: Sequence[int] | None = None,
+    category_id: int | None = None,
+) -> None:
+    """引用到的成员/分类必须真实存在。
+
+    不查的话，不存在的 id 会一路撞到数据库的外键约束上，返回 500 ——
+    客户端拿到的是一句「服务器错误」，既看不出是哪个字段，也不知道能不能重试。
+    """
+    for label, mid in (("付款人", payer_id), ("转入人", to_member_id)):
+        if mid is not None and session.get(Member, mid) is None:
+            raise LedgerError("unknown_member", f"{label}不存在：{mid}", member_id=mid)
+    for mid in member_ids or ():
+        if session.get(Member, mid) is None:
+            raise LedgerError("unknown_member", f"参与人不存在：{mid}", member_id=mid)
+    if category_id is not None and session.get(Category, category_id) is None:
+        raise LedgerError("unknown_category", f"分类不存在：{category_id}", category_id=category_id)
+
+
 def create_entry(
     session: Session,
     *,
@@ -79,6 +104,8 @@ def create_entry(
 
     分摊只在这一刻算一次。之后改默认比例、加成员、删分类，这条账都不会变。
     """
+    _check_refs(session, payer_id=payer_id, to_member_id=to_member_id,
+                member_ids=member_ids, category_id=category_id)
     _validate_amount(kind, amount)
 
     if kind == EntryKind.settlement:
@@ -245,13 +272,25 @@ def update_entry(
     version 是乐观锁：两个人同时改同一笔时，后提交的那个会被挡下来，
     而不是悄悄覆盖掉对方的修改。
     """
-    if entry.version != version:
+    # 乐观锁必须是**一条语句**。原来是「先读出来比一比，再写回去」：
+    # 两个人同时改同一笔，两边都读到 version=1、都觉得没冲突，然后各写各的；
+    # 而写 entry 和写 entry_share 又是分开两步，交错之后能留下
+    # 「金额是后写那个人的、分摊还是先写那个人的」这种 Σshares ≠ amount 的账 ——
+    # 那是全局余额恒等式的地基。下面这条 UPDATE ... WHERE version = ? 由数据库
+    # 保证只有一个人抢得到
+    claimed = session.execute(
+        sa_update(Entry).where(Entry.id == entry.id, Entry.version == version).values(version=version + 1)
+    )
+    if claimed.rowcount == 0:
+        session.rollback()
+        session.refresh(entry)
         raise LedgerError(
             "version_conflict",
             "这笔账刚被人改过，请刷新后重试",
             expected=entry.version,
             got=version,
         )
+    entry.version = version + 1     # ORM 手里那份跟上，后面 add() 才不会写回旧值
     before = _snapshot(session, entry)
     prev_kind = entry.kind          # 下面几行就要被覆盖掉，先留一份
 
@@ -264,6 +303,8 @@ def update_entry(
     on = fields.get("date", entry.date)
     payer_id = fields.get("payer_id", entry.payer_id)
     to_member_id = fields.get("to_member_id", entry.to_member_id)
+    _check_refs(session, payer_id=payer_id, to_member_id=to_member_id,
+                member_ids=member_ids, category_id=fields.get("category_id"))
     _validate_amount(kind, amount)
 
     entry.kind, entry.date, entry.amount_jpy = kind, on, amount
@@ -301,8 +342,7 @@ def update_entry(
             expanded["remainder_to"] = settings_svc.get(session, "remainder_to")
 
     entry.split_rule_json = expanded
-    entry.updated_at = now_utc()
-    entry.version += 1
+    entry.updated_at = now_utc()   # version 在最上面那条 UPDATE 里已经加过了
     session.add(entry)
     session.flush()
 

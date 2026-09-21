@@ -94,11 +94,13 @@
              **这条横幅是那条规矩唯一的可见凭证** —— 曾被一个 class="hidden" 的
              外壳罩住（重构时套错的），于是「可以改」成了「改了没人知道」 -->
         <q-banner v-if="bill.edited_after_cut" dense class="bg-orange-1 text-orange-9 q-mt-sm rounded-borders">
-          {{ t('bill.editedAfterCut', {
-            n: bill.edited_after_cut.count,
-            frozen: formatYen(bill.edited_after_cut.frozen_total ?? 0),
-            live: formatYen(bill.edited_after_cut.live_total),
-          }) }}
+          {{ bill.edited_after_cut.from_earlier
+            ? t('bill.driftedFromEarlier')
+            : t('bill.editedAfterCut', {
+              n: bill.edited_after_cut.count,
+              frozen: formatYen(bill.edited_after_cut.frozen_total ?? 0),
+              live: formatYen(bill.edited_after_cut.live_total),
+            }) }}
         </q-banner>
       </div>
 

@@ -86,6 +86,7 @@ export default {
     tabDraft: '未出账', tabOpen: '已出账',
     noOpen: '还没出过账单，先去「未出账」那页点出账单',
     editedAfterCut: '这张出账后被改过 {n} 处：当初 {frozen}，现在 {live}',
+    driftedFromEarlier: '更早的账单被改过，这张的「上期结转」跟着变了 —— 钱没算错，只是数字和当初发出去的那份不一样了。',
     coversRange: '{from} 〜 {to}',
     noPeriod: '还没有账目',
   },

@@ -163,6 +163,31 @@ def test_statements_are_ordered_and_labelled(session: Session, members) -> None:
     assert "出账" in first.label
 
 
+def test_editing_an_earlier_bill_flags_the_later_ones_too(session: Session, members) -> None:
+    """改了**更早**那张单子上的账，后面每一张的数字都会跟着变 —— 那就都得标出来。
+
+    「不锁历史」的前提是「改动必须可见」。原来只认「改到这张单子自己的账目」，
+    于是改一笔五月的账，六月七月的账单会悄悄换一组数字，上面什么提示都没有。
+    """
+    a, b, c = members
+    e = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=3_000, payer_id=a.id)
+    first = cut_statement(session, actor_id=a.id)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=OCT, amount=6_000, payer_id=b.id)
+    second = cut_statement(session, actor_id=a.id)
+
+    assert build_bill(session, second)["edited_after_cut"] is None
+
+    # 动第一张单子上的那笔账：第二张一笔没碰，但它的「上期结转」变了
+    update_entry(session, e, actor_id=a.id, version=e.version, fields={"amount_jpy": 9_000})
+
+    flagged = build_bill(session, second)["edited_after_cut"]
+    assert flagged is not None, "更早的账单被改过，这张也该标出来"
+    assert flagged["count"] == 0 and flagged["from_earlier"] is True
+    # 第一张自己那笔被改了，照旧按「本单被改」标
+    own = build_bill(session, first)["edited_after_cut"]
+    assert own["count"] == 1 and own["from_earlier"] is False
+
+
 def test_empty_draft_covers_nothing(session: Session, members) -> None:
     """出完账草稿就空了 —— 覆盖期**两端一起留空**，不许只给一头。
 

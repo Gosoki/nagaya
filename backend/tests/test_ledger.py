@@ -244,3 +244,35 @@ def test_editing_an_old_entry_after_a_new_roommate_moves_in(session: Session, me
     rule = {"mode": "ratio", "weights": {str(a.id): 1, str(b.id): 1, str(c.id): 1, str(d.id): 1}}
     update_entry(session, e, actor_id=a.id, version=e.version, fields={"amount_jpy": 4_000}, rule=rule)
     assert shares_of(session, e.id) == {a.id: 1_000, b.id: 1_000, c.id: 1_000, d.id: 1_000}
+
+
+def test_two_people_editing_the_same_entry_cannot_both_win(session: Session, members) -> None:
+    """乐观锁得由数据库来判，不能靠「先读出来比一比」。
+
+    两个人几乎同时点保存时，两边手里的 Entry 都还是旧的 version：
+    读-比-写那种写法两边都觉得没冲突，于是后写的那个悄悄盖掉前一个 ——
+    而写 entry 和写 entry_share 是分开两步，交错之后能留下
+    Σshares ≠ amount 的账，全局余额恒等式就此破掉。
+    """
+    from sqlmodel import Session as RawSession
+
+    a, *_ = members
+    e = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                     amount=3_000, payer_id=a.id)
+    session.commit()
+
+    # 另一台手机上先改成了 5,000
+    other = RawSession(session.get_bind())
+    theirs = other.get(Entry, e.id)
+    update_entry(other, theirs, actor_id=a.id, version=theirs.version, fields={"amount_jpy": 5_000})
+    other.close()
+
+    # 这台手机手里还是出改之前那份，version 没变 —— 必须被挡下来
+    with pytest.raises(LedgerError) as caught:
+        update_entry(session, e, actor_id=a.id, version=e.version, fields={"amount_jpy": 7_000})
+    assert caught.value.code == "version_conflict"
+
+    session.expire_all()
+    fresh = session.get(Entry, e.id)
+    assert fresh.amount_jpy == 5_000, "先到的那个人的修改不许被盖掉"
+    assert sum(shares_of(session, e.id).values()) == 5_000
