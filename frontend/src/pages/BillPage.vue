@@ -216,7 +216,7 @@
         <!-- 已出的账单：右边这一半写「已出账」。做成静态块不是禁用按钮 ——
              禁用按钮看着还是个按钮，会让人反复点它找反应 -->
         <div v-else class="issued row items-center justify-center">
-          <q-icon name="task_alt" size="20px" class="q-mr-xs" />
+          <q-icon name="task_alt" size="24px" />
           {{ t('bill.issued') }}
         </div>
       </div>
@@ -577,8 +577,13 @@ function doCut() {
   border-radius: 4px;
   background: #f2f2f5;
   color: #9e9e9e;
-  font-size: 15px;
+  /* 字号/字重/行高/图标间距全部照抄 q-btn 的实测值：外框早就各占一半了，
+     里面不抄的话左右两块字一大一小、一粗一细，看着还是不一样大 */
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 24px;
 }
+.issued :deep(.q-icon) { margin-right: 12px; }
 .actions {
   position: fixed;
   left: 0;

@@ -17,30 +17,21 @@
     </q-page-container>
 
     <q-footer class="bg-white text-grey-8 footer-safe">
-      <!-- 必须是 q-route-tab：q-tab 不认 :to，点了不会导航也不报错 -->
+      <!-- 不用 q-route-tab：它的高亮跟着 vue-router 的 matched 链走，而
+           /bill/current、/bill/past 是和 /bill 平级的路由、不是它的子路由，
+           于是站在那两页上底栏三个 Tab 一个都不亮。
+           这里改成「路由 → 所属分区」自己算，点击自己导航 -->
       <q-tabs
+        :model-value="navSection"
         dense
         no-caps
         indicator-color="transparent"
         active-color="primary"
         class="text-grey-6"
       >
-        <q-route-tab
-          :to="{ name: 'add' }"
-          exact
-          icon="add_circle"
-          :label="t('nav.add')"
-        />
-        <q-route-tab
-          :to="{ name: 'bill' }"
-          icon="receipt"
-          :label="t('nav.bill')"
-        />
-        <q-route-tab
-          :to="{ name: 'entries' }"
-          icon="receipt_long"
-          :label="t('nav.entries')"
-        />
+        <q-tab name="add" icon="add_circle" :label="t('nav.add')" @click="go('add')" />
+        <q-tab name="bill" icon="receipt" :label="t('nav.bill')" @click="go('bill')" />
+        <q-tab name="entries" icon="receipt_long" :label="t('nav.entries')" @click="go('entries')" />
       </q-tabs>
     </q-footer>
   </q-layout>
@@ -51,7 +42,7 @@ import { onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import BillTabs from 'src/components/BillTabs.vue'
 import DraftBanner from 'src/components/DraftBanner.vue'
@@ -66,6 +57,25 @@ const auth = useAuth()
 const ledger = useLedger()
 const drafts = useDrafts()
 const route = useRoute()
+const router = useRouter()
+
+/**
+ * 「账单」这一格代表的是一整个分区，不只是 /bill 那一页：
+ * 三个页签、从「以前」点进的某一张、还有固定费那一屏，站在哪儿它都该亮着。
+ * 新加账单相关的路由时记得加进来 —— test/nav-section.spec.ts 会盯着。
+ */
+const BILL_SECTION = ['bill', 'bill-current', 'bill-past', 'monthly']
+
+const navSection = computed(() => {
+  const name = String(route.name ?? '')
+  if (BILL_SECTION.includes(name)) return 'bill'
+  return name === 'entries' ? 'entries' : 'add'
+})
+
+/** 点已经亮着的那一格：回到这一分区的首页（站在首页上就什么都不做） */
+function go(name: string) {
+  if (route.name !== name) void router.push({ name })
+}
 
 /** 账单那三页才显示页签。从「以前」点进某一张（/bill/3）时换成返回条，不算 */
 const onBillTabs = computed(
