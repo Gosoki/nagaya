@@ -58,7 +58,7 @@ export default {
     toReceive: '受取', toPay: '支払', settled: '精算済み',
     total: '合計', income: '収入', unsettled: '未精算',
     plan: '送金プラン（{n} 件）', planEmpty: '全員ぴったり。送金不要です',
-    done: '完了', doneHint: '{from} → {to} の送金を記帳します',
+    done: '送金済みにする', doneHint: '{from} → {to} の送金を記帳します',
     copy: '請求書をコピー', copied: 'コピーしました。LINE に貼り付けてください',
     copyFallback: '下のテキストを長押しして選択・コピーしてください',
     entryCount: '{n} 件',

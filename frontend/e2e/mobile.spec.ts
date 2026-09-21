@@ -353,7 +353,7 @@ test('PWA 产物齐全：manifest 与 service worker 都在', async ({ page }) =
   expect((await page.request.get('/icons/apple-touch-icon.png')).ok()).toBe(true)
 })
 
-test('完整闭环：出账单 → 点「已完成」→ 那个人归零', async ({ page }) => {
+test('完整闭环：出账单 → 点「确认已完成」→ 那个人归零', async ({ page }) => {
   await login(page)
   await page.goto('/bill')
   await expect(page.getByText(/转账方案/)).toBeVisible()
@@ -365,7 +365,8 @@ test('完整闭环：出账单 → 点「已完成」→ 那个人归零', async
   const amount = Number((await firstCard.locator('.text-subtitle1').textContent())!.replace(/[^\d]/g, ''))
   expect(amount, '转账卡片上没读到金额，多半是选择器过期了').toBeGreaterThan(0)
 
-  await firstCard.getByRole('button', { name: '已完成' }).click()
+  // 按钮上写的是「确认已完成」—— 它是个动作，不是状态标签
+  await firstCard.getByRole('button', { name: '确认已完成' }).click()
   await page.locator('.q-dialog input').fill(String(amount))
   await page.getByRole('button', { name: '确定' }).click()
   await expect(page.locator('.q-dialog')).toHaveCount(0)

@@ -58,7 +58,7 @@ export default {
     toReceive: '应收', toPay: '应付', settled: '已结清',
     total: '合计', income: '收入', unsettled: '未结清',
     plan: '转账方案（{n} 笔）', planEmpty: '大家都平了，不用转账',
-    done: '已完成', doneHint: '记一笔 {from} → {to} 的转账',
+    done: '确认已完成', doneHint: '记一笔 {from} → {to} 的转账',
     copy: '复制账单', copied: '已复制，去 LINE 粘贴就行',
     copyFallback: '长按选中下面的文字复制',
     entryCount: '{n} 笔',
