@@ -36,7 +36,7 @@
 
     <div v-for="m in members" :key="m.id" class="row items-center member-row">
       <div class="col name-col row items-center no-wrap">
-        <q-avatar size="28px" :style="{ background: m.color }" text-color="white" class="q-mr-sm">
+        <q-avatar size="30px" :style="{ background: m.color }" text-color="white" class="q-mr-sm">
           {{ m.display_name.slice(0, 1) }}
         </q-avatar>
         <div class="name ellipsis">{{ m.display_name }}</div>

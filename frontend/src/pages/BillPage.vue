@@ -74,8 +74,8 @@
         <q-list v-if="monthlyEntries.length" separator>
           <q-item v-for="e in monthlyEntries" :key="e.id" dense>
             <q-item-section avatar>
-              <q-avatar size="26px" :style="{ background: colorOfEntry(e) }" text-color="white">
-                <q-icon :name="iconOfEntry(e)" size="14px" />
+              <q-avatar size="30px" :style="{ background: colorOfEntry(e) }" text-color="white">
+                <q-icon :name="iconOfEntry(e)" size="16px" />
               </q-avatar>
             </q-item-section>
             <q-item-section>
@@ -95,8 +95,8 @@
         <q-list v-if="others.length" separator>
           <q-item v-for="e in others" :key="e.id" dense clickable @click="editEntry(e.id)">
             <q-item-section avatar>
-              <q-avatar size="26px" :style="{ background: colorOfEntry(e) }" text-color="white">
-                <q-icon :name="iconOfEntry(e)" size="14px" />
+              <q-avatar size="30px" :style="{ background: colorOfEntry(e) }" text-color="white">
+                <q-icon :name="iconOfEntry(e)" size="16px" />
               </q-avatar>
             </q-item-section>
             <q-item-section>
@@ -122,7 +122,7 @@
           :class="{ 'bg-blue-1': row.member_id === auth.me?.id }"
         >
           <q-item-section avatar>
-            <q-avatar size="32px" :style="{ background: colorOf(row.member_id) }" text-color="white">
+            <q-avatar size="30px" :style="{ background: colorOf(row.member_id) }" text-color="white">
               {{ nameOf(row.member_id).slice(0, 1) }}
             </q-avatar>
           </q-item-section>

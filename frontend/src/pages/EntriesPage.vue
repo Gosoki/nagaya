@@ -19,8 +19,8 @@
             @click="openStatement(st.id)"
           >
             <q-item-section avatar>
-              <q-avatar size="34px" color="primary" text-color="white">
-                <q-icon name="task_alt" size="18px" />
+              <q-avatar size="30px" color="primary" text-color="white">
+                <q-icon name="task_alt" size="16px" />
               </q-avatar>
             </q-item-section>
             <q-item-section>
@@ -46,8 +46,8 @@
 
             <q-item clickable @click="openEntry(e)">
               <q-item-section avatar>
-                <q-avatar size="34px" :style="{ background: colorOf(e) }" text-color="white">
-                  <q-icon :name="iconOf(e)" size="18px" />
+                <q-avatar size="30px" :style="{ background: colorOf(e) }" text-color="white">
+                  <q-icon :name="iconOf(e)" size="16px" />
                 </q-avatar>
               </q-item-section>
 
