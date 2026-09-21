@@ -77,7 +77,9 @@
           <q-item-section side class="text-grey-9">{{ formatYen(monthlyTotal) }}</q-item-section>
           <q-item-section side><q-icon name="chevron_right" color="grey-5" size="18px" /></q-item-section>
         </q-item>
-        <q-list v-if="monthlyEntries.length" separator>
+        <!-- 行的尺寸照着未出账那页的可编辑面板来：一样的行高、一样的金额字号、
+             一样的右边距。两页看的是同一件事，来回切时这一块不该变样 -->
+        <q-list v-if="monthlyEntries.length" separator class="monthly-list">
           <q-item v-for="e in monthlyEntries" :key="e.id" dense>
             <q-item-section avatar>
               <q-avatar size="30px" :style="{ background: colorOfEntry(e) }" text-color="white">
@@ -88,7 +90,7 @@
               <q-item-label>{{ categoryOfEntry(e)?.name ?? labelOfEntry(e) }}</q-item-label>
               <q-item-label v-if="e.title" caption>{{ e.title }}</q-item-label>
             </q-item-section>
-            <q-item-section side class="text-grey-9">{{ formatYen(e.amount_jpy) }}</q-item-section>
+            <q-item-section side class="amount text-grey-9">{{ formatYen(e.amount_jpy) }}</q-item-section>
           </q-item>
         </q-list>
         <div v-else class="text-caption text-grey-6 q-px-md q-pb-md">{{ t('monthly.noneBilled') }}</div>
@@ -512,6 +514,16 @@ function doCut() {
 
 <style scoped>
 .head { border-bottom: 1px solid rgba(0, 0, 0, 0.08); }
+/* 本期固定费：和未出账那页的面板对齐到同一套尺寸 —— 行高 40、金额 16px、
+   右边留 50px（那页那儿是展开箭头，这页没有，用内边距占出来） */
+.monthly-list .q-item {
+  min-height: var(--nagaya-fee-row-h);
+  padding-right: var(--nagaya-fee-amount-gap);
+}
+.monthly-list .amount {
+  font-size: var(--nagaya-fee-amount-fs);
+  font-variant-numeric: tabular-nums;
+}
 /* 自己那笔：这一屏最该一眼看到的东西 */
 .mine { font-size: 17px; font-weight: 600; }
 .mine.owe { color: #c10015; }

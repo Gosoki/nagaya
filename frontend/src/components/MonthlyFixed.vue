@@ -17,16 +17,23 @@
 -->
 <template>
   <div v-if="data" class="wrap">
-    <div class="row items-center q-px-md q-pt-md q-pb-xs">
-      <div class="text-subtitle2">{{ t('monthly.title') }}</div>
-      <q-space />
+    <!-- 标题条跟已出账那页的完全同构：同一个 q-item、同样的内边距、
+         右边同样给出本期合计。两页来回切时这一条不该跳 -->
+    <q-item dense class="q-pt-md q-pb-xs">
+      <q-item-section class="text-subtitle2">{{ t('monthly.title') }}</q-item-section>
       <!-- 没有保存按钮：离开输入框就存。这里只报状态。
            dirtyCount > 0 只会在存失败时出现 —— 那时必须显眼，别让人以为存好了 -->
-      <div class="text-caption row items-center" :class="dirtyCount ? 'text-negative' : 'text-grey-6'">
-        <q-spinner v-if="busy" size="14px" class="q-mr-xs" />
-        {{ busy ? t('monthly.saving') : dirtyCount ? t('monthly.unsaved', { n: dirtyCount }) : t('monthly.autoSaved') }}
-      </div>
-    </div>
+      <q-item-section side class="text-caption" :class="dirtyCount ? 'text-negative' : 'text-grey-6'">
+        <div class="row items-center">
+          <q-spinner v-if="busy" size="14px" class="q-mr-xs" />
+          {{ busy ? t('monthly.saving') : dirtyCount ? t('monthly.unsaved', { n: dirtyCount }) : t('monthly.autoSaved') }}
+        </div>
+      </q-item-section>
+      <q-item-section side class="text-grey-9">{{ formatYen(total) }}</q-item-section>
+      <!-- 占位：已出账那页这里是个 chevron。留出同样的宽度，
+           合计才和下面每一行的金额落在同一条竖线上 -->
+      <q-item-section side><q-icon name="chevron_right" size="18px" class="invisible" /></q-item-section>
+    </q-item>
 
     <q-list separator>
       <q-expansion-item
@@ -34,7 +41,7 @@
         :key="row.category_id"
         dense
         expand-icon-class="text-grey-5"
-        header-style="min-height:40px"
+        header-style="min-height: var(--nagaya-fee-row-h)"
         @update:model-value="(open: boolean) => !open && saveRow(row)"
       >
         <template #header>
@@ -118,6 +125,7 @@ import { useI18n } from 'vue-i18n'
 import { ApiError, api } from 'src/api/client'
 import type { MonthlyData, MonthlyRow } from 'src/api/types'
 import SplitEditor from 'src/components/SplitEditor.vue'
+import { formatYen } from 'src/i18n'
 import { useAuth } from 'src/stores/auth'
 import { useBills } from 'src/stores/bills'
 import { useMeta } from 'src/stores/meta'
@@ -257,6 +265,10 @@ const stateClass = (row: Row) =>
 
 /** 还没存上的行数（存失败才会 >0）。和 saveRow 用同一个判据 */
 const dirtyCount = computed(() => rows.value.filter((r) => r.dirty).length)
+/** 本期固定费合计。只算真填了的 —— 灰色占位是上次的参考，不是这期的钱 */
+const total = computed(() =>
+  rows.value.reduce((sum, r) => sum + (r.text ? valueOf(r) : 0), 0),
+)
 
 /**
  * 存一行。**离开输入框就调它**，没有保存按钮。
@@ -408,6 +420,11 @@ defineExpose({ reload: load })
 
 <style scoped>
 .wrap { border-bottom: 8px solid #f2f2f2; }
+/* 金额列对齐：右边距 ＝ 行内边距 16 + 展开箭头 24 + 这一格的左内边距。
+   要凑到 --nagaya-fee-amount-gap，这里就该留下减掉那 40px 的部分 */
+.wrap :deep(.q-expansion-item .q-item__section--side:last-child) {
+  padding-left: calc(var(--nagaya-fee-amount-gap) - 40px);
+}
 .amount-input {
   width: 116px;
   border: none;
@@ -415,16 +432,16 @@ defineExpose({ reload: load })
   outline: none;
   background: transparent;
   text-align: right;
-  font-size: 16px;
+  font-size: var(--nagaya-fee-amount-fs);
   font-variant-numeric: tabular-nums;
   /* **不能用 inherit**：会继承 Quasar 次级文字色 rgba(0,0,0,.54)，
      跟 #c8c8c8 的占位只差一档。而「正常已录不显示标签」的全部理由
      就是「实数本身看得出录了」—— 前提是它真的够黑 */
   color: rgba(0, 0, 0, 0.87);
-  /* 行高压到和账单上「本期其他」一样（40px）。输入框跟着收到 34px ——
+  /* 行高压到和账单上「本期其他」一样。输入框比行矮 6px ——
      当初写 44px 是因为行有 52px 高、上下各留出一条点了会误展开的带；
      行矮下来之后那条带只剩几像素，真正的解法本来就是压行而不是撑框 */
-  height: 34px;
+  height: calc(var(--nagaya-fee-row-h) - 6px);
   padding: 0 2px;
 }
 /* 灰色占位＝上次的参考，不是值。改过的才变实色 */
