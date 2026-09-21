@@ -1,0 +1,174 @@
+{
+  "_readme": [
+    "分摊算法的唯一事实来源。后端 pytest 和前端 vitest 跑的是同一份。",
+    "新增分摊规则时：先加用例，再改两边实现。两边结果必须逐円一致。",
+    "字段：mode=ratio 用 weights/adjustments；mode=exact 用 exact。",
+    "remainder_to 决定最大余数法平局时 1 円给谁（payer/order/rotate），见 SPEC §4.3。",
+    "expect_error 表示这个输入应当被拒绝，值是错误码。"
+  ],
+  "cases": [
+    {
+      "name": "SPEC §4.2 的例子：电费 9000，1:1:1，a−1000 b+500",
+      "mode": "ratio", "amount": 9000, "order": ["a", "b", "c"],
+      "weights": {"a": 1, "b": 1, "c": 1},
+      "adjustments": {"a": -1000, "b": 500},
+      "remainder_to": "payer", "payer": "a",
+      "expected": {"a": 2167, "b": 3667, "c": 3166}
+    },
+    {
+      "name": "平分 10000 除不尽，余 1 円给付款人 a",
+      "mode": "ratio", "amount": 10000, "order": ["a", "b", "c"],
+      "weights": {"a": 1, "b": 1, "c": 1},
+      "remainder_to": "payer", "payer": "a",
+      "expected": {"a": 3334, "b": 3333, "c": 3333}
+    },
+    {
+      "name": "同上但付款人是 b，那 1 円就该跟着 b 走",
+      "mode": "ratio", "amount": 10000, "order": ["a", "b", "c"],
+      "weights": {"a": 1, "b": 1, "c": 1},
+      "remainder_to": "payer", "payer": "b",
+      "expected": {"a": 3333, "b": 3334, "c": 3333}
+    },
+    {
+      "name": "remainder_to=order：不看付款人，按成员顺序给",
+      "mode": "ratio", "amount": 10000, "order": ["a", "b", "c"],
+      "weights": {"a": 1, "b": 1, "c": 1},
+      "remainder_to": "order", "payer": "c",
+      "expected": {"a": 3334, "b": 3333, "c": 3333}
+    },
+    {
+      "name": "remainder_to=rotate：seed=1 时轮到 c",
+      "mode": "ratio", "amount": 10000, "order": ["a", "b", "c"],
+      "weights": {"a": 1, "b": 1, "c": 1},
+      "remainder_to": "rotate", "rotate_seed": 1, "payer": "a",
+      "expected": {"a": 3333, "b": 3333, "c": 3334}
+    },
+    {
+      "name": "1:1:0 —— 权重 0 就是不参与，不是特例",
+      "mode": "ratio", "amount": 10000, "order": ["a", "b", "c"],
+      "weights": {"a": 1, "b": 1, "c": 0},
+      "remainder_to": "payer", "payer": "a",
+      "expected": {"a": 5000, "b": 5000, "c": 0}
+    },
+    {
+      "name": "2:1:0",
+      "mode": "ratio", "amount": 9000, "order": ["a", "b", "c"],
+      "weights": {"a": 2, "b": 1, "c": 0},
+      "remainder_to": "payer", "payer": "a",
+      "expected": {"a": 6000, "b": 3000, "c": 0}
+    },
+    {
+      "name": "2:1:1 除不尽：余数该给小数部分最大的 a，不是给付款人 b",
+      "mode": "ratio", "amount": 10001, "order": ["a", "b", "c"],
+      "weights": {"a": 2, "b": 1, "c": 1},
+      "remainder_to": "payer", "payer": "b",
+      "expected": {"a": 5001, "b": 2500, "c": 2500}
+    },
+    {
+      "name": "收入（返现）：金额取负，整除",
+      "mode": "ratio", "amount": -3000, "order": ["a", "b", "c"],
+      "weights": {"a": 1, "b": 1, "c": 1},
+      "remainder_to": "payer", "payer": "a",
+      "expected": {"a": -1000, "b": -1000, "c": -1000}
+    },
+    {
+      "name": "收入除不尽：负数也走 floor + 最大余数，合计必须严格等于 −10000",
+      "mode": "ratio", "amount": -10000, "order": ["a", "b", "c"],
+      "weights": {"a": 1, "b": 1, "c": 1},
+      "remainder_to": "payer", "payer": "a",
+      "expected": {"a": -3333, "b": -3333, "c": -3334}
+    },
+    {
+      "name": "调整额把 a 压成负份额 —— 允许，合计仍等于总额",
+      "mode": "ratio", "amount": 3000, "order": ["a", "b", "c"],
+      "weights": {"a": 1, "b": 1, "c": 1},
+      "adjustments": {"a": -2000},
+      "remainder_to": "payer", "payer": "a",
+      "expected": {"a": -333, "b": 1667, "c": 1666}
+    },
+    {
+      "name": "调整额自己抵消（−500/+500），base 不变",
+      "mode": "ratio", "amount": 9000, "order": ["a", "b", "c"],
+      "weights": {"a": 1, "b": 1, "c": 1},
+      "adjustments": {"a": -500, "b": 500},
+      "remainder_to": "payer", "payer": "a",
+      "expected": {"a": 2500, "b": 3500, "c": 3000}
+    },
+    {
+      "name": "只有一个人",
+      "mode": "ratio", "amount": 5000, "order": ["a"],
+      "weights": {"a": 1},
+      "remainder_to": "payer", "payer": "a",
+      "expected": {"a": 5000}
+    },
+    {
+      "name": "第 4 个人加入后：1:1:1:1 整除",
+      "mode": "ratio", "amount": 10000, "order": ["a", "b", "c", "d"],
+      "weights": {"a": 1, "b": 1, "c": 1, "d": 1},
+      "remainder_to": "payer", "payer": "a",
+      "expected": {"a": 2500, "b": 2500, "c": 2500, "d": 2500}
+    },
+    {
+      "name": "4 人除不尽",
+      "mode": "ratio", "amount": 10001, "order": ["a", "b", "c", "d"],
+      "weights": {"a": 1, "b": 1, "c": 1, "d": 1},
+      "remainder_to": "payer", "payer": "a",
+      "expected": {"a": 2501, "b": 2500, "c": 2500, "d": 2500}
+    },
+    {
+      "name": "金额为 0",
+      "mode": "ratio", "amount": 0, "order": ["a", "b", "c"],
+      "weights": {"a": 1, "b": 1, "c": 1},
+      "remainder_to": "payer", "payer": "a",
+      "expected": {"a": 0, "b": 0, "c": 0}
+    },
+    {
+      "name": "全员权重 0，但调整额刚好吃掉全部金额（某人单独补的场景）",
+      "mode": "ratio", "amount": 1000, "order": ["a", "b", "c"],
+      "weights": {"a": 0, "b": 0, "c": 0},
+      "adjustments": {"a": 1000},
+      "remainder_to": "payer", "payer": "a",
+      "expected": {"a": 1000, "b": 0, "c": 0}
+    },
+    {
+      "name": "固定金额模式：家賃 120000",
+      "mode": "exact", "amount": 120000, "order": ["a", "b", "c"],
+      "exact": {"a": 45000, "b": 40000, "c": 35000},
+      "expected": {"a": 45000, "b": 40000, "c": 35000}
+    },
+    {
+      "name": "固定金额模式：负数（返现按固定金额分）",
+      "mode": "exact", "amount": -3000, "order": ["a", "b", "c"],
+      "exact": {"a": -1500, "b": -1000, "c": -500},
+      "expected": {"a": -1500, "b": -1000, "c": -500}
+    },
+    {
+      "name": "固定金额合计对不上 —— 必须拒绝，并说出差多少",
+      "mode": "exact", "amount": 120000, "order": ["a", "b", "c"],
+      "exact": {"a": 45000, "b": 40000, "c": 30000},
+      "expect_error": "sum_mismatch", "expect_diff": 5000
+    },
+    {
+      "name": "全员权重 0 且金额非 0 —— 没人分摊，拒绝",
+      "mode": "ratio", "amount": 1000, "order": ["a", "b", "c"],
+      "weights": {"a": 0, "b": 0, "c": 0},
+      "remainder_to": "payer", "payer": "a",
+      "expect_error": "weights_all_zero"
+    },
+    {
+      "name": "负权重 —— 拒绝",
+      "mode": "ratio", "amount": 1000, "order": ["a", "b", "c"],
+      "weights": {"a": -1, "b": 1, "c": 1},
+      "remainder_to": "payer", "payer": "a",
+      "expect_error": "negative_weight"
+    },
+    {
+      "name": "调整额给了不在参与人里的人 —— 拒绝",
+      "mode": "ratio", "amount": 1000, "order": ["a", "b"],
+      "weights": {"a": 1, "b": 1},
+      "adjustments": {"z": 100},
+      "remainder_to": "payer", "payer": "a",
+      "expect_error": "unknown_member"
+    }
+  ]
+}

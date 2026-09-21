@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+backend/.venv/
+backend/data/
+backend/backups/
+
+# 数据库（开发库也不进仓库，里面有真实金额）
+*.db
+*.db-wal
+*.db-shm
+.secret
+
+# Node
+node_modules/
+frontend/dist/
+frontend/dev-dist/
+frontend/test-results/
+frontend/playwright-report/
+frontend/e2e/shots/
+
+# 编辑器 / 系统
+.DS_Store
+.idea/
+.vscode/
+*.swp
