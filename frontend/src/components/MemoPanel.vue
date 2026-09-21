@@ -31,11 +31,9 @@
             </q-avatar>
           </q-item-section>
           <q-item-section>
-            <q-item-label class="row items-baseline no-wrap">
-              <div class="col">{{ c.name }}</div>
-              <!-- 金额只是**参考**，这一屏不是账单：写清楚它是哪张单子上的数 -->
-              <div v-if="refOf(c.id)" class="text-caption text-grey-6">{{ refOf(c.id) }}</div>
-            </q-item-label>
+            <!-- 这一屏只管备注，不出现金额 —— 钱在账单那边，
+                 同一个数在两处显示，迟早有一天对不上 -->
+            <q-item-label>{{ c.name }}</q-item-label>
             <textarea
               class="note"
               rows="1"
@@ -110,13 +108,11 @@
 
 <script setup lang="ts">
 import { useQuasar } from 'quasar'
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { ApiError, api } from 'src/api/client'
 import type { Category, Memo } from 'src/api/types'
-import { formatYen } from 'src/i18n'
-import { useBills } from 'src/stores/bills'
 import { useMemos } from 'src/stores/memos'
 import { useMeta } from 'src/stores/meta'
 
@@ -124,7 +120,6 @@ const { t } = useI18n()
 const $q = useQuasar()
 const meta = useMeta()
 const memos = useMemos()
-const bills = useBills()
 
 const busy = ref(false)
 const failed = ref(0)
@@ -133,22 +128,10 @@ const adding = ref(false)
 
 onMounted(() => {
   void memos.load().then(sizeAll).catch(() => {})
-  // 参考金额借固定费面板那份数据，账单页去过就是现成的
-  void bills.loadMonthly('draft').catch(() => {})
   void sizeAll()
 })
 // 分类的备注是随 meta 一起来的，可能比这个组件挂载还晚
 watch(() => meta.categories, sizeAll, { deep: true })
-
-/** 这一项的参考金额：本期录了就报本期的，没录就报上次那张单子上的 */
-const monthlyRows = computed(() => bills.monthly.draft?.rows ?? [])
-function refOf(categoryId: number): string {
-  const row = monthlyRows.value.find((r) => r.category_id === categoryId)
-  if (!row) return ''
-  if (row.amount !== null) return formatYen(row.amount)
-  if (row.hint === null) return ''
-  return `${t('monthly.hintFrom', { label: row.hint_label ?? '' })} ${formatYen(row.hint)}`
-}
 
 /** 一行文字就一行高，写多了自己长 —— 固定高度要么浪费半屏，要么看不全 */
 const root = ref<HTMLElement | null>(null)
