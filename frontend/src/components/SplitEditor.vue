@@ -43,20 +43,22 @@
       </div>
 
       <template v-if="mode === 'ratio'">
-        <div class="col-auto weight-col row items-center justify-center no-wrap">
-          <q-btn
-            dense flat round icon="remove" padding="9px"
-            :disable="(weights[String(m.id)] ?? 0) <= 0"
-            @click="bump(m.id, -1)"
+        <div class="col-auto weight-col">
+          <input
+            class="num-input weight-input"
+            type="number"
+            inputmode="numeric"
+            min="0"
+            step="1"
+            :value="weights[String(m.id)] ?? 0"
+            @input="onWeightInput(m.id, $event)"
           />
-          <div class="weight">{{ weights[String(m.id)] ?? 0 }}</div>
-          <q-btn dense flat round icon="add" padding="9px" @click="bump(m.id, 1)" />
         </div>
         <div class="col-auto adj-col">
           <input
             class="num-input"
             type="text"
-            inputmode="numeric"
+            inputmode="text"
             placeholder="0"
             :value="adjDisplay(m.id)"
             @input="onAdjInput(m.id, $event)"
@@ -138,6 +140,13 @@ const adjustments = ref<Record<string, number>>({})
 const exact = ref<Record<string, number>>({})
 const touched = ref(false)
 
+/**
+ * 输入过程中**保留用户打的原文**，否则负号活不到下一个按键：
+ * 光打一个「-」时数值还是 0，`:value` 会把框重绘成空，负号当场消失，
+ * 于是「a 少担 1000」这种根本输不进去 —— 而它正是这个字段存在的理由。
+ */
+const typing = ref<Record<string, string>>({})
+
 function resetWeights() {
   const seed = props.seedRule ?? null
   const seedMode = (seed?.mode as string) ?? 'ratio'
@@ -163,6 +172,7 @@ function resetWeights() {
     Object.entries(seededAdj).filter(([k, v]) => keys.includes(k) && Number(v) !== 0),
   )
   exact.value = Object.fromEntries(keys.map((k) => [k, 0]))
+  typing.value = {}
 }
 resetWeights()
 watch(() => props.members, resetWeights)
@@ -221,38 +231,46 @@ function onModeChange() {
   }
 }
 
-function bump(id: number, delta: number) {
+function onWeightInput(id: number, e: Event) {
   touched.value = true
-  const key = String(id)
-  weights.value = { ...weights.value, [key]: Math.max(0, (weights.value[key] ?? 0) + delta) }
+  const n = Math.max(0, Math.floor(Number((e.target as HTMLInputElement).value) || 0))
+  weights.value = { ...weights.value, [String(id)]: n }
 }
 
-function digits(e: Event, allowNegative: boolean): number {
-  const raw = (e.target as HTMLInputElement).value
-  const neg = allowNegative && raw.trim().startsWith('-')
-  const n = Number(raw.replace(/\D/g, '') || 0)
-  return neg ? -n : n
+function normalize(raw: string): { text: string; value: number } {
+  const neg = raw.trim().startsWith('-')
+  const d = raw.replace(/\D/g, '')
+  const n = d ? Number(d) : 0
+  const sign = neg ? '-' : ''
+  return { text: d ? sign + n.toLocaleString('en-US') : sign, value: neg ? -n : n }
 }
 
 function onExactInput(id: number, e: Event) {
   touched.value = true
-  exact.value = { ...exact.value, [String(id)]: digits(e, true) }
+  const { text, value } = normalize((e.target as HTMLInputElement).value)
+  typing.value = { ...typing.value, [`e${id}`]: text }
+  exact.value = { ...exact.value, [String(id)]: value }
 }
 
 function onAdjInput(id: number, e: Event) {
   touched.value = true
-  const v = digits(e, true)
+  const { text, value } = normalize((e.target as HTMLInputElement).value)
+  typing.value = { ...typing.value, [`a${id}`]: text }
   const next = { ...adjustments.value }
-  if (v === 0) delete next[String(id)]
-  else next[String(id)] = v
+  if (value === 0) delete next[String(id)]
+  else next[String(id)] = value
   adjustments.value = next
 }
 
 const exactDisplay = (id: number) => {
+  const held = typing.value[`e${id}`]
+  if (held !== undefined) return held
   const v = exact.value[String(id)] ?? 0
   return v ? v.toLocaleString('en-US') : ''
 }
 const adjDisplay = (id: number) => {
+  const held = typing.value[`a${id}`]
+  if (held !== undefined) return held
   const v = adjustments.value[String(id)]
   return v ? v.toLocaleString('en-US') : ''
 }
@@ -271,24 +289,24 @@ defineExpose({
 .mode-toggle { border: 1px solid rgba(0, 0, 0, 0.12); border-radius: 8px; }
 
 /* 375px 下的列宽预算：左右各 16 padding → 343 可用。
-   固定列 84+66+84 = 234，名字列拿剩下的并在必要时省略号收缩。 */
+   比例改成数字框之后不用再塞两个 40px 的按钮，省出来的宽度给调整列。 */
 .head-row { padding-bottom: 2px; }
 .name-col { min-width: 0; }
-.weight-col { width: 112px; }
-.adj-col { width: 62px; }
+.weight-col { width: 62px; padding-right: 12px; }
+.adj-col { width: 92px; }
 .exact-col { width: 150px; }
 .share-col { width: 78px; text-align: right; font-variant-numeric: tabular-nums; font-size: 15px; }
 
 .member-row { min-height: 48px; }
-/* 44px 说的是**按钮本身**，不是整行 —— 原来 ± 只有 24×24，
-   三行挤在一起，拇指很容易点到相邻的那个甚至相邻成员 */
-.member-row :deep(.q-btn) { min-width: 40px; min-height: 40px; }
 .name { font-size: 15px; }
-.weight {
-  min-width: 24px;
+/* 数字框本身要够高：44px 说的是**可点区域**，输入框太矮拇指点不准 */
+.weight-input {
   text-align: center;
-  font-variant-numeric: tabular-nums;
-  font-size: 16px;
+  padding-right: 0;
+}
+.weight-input::-webkit-outer-spin-button,
+.weight-input::-webkit-inner-spin-button {
+  opacity: 1;                 /* 桌面上把上下箭头显出来，手机上本来就没有 */
 }
 .num-input {
   width: 100%;
@@ -299,6 +317,7 @@ defineExpose({
   text-align: right;
   font-size: 15px;
   padding: 4px 2px;
+  height: 40px;              /* 行高 48，输入框占满大半 —— 拇指点得准 */
   font-variant-numeric: tabular-nums;
   color: inherit;
 }

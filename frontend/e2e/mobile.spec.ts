@@ -600,3 +600,28 @@ test('账目里点固定费去固定费那一屏，点日常开销才进单笔�
   await expect(page).toHaveURL(/\/entry\/\d+/)
   await expect(page.getByText('改这一笔')).toBeVisible()
 })
+
+test('调整额输得进负数，比例是个能直接打的数字框', async ({ page }) => {
+  await login(page)
+  await page.locator('input.amount').fill('9000')
+  await page.getByRole('button', { name: '日用品' }).click()
+
+  // **一个键一个键地敲**：光打一个减号时数值还是 0，原来输入框会被重绘成空，
+  // 负号当场消失，于是「a 少担 1000」根本输不进去 —— 而它正是这个字段的用途。
+  // 注意不能用 fill()：那是整串一次性塞进去，绕过了出问题的那条路。
+  const adj = page.locator('.adj-col .num-input').first()
+  await adj.click()
+  await page.keyboard.type('-')
+  await expect(adj, '减号被吃掉了').toHaveValue('-')
+  await page.keyboard.type('1500')
+  await expect(adj).toHaveValue('-1,500')
+
+  const shares = () =>
+    page.locator('.member-row .share-col').allTextContents()
+      .then((ts) => ts.map((t) => Number(t.replace(/[^\d-]/g, ''))))
+  expect((await shares()).sort((a, b) => a - b)).toEqual([2000, 3500, 3500])
+
+  // 比例直接打数字，不用左右加减
+  await page.locator('.weight-input').nth(2).fill('0')
+  expect((await shares()).sort((a, b) => a - b)).toEqual([0, 3750, 5250])
+})
