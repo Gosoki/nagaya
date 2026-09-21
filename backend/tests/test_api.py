@@ -181,17 +181,42 @@ def test_password_is_yours_alone(client, auth, members) -> None:
 
 def test_left_on_can_be_cleared(client, auth, members) -> None:
     """退出日填错了要能清掉，不然那个人永远回不来。"""
-    _, other, *_ = members
-    assert client.patch(f"/api/members/{other.id}", headers=auth,
+    me, *_ = members
+    assert client.patch(f"/api/members/{me.id}", headers=auth,
                         json={"left_on": "2026-08-31"}).json()["left_on"] == "2026-08-31"
-    assert client.patch(f"/api/members/{other.id}", headers=auth,
+    assert client.patch(f"/api/members/{me.id}", headers=auth,
                         json={"left_on": None}).json()["left_on"] is None
 
 
 def test_renaming_to_a_taken_name_is_409_like_create(client, auth, members) -> None:
     me, other, *_ = members
-    r = client.patch(f"/api/members/{other.id}", headers=auth, json={"name": me.name})
+    r = client.patch(f"/api/members/{me.id}", headers=auth, json={"name": other.name})
     assert r.status_code == 409, "重名在 POST 那边是 409，PATCH 不该是 500"
+
+
+def test_identity_fields_are_self_only(client, auth, members) -> None:
+    """**没法自己恢复的动作只能自己做。**
+
+    密码本来就挡了，理由写得明明白白「改掉别人的密码是一个没法自己恢复的动作」——
+    可改掉别人的**登录名**是同一件事：实测把 go 的 name 改掉之后，
+    他用自己的用户名登录直接 401，而且他没有任何自救手段。
+    joined_on / left_on 更直接：一改，那个人立刻进出分摊名单，钱当场算错。
+    """
+    _, other, *_ = members
+    for patch in ({"name": "hacked"}, {"left_on": "2026-01-01"}, {"joined_on": "2020-01-01"},
+                  {"password": "whatever123"}):
+        r = client.patch(f"/api/members/{other.id}", headers=auth, json=patch)
+        assert r.status_code == 403, f"{patch} 不该被放行"
+    # 昵称和颜色不在此列：改错了当事人自己看得见、也改得回来
+    assert client.patch(f"/api/members/{other.id}", headers=auth,
+                        json={"display_name": "小二"}).status_code == 200
+
+
+def test_a_member_without_a_password_cannot_be_created(client, auth) -> None:
+    """不给密码建出来的账号**永远登不进来**：密码只能自己改，而他登不进来就改不了，
+    别人替他改会被上一条挡下 —— 谁也解不开。"""
+    assert client.post("/api/members", headers=auth,
+                       json={"name": "ghost"}).status_code == 400
 
 
 def test_a_broken_default_rule_is_rejected_on_the_spot(client, auth, members) -> None:

@@ -32,6 +32,10 @@ def create_member(
     if session.exec(select(Member).where(Member.name == body.name)).first():
         raise HTTPException(status.HTTP_409_CONFLICT, f"登录名 {body.name} 已存在")
 
+    # 不给密码建出来的账号**永远登不进来**：密码只能自己改，而他登不进来就改不了，
+    # 别人替他改会被上面那条挡下 —— 谁也解不开。建的时候就要有
+    if not body.password:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "新成员要给一个初始密码")
     data = body.model_dump(exclude_none=True, exclude={"password"})
     data.setdefault("display_name", body.name)
     member = Member(**data)
@@ -54,11 +58,21 @@ def update_member(
     if member is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "成员不存在")
 
+    # **这几样只能改自己的。** 这屋里三个人是互相信任的，但「信任」不该等于
+    # 「谁都能把别人锁在门外」—— 它们都是**没法自己恢复**的动作：
+    #   password / name  改掉之后那个人再也登不进来（实测：改掉别人的 name，
+    #                    他用自己的用户名登录直接 401，而且他没有任何自救手段）
+    #   joined_on / left_on  一改，那个人立刻进出分摊名单，钱当场算错
+    # 昵称、颜色、语言、排序不在此列：那些改错了当事人自己看得见、也改得回来
+    private = [k for k in ("name", "joined_on", "left_on")
+               if k in body.model_fields_set and getattr(body, k) is not None]
     if body.password is not None:
-        # **密码只能自己改。** 这屋里三个人是互相信任的，但「信任」不该等于
-        # 「谁都能把别人锁在门外」—— 改掉别人的密码是一个没法自己恢复的动作
-        if member.id != me.id:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "只能改自己的密码")
+        private.append("password")
+    if private and member.id != me.id:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, f"只能改自己的：{', '.join(private)}"
+        )
+    if body.password is not None:
         # 已经设过密码的，得先报出旧的。手机搁桌上没锁屏，别人顺手就能改掉
         if member.password_hash and not verify_password(body.old_password or "", member.password_hash):
             raise HTTPException(status.HTTP_403_FORBIDDEN, "当前密码不对")

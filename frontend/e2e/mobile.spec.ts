@@ -1304,3 +1304,79 @@ test('点头像把人排除出这笔，再点恢复（原来是几就还回几�
   await page.locator('.name-col').first().click()
   expect(await weights(), '恢复该还回 2，不是 1').toBe('2/1/1')
 })
+
+test('删掉一笔账：能撤销，撤销之后余额原样回来', async ({ page }) => {
+  await login(page)
+  const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
+  const balances = async () =>
+    (await (await page.request.get('/api/balances', { headers })).json()).balances
+
+  const before = await balances()
+  const cats = await (await page.request.get('/api/categories', { headers })).json()
+  const daily = cats.find((c: { monthly: boolean; archived: boolean }) => !c.monthly && !c.archived)
+  const made = await (
+    await page.request.post('/api/entries', {
+      headers,
+      data: { kind: 'expense', date: '2026-09-21', amount_jpy: 3_000, payer_id: 1, category_id: daily.id, title: 'E2E待删' },
+    })
+  ).json()
+  const afterCreate = await balances()
+  expect(afterCreate, '记了一笔，余额总得动').not.toEqual(before)
+
+  // 这笔是绕过前端直接 POST 的，账目列表是开 App 那一刻拉的 —— 重开一次才看得见
+  await page.goto('/')
+  // 按真实路径点进去（账目列表 → 那一条），不是直接 goto 编辑页 ——
+  // 直接 goto 会让随后的 router.back() 跨文档整页重载，把 toast 冲掉
+  await page.getByRole('tab', { name: '更多' }).click()
+  await page.getByRole('tab', { name: '流水' }).click()
+  await page.locator('.entry-row').filter({ hasText: 'E2E待删' }).first().click()
+  await expect(page.getByText('改这一笔')).toBeVisible()
+  await page.getByRole('button', { name: '删除' }).click()
+  await page.getByRole('button', { name: '确定' }).click()
+
+  // **删掉一笔真金白银的账必须有后悔药。** 后端一直是软删，restore 端点也一直在，
+  // 只是前端从没接过 —— 对比一下：删一个固定费**项目**（只是归档分类）反而有 6 秒撤销
+  const toast = page.locator('.q-notification').filter({ hasText: '已删掉' })
+  await expect(toast).toBeVisible()
+  // 删掉了：余额回到记账之前
+  await expect.poll(balances, { message: '删掉之后余额该回到记账前' }).toEqual(before)
+
+  await toast.getByRole('button', { name: '撤销' }).click()
+  await expect(page.locator('.q-notification').filter({ hasText: '已撤销删除' })).toBeVisible()
+  // 撤销了：那笔钱一分不差地回来
+  await expect.poll(balances, { message: '撤销之后每个人的余额要一分不差地回来' }).toEqual(afterCreate)
+
+  await page.request.delete(`/api/entries/${made.id}`, { headers })   // 收尾
+})
+
+test('出账后改一笔：那张账单要打出「被改过」，而且复制出来的文本里也有', async ({ page }) => {
+  await login(page)
+  const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
+  const cats = await (await page.request.get('/api/categories', { headers })).json()
+  const daily = cats.find((c: { monthly: boolean; archived: boolean }) => !c.monthly && !c.archived)
+  await page.request.post('/api/entries', {
+    headers,
+    data: { kind: 'expense', date: '2026-09-21', amount_jpy: 6_000, payer_id: 1, category_id: daily.id, title: 'E2E改历史' },
+  })
+  const st = await (await page.request.post('/api/statements', { headers })).json()
+
+  // 出账之后把那一笔改掉 —— 这是「不锁历史」允许的，但必须看得见
+  const mine = (await (await page.request.get(`/api/entries?statement_id=${st.id}&limit=50`, { headers })).json())
+    .find((e: { title: string }) => e.title === 'E2E改历史')
+  await page.request.patch(`/api/entries/${mine.id}?version=${mine.version}`,
+    { headers, data: { amount_jpy: 9_000 } })
+
+  await page.goto('/bill')
+  await page.getByRole('tab', { name: '已出账' }).click()
+  await expect(page.locator('.head .pick')).toContainText(st.label)
+  // **这条横幅是「不锁历史但改动必须可见」唯一的凭证** —— 它被 class="hidden" 罩住过一次
+  const banner = page.locator('.q-banner').filter({ hasText: '出账后被改过' })
+  await expect(banner).toBeVisible()
+  await expect(banner).toContainText('6,000')     // 当初
+  await expect(banner).toContainText('9,000')     // 现在
+
+  // 复制出去的那份才是「用户手里那份」，屏幕上有的它也得有
+  await page.getByRole('button', { name: '复制账单' }).click()
+  const text = await page.evaluate(() => navigator.clipboard.readText().catch(() => ''))
+  if (text) expect(text, '复制文本里也要说明这张被改过').toContain('出账后被改过')
+})

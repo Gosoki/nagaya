@@ -70,7 +70,9 @@ class Member(SQLModel, table=True):
         sa_column=Column(LargeBinary),
         description=(
             "头像图片（WebP）。**存库里不存目录**：压完才几 KB，三个人加起来不到 50KB，"
-            "而备份本来就是拷贝这个 .db —— 换成目录就得再管一套备份和权限。"
+            "而备份是拷整个 data/ 目录 —— 换成目录就得再管一套备份和权限。"
+            "（**别只拷 nagaya.db**：开着 WAL，没 checkpoint 的数据全在 nagaya.db-wal 里，"
+            "实测主文件只有 4096 字节、单拷出来是个零张表的空库。）"
         ),
     )
     avatar_version: int = Field(default=0, description="改一次加一，前端拿它做缓存键")
@@ -175,12 +177,16 @@ class Statement(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     label: str = Field(index=True, description="'9/28 出账'，给人看的")
     cut_at: dt.datetime = Field(default_factory=now_utc, index=True, description="划线的那一刻")
-    covers_from: Optional[dt.date] = Field(default=None, description="这张单子里最早一笔的日期，展示用")
-    covers_to: Optional[dt.date] = Field(default=None, description="最晚一笔的日期，展示用")
+    #: 覆盖期的**起点是上一次出账那天**，不是这张单子里最早那笔的日期。
+    #: 「7 月那张从 7/2 开始」是错觉 —— 7/1 只是没人花钱，它管的是 6/30 出账之后的一切。
+    #: 头一张没有上一次，才从第一笔算起。见 bill._covers_from
+    covers_from: Optional[dt.date] = Field(default=None, description="覆盖期起点：上次出账那天")
+    covers_to: Optional[dt.date] = Field(default=None, description="这张单子里最晚一笔的日期")
     cut_by: Optional[int] = Field(default=None, foreign_key="member.id")
-    #: 出完账就锁上，防的是「手滑改了已经发给室友的那张账单」。
-    #: 但**留了明路**：详情页上「解锁修改」一点就开，改完那张单子会自己标出
-    #: 「出账后被改过」—— 锁不该变成想补录也没门。
+    #: 出账**不锁定任何东西**（D24）。余额是全局累计的，事后改一笔已出账的账，
+    #: 差额会原样出现在下一张的「上期结转」里，钱不会算错 —— 所以不需要「关账」这道门。
+    #: 需要的只是把「这一期在出账后被改过」显示出来，让结转解释得清。
+    #: 曾短暂加过「锁 + 解锁」，多一道门却保护不了钱，已经整套删掉了。
     snapshot_json: Optional[dict[str, Any]] = Field(
         default=None,
         sa_column=Column(JSON),

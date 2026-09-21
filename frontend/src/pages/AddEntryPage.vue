@@ -387,7 +387,8 @@ function removeEntry() {
         return
       }
       await ledger.refresh().catch(() => {})
-      goBack()
+      // 先弹再走。直接用地址打开这一屏时（刷新、PWA 快捷方式），goBack() 会跨文档，
+      // 整页一重载这条撤销就没了 —— 而它正是这次删除唯一的后悔药
       $q.notify({
         type: 'positive',
         message: t('entry.deleted'),
@@ -408,6 +409,7 @@ function removeEntry() {
           },
         ],
       })
+      goBack()
     },
   )
 }

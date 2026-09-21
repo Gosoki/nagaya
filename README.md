@@ -87,9 +87,9 @@ cd frontend && npm run build && cd ../backend && ./run.sh
 ## 测试
 
 ```bash
-cd backend  && .venv/bin/python -m pytest   # 111 条：算法 / 账本 / 账单 / API
-cd frontend && npm test                     # 52 条：分摊引擎（对后端 fixture）+ 若干守卫
-./run-e2e.sh                                # 32 条：375px 手机视口，跑前重置库、跑完恢复
+cd backend  && .venv/bin/python -m pytest   # 164 条：算法 / 账本 / 账单 / API / 边界输入 / 随机操作序列
+cd frontend && npm test                     # 86 条：分摊引擎（对后端 fixture）+ 若干守卫
+./run-e2e.sh                                # 44 条：375px 手机视口，跑前重置库、跑完恢复
 ```
 
 `run-e2e.sh` 会**先把开发库重置到确定基线**再跑 —— E2E 是真往库里写的，
@@ -119,10 +119,11 @@ cd frontend && npm test                     # 52 条：分摊引擎（对后端 
 
 能用了，日常记账 / 出账 / 结算这条主线是通的。**还缺的：**
 
-- **设置面板**。结算日、余数归谁、最少转账方案开关、默认分摊比例等等都在数据库里、
-  接口也有，就是没有界面 —— 现在改它们得敲接口。
 - **成员管理界面**。加人减人后端支持（成员带「入住日 / 搬出日」，分摊按那笔账当天
   在籍的人算），同样只差一屏。
+- **备份**。`backup_path` 这个设置项摆在面板上，但**备份功能一行代码都没写**。
+  在它真做出来之前：手动拷**整个 `backend/data/` 目录**，不能只拷 `nagaya.db` ——
+  开着 WAL，没 checkpoint 的数据全在 `nagaya.db-wal` 里。
 - **数据库迁移**。Alembic 配好了但没启用 —— 设计阶段表结构还在改，用 `create_all`；
   录真实账目之前切过去（见 `backend/alembic/versions/README.md`）。
 
