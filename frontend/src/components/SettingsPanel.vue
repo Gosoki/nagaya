@@ -8,18 +8,31 @@
 <template>
   <div>
     <ProfileCard />
+    <!-- 系统设置默认收起来：这些是「定一次就不再动」的规矩，
+         而这一页天天要来的是上面的个人设置。摊开着只会把它挤到屏幕外 -->
     <div class="bill-section">
-      <q-item dense class="section-head">
-        <q-item-section>{{ t('nav.settings') }}</q-item-section>
-        <q-item-section side class="text-caption" :class="failed ? 'text-negative' : 'text-grey-6'">
+      <q-item clickable dense class="section-head" @click="open = !open">
+        <q-item-section>{{ t('settings.system') }}</q-item-section>
+        <q-item-section
+          v-if="open"
+          side
+          class="text-caption"
+          :class="failed ? 'text-negative' : 'text-grey-6'"
+        >
           <div class="row items-center">
             <q-spinner v-if="busy" size="14px" class="q-mr-xs" />
             {{ busy ? t('monthly.saving') : failed ? t('monthly.unsaved', { n: failed }) : t('monthly.autoSaved') }}
           </div>
         </q-item-section>
+        <q-item-section v-else side class="text-caption text-grey-6">
+          {{ t('settings.count', { n: rows.length }) }}
+        </q-item-section>
+        <q-item-section side>
+          <q-icon :name="open ? 'expand_less' : 'expand_more'" color="grey-5" size="20px" />
+        </q-item-section>
       </q-item>
 
-      <q-list separator>
+      <q-list v-if="open" separator>
         <q-item v-for="s in rows" :key="s.key" class="setting-row" :data-key="s.key">
           <q-item-section>
             <q-item-label class="row items-center no-wrap">
@@ -157,6 +170,8 @@ const meta = useMeta()
 
 const busy = ref(false)
 const failed = ref(0)
+/** 默认收起。定一次就不动的东西，不该天天占着屏幕 */
+const open = ref(false)
 
 onMounted(() => {
   // meta 里已经有一份，但设置面板要的是最新的（别的手机可能刚改过）

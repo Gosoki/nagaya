@@ -109,6 +109,7 @@ export default {
     passwordChanged: '密码改好了',
   },
   settings: {
+    system: '系统设置', count: '{n} 项',
     label: {
       default_payer_id: '默认垫付人',
       remainder_to: '余数归谁',

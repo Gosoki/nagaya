@@ -109,6 +109,7 @@ export default {
     passwordChanged: 'パスワードを変更しました',
   },
   settings: {
+    system: 'システム設定', count: '{n} 項目',
     label: {
       default_payer_id: '既定の立替者',
       remainder_to: '端数を誰が',

@@ -927,6 +927,9 @@ test('设置面板：照后端的声明渲染，改完当场落库', async ({ pa
 
   await page.getByRole('tab', { name: '更多' }).click()
   await page.getByRole('tab', { name: '设置' }).click()
+  // 系统设置默认收起 —— 这一页天天要来的是上面的个人设置
+  await expect(page.locator('.setting-row')).toHaveCount(0)
+  await page.getByText('系统设置').click()
   // 面板不写死项目：后端声明里有几条就渲染几条
   const spec = await (await page.request.get('/api/settings', { headers })).json()
   await expect(page.locator('.setting-row')).toHaveCount(spec.length)
