@@ -15,6 +15,7 @@ const read = (p: string) => readFileSync(fileURLToPath(new URL(p, import.meta.ur
 
 const routerSrc = read('../src/router/index.ts')
 const layoutSrc = read('../src/layouts/MainLayout.vue')
+const tabsSrc = read('../src/components/BillTabs.vue')
 
 /** 路由表里每条 { path: 'x', name: 'y' } */
 const routes = [...routerSrc.matchAll(/path:\s*'([^']*)',\s*name:\s*'([^']+)'/g)].map(
@@ -32,8 +33,17 @@ describe('底栏高亮覆盖到整个分区', () => {
 
   it('每一条账单路由都登记在「账单」这一格下面', () => {
     const billRoutes = routes.filter((r) => r.path.startsWith('bill')).map((r) => r.name)
-    expect(billRoutes.length).toBeGreaterThanOrEqual(3)
+    expect(billRoutes.length).toBeGreaterThanOrEqual(1)
     for (const name of billRoutes) expect(billSection).toContain(name)
+  })
+
+  it('三个页签不是路由：点它们不该改地址', () => {
+    // 页签走路由的代价是实打实的：换一页就换一个 route record，组件跟着重建、
+    // 返回键里堆出一串账单页。这里盯死「页签＝状态」这个决定
+    expect(tabsSrc).not.toContain('q-route-tab')
+    expect(tabsSrc).not.toMatch(/:to=/)
+    expect(tabsSrc).toContain('v-model="bills.tab"')
+    expect(routes.filter((r) => r.path.startsWith('bill'))).toHaveLength(1)
   })
 
   it('固定费那一屏也算账单分区 —— 它只能从账单页进去', () => {

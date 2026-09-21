@@ -68,7 +68,7 @@ export default {
     others: '本期其他',
     othersEmpty: '这期还没有别的开销',
     cutDoneTitle: '出账完成',
-    cutDoneHint: '这一批锁定了。把下面这些告诉大家，转完钱点一下记账。',
+    cutDoneHint: '这一批归到这张单子上了。把下面这些告诉大家，转完钱点一下记账。',
     settledBadge: '已结清',
     statementItem: '出了一次账单',
     lastCut: '上次 {label}',

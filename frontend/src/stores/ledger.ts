@@ -3,6 +3,7 @@ import { ref } from 'vue'
 
 import { api } from 'src/api/client'
 import type { Entry, EntryPayload } from 'src/api/types'
+import { useBills } from 'src/stores/bills'
 
 export const useLedger = defineStore('ledger', () => {
   const entries = ref<Entry[]>([])
@@ -36,6 +37,9 @@ export const useLedger = defineStore('ledger', () => {
     entries.value = [saved, ...entries.value]
     const b = await api.get<{ balances: Record<string, number> }>('/api/balances')
     balances.value = b.balances
+    // 账单那几页缓存着，记完这笔它们就旧了。后台刷，不清空 ——
+    // 清空的话下次点过去又要白屏等一遍
+    useBills().refreshCached()
     return saved
   }
 
@@ -45,6 +49,7 @@ export const useLedger = defineStore('ledger', () => {
     entries.value = entries.value.map((e) => (e.id === id ? saved : e))
     const b = await api.get<{ balances: Record<string, number> }>('/api/balances')
     balances.value = b.balances
+    useBills().refreshCached()
     return saved
   }
 
@@ -53,6 +58,7 @@ export const useLedger = defineStore('ledger', () => {
     entries.value = entries.value.filter((e) => e.id !== entry.id)
     const b = await api.get<{ balances: Record<string, number> }>('/api/balances')
     balances.value = b.balances
+    useBills().refreshCached()
   }
 
   return { entries, balances, loading, prevCutAt, prevLabel, refresh, create, update, remove }

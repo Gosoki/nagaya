@@ -20,11 +20,10 @@ export const router = createRouter({
         { path: 'monthly/:statementId?', name: 'monthly', component: () => import('src/pages/MonthlyPage.vue') },
         // 账单就是第二个 Tab。它已经包含了每人的应担/已垫付/应收应付和转账方案，
         // 原来的「余额」页是它的子集，留着只会让人问「这两个有什么区别」
+        // 账单三页（未出账/已出账/以前）**共用这一个地址**，点页签只换状态不换 URL。
+        // :statementId 只是个入口：从账目或固定费屏点进某一张时带着它进来，
+        // 页面收下之后会把地址 replace 回 /bill
         { path: 'bill/:statementId?', name: 'bill', component: () => import('src/pages/BillPage.vue') },
-        // 静态段排在动态段前面（vue-router 自己按具体程度排，不看注册顺序）
-        // bill/current ＝ 最近出的那一张（还在收钱的那张），id 由页面自己查
-        { path: 'bill/current', name: 'bill-current', component: () => import('src/pages/BillPage.vue') },
-        { path: 'bill/past', name: 'bill-past', component: () => import('src/pages/BillHistoryPage.vue') },
       ],
     },
   ],

@@ -116,31 +116,13 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { ApiError, api } from 'src/api/client'
+import type { MonthlyData, MonthlyRow } from 'src/api/types'
 import SplitEditor from 'src/components/SplitEditor.vue'
 import { useAuth } from 'src/stores/auth'
+import { useBills } from 'src/stores/bills'
 import { useMeta } from 'src/stores/meta'
 
-interface ApiRow {
-  category_id: number
-  name: string
-  icon: string
-  color: string
-  default_rule_json: Record<string, unknown> | null
-  entry_id: number | null
-  amount: number | null
-  version: number | null
-  rule: Record<string, unknown> | null
-  date: string | null
-  hint: number | null
-  hint_label: string | null
-  /** 本期这个分类一共有几笔。>1 说明这一行没显示全 */
-  entry_count: number
-}
-interface MonthlyData {
-  default_date: string
-  rows: ApiRow[]
-}
-interface Row extends ApiRow {
+interface Row extends MonthlyRow {
   text: string
   dirty: boolean
   rule_override: Record<string, unknown> | null
@@ -159,6 +141,7 @@ const historic = computed(() => props.statementId != null)
 const { t } = useI18n()
 const $q = useQuasar()
 const meta = useMeta()
+const bills = useBills()
 const auth = useAuth()
 
 const data = ref<MonthlyData | null>(null)
@@ -179,11 +162,11 @@ const valueOf = (row: Row) => Number(row.text.replace(/\D/g, '')) || 0
  * 全部清空、退回灰色占位 —— 而灰色数字就在同一个位置，用户唯一能察觉的
  * 线索是字体颜色。保存失败后的重载也是同一个坑。
  */
-async function load() {
+/** 看的是哪一张 —— 和账单页共用同一套缓存 key */
+const cacheKey = computed(() => (historic.value ? `st:${props.statementId}` : 'draft'))
+
+function build(d: MonthlyData) {
   const keep = new Map(rows.value.filter((r) => r.dirty).map((r) => [r.category_id, r]))
-  const d = await api.get<MonthlyData>(
-    historic.value ? `/api/monthly?statement_id=${props.statementId}` : '/api/monthly',
-  )
   data.value = d
   rows.value = d.rows.map((r) => {
     const held = keep.get(r.category_id)
@@ -197,21 +180,40 @@ async function load() {
       payer_id: null,
     })
   })
+}
+
+async function load() {
+  build(await bills.loadMonthly(cacheKey.value))
   await hydratePayers()
 }
 
-/** 已录行的原始付款人：分摊预览要按它算余数，否则预览和落库差 1 円 */
+/**
+ * 已录行的原始付款人：分摊预览要按它算余数，否则预览和落库差 1 円。
+ *
+ * 账单页早就把这张单子的明细取过了，能直接借来用 —— 借得到就一个请求都不发，
+ * 面板整块同步出来。借不到（比如直接进固定费那一屏）才自己去取。
+ */
 async function hydratePayers() {
   const ids = rows.value.filter((r) => r.entry_id !== null).map((r) => r.entry_id)
   if (!ids.length) return
-  const entries = await api.get<{ id: number; payer_id: number }[]>('/api/entries?limit=200')
+  const shared = bills.views[cacheKey.value]?.entries
+  const entries =
+    shared ?? (await api.get<{ id: number; payer_id: number }[]>('/api/entries?limit=200'))
   const byId = new Map(entries.map((e) => [e.id, e.payer_id]))
   for (const r of rows.value) {
     if (r.entry_id !== null) r.payer_id = byId.get(r.entry_id) ?? null
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  // 缓存先上屏，再后台校正。load() 本身会保留还没保存的输入，所以校正不会抹掉手输的值
+  const cached = bills.monthly[cacheKey.value]
+  if (cached) {
+    build(cached)
+    void hydratePayers()
+  }
+  void load()
+})
 
 function onInput(row: Row, e: Event) {
   const digits = (e.target as HTMLInputElement).value.replace(/\D/g, '')

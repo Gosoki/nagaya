@@ -2,8 +2,8 @@
      两处都列会让人以为是两张。每行直接给金额和结清状态，翻旧账最常问的
      就是「那个月多少钱、转清了没」，不该点进去才看得到。 -->
 <template>
-  <q-page v-touch-swipe.capture.mouse.mouseCapture.horizontal="onSwipe" class="q-pb-xl">
-    <div v-if="!statements.length" class="text-center text-grey-6 q-mt-xl">
+  <div class="q-pb-xl">
+    <div v-if="!statements.length && bills.statements" class="text-center text-grey-6 q-mt-xl">
       {{ t('bill.noPast') }}
     </div>
 
@@ -33,31 +33,28 @@
         <q-item-section side><q-icon name="chevron_right" color="grey-5" size="18px" /></q-item-section>
       </q-item>
     </q-list>
-  </q-page>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
 
-import { api } from 'src/api/client'
-import type { Statement } from 'src/api/types'
-import { justSwiped, useBillSwipe } from 'src/composables/billSwipe'
+import { justSwiped } from 'src/composables/billSwipe'
 import { formatYen } from 'src/i18n'
+import { useBills } from 'src/stores/bills'
 
 const { t } = useI18n()
-const router = useRouter()
-const onSwipe = useBillSwipe()
-const statements = ref<Statement[]>([])
+const bills = useBills()
+const emit = defineEmits<{ open: [id: number] }>()
 
-onMounted(async () => {
-  // 最近那一张归「已出账」管，这里从第二张开始
-  statements.value = (await api.get<Statement[]>('/api/statements')).slice(1)
-})
+// 最近那一张归「已出账」管，这里从第二张开始
+const statements = computed(() => (bills.statements ?? []).slice(1))
+// 列表走共用缓存：账单页已经取过就直接上屏，这一跳不白屏。照样后台校正
+onMounted(() => void bills.loadStatements().catch(() => {}))
 
 function open(id: number) {
   if (justSwiped()) return       // 刚划完那一下不是点击，见 billSwipe.ts
-  void router.push({ name: 'bill', params: { statementId: String(id) } })
+  emit('open', id)
 }
 </script>

@@ -60,6 +60,65 @@ export interface Statement {
   settled: boolean
 }
 
+/** 账单上的一行人。钱是全局累计的，这里拆成「期初 + 本期 + 已收付」 */
+export interface BillRow {
+  member_id: number
+  opening: number
+  owed: number
+  paid: number
+  transferred_out: number
+  transferred_in: number
+  closing: number
+}
+
+export interface BillTransfer { from_id: number; to_id: number; amount: number }
+
+/** 一张账单的全貌。草稿（还没出账的流水）和出过的单子是同一个形状 */
+export interface Bill {
+  statement_id: number | null
+  label: string | null
+  is_draft: boolean
+  cut_at: string | null
+  covers_from: string | null
+  covers_to: string | null
+  edited_after_cut: { count: number; frozen_total: number | null; live_total: number } | null
+  prev_cut_at: string | null
+  prev_label: string | null
+  days_since_prev_cut: number | null
+  suggest_monthly: boolean
+  settled: boolean
+  settled_transfers: boolean[]
+  total_expense: number
+  total_income: number
+  entry_count: number
+  members: BillRow[]
+  transfers: BillTransfer[]
+  simplified: boolean
+}
+
+/** 固定费面板的一行。`amount === null` ＝ 本期还没录，灰色占位不算数 */
+export interface MonthlyRow {
+  category_id: number
+  name: string
+  icon: string
+  color: string
+  default_rule_json: Record<string, unknown> | null
+  entry_id: number | null
+  amount: number | null
+  version: number | null
+  rule: Record<string, unknown> | null
+  date: string | null
+  hint: number | null
+  hint_label: string | null
+  /** 本期这个分类一共有几笔。>1 说明这一行没显示全 */
+  entry_count: number
+}
+
+export interface MonthlyData {
+  default_date: string
+  rows: MonthlyRow[]
+}
+
 export interface Setting {
   key: string
   value: unknown

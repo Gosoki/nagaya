@@ -47,6 +47,7 @@ import { useRoute, useRouter } from 'vue-router'
 import BillTabs from 'src/components/BillTabs.vue'
 import DraftBanner from 'src/components/DraftBanner.vue'
 import { useAuth } from 'src/stores/auth'
+import { useBills } from 'src/stores/bills'
 import { useDrafts } from 'src/stores/drafts'
 import { useLedger } from 'src/stores/ledger'
 import { useMeta } from 'src/stores/meta'
@@ -54,17 +55,18 @@ import { useMeta } from 'src/stores/meta'
 const { t } = useI18n()
 const meta = useMeta()
 const auth = useAuth()
+const bills = useBills()
 const ledger = useLedger()
 const drafts = useDrafts()
 const route = useRoute()
 const router = useRouter()
 
 /**
- * 「账单」这一格代表的是一整个分区，不只是 /bill 那一页：
- * 三个页签、从「以前」点进的某一张、还有固定费那一屏，站在哪儿它都该亮着。
+ * 「账单」这一格代表的是一整个分区，不只是 /bill 那一页 —— 固定费那一屏
+ * 只能从账单页进去，站在那儿底栏也该亮着「账单」。
  * 新加账单相关的路由时记得加进来 —— test/nav-section.spec.ts 会盯着。
  */
-const BILL_SECTION = ['bill', 'bill-current', 'bill-past', 'monthly']
+const BILL_SECTION = ['bill', 'monthly']
 
 const navSection = computed(() => {
   const name = String(route.name ?? '')
@@ -74,16 +76,14 @@ const navSection = computed(() => {
 
 /** 点已经亮着的那一格：回到这一分区的首页（站在首页上就什么都不做） */
 function go(name: string) {
+  // 账单那一节没有「首页路由」可回 —— 它三页共用一个地址。
+  // 点底栏的账单＝回到页签那层，而不是停在上次翻开的某张旧账单上
+  if (name === 'bill') bills.detail = null
   if (route.name !== name) void router.push({ name })
 }
 
-/** 账单那三页才显示页签。从「以前」点进某一张（/bill/3）时换成返回条，不算 */
-const onBillTabs = computed(
-  () =>
-    (route.name === 'bill' && !route.params.statementId) ||
-    route.name === 'bill-current' ||
-    route.name === 'bill-past',
-)
+/** 账单那三页才显示页签。翻某一张旧账单时页面自己换成返回条，这里不显示 */
+const onBillTabs = computed(() => route.name === 'bill' && bills.detail === null)
 
 onMounted(async () => {
   if (!auth.me) await auth.restore()

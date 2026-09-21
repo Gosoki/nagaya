@@ -237,6 +237,15 @@ test('出账单：划一条线，之后记的账进下一张', async ({ page }) 
   const withMonthly = page.locator('.q-dialog .q-checkbox')
   if ((await withMonthly.getAttribute('aria-checked')) !== 'true') await withMonthly.click()
   await page.getByRole('button', { name: '确定' }).click()
+
+  // 出完账立刻弹出「谁给谁多少」。**以前这个框根本看不见** —— 那会儿出完账要
+  // router.push 去另一条路由，整个页面连着这个框一起被卸载掉了。
+  // 现在三页共用一个地址、不走路由，它才真的留得住
+  // 断言和点击都锁到这个框上：刚关掉的那个确认框还挂在 DOM 里做退场动画，
+  // 用 .q-dialog 直接找会同时命中两个
+  const cutDone = page.locator('.q-dialog').filter({ hasText: '出账完成' })
+  await expect(cutDone).toBeVisible()
+  await cutDone.getByRole('button', { name: '确定' }).click()
   await expect(page.locator('.q-dialog')).toHaveCount(0)
 
   // 出完账草稿就空了，之后记的账进下一张
@@ -736,12 +745,14 @@ test('账单三页：未出账 / 已出账 / 以前，各管一段', async ({ pa
 
   // ① 未出账：还没归到任何账单上的流水
   await expect(page).toHaveURL(/\/bill$/)
+  // 三页共用一个地址：下面每切一页都再确认一次地址没动 —— 页签一旦做回路由，
+  // 组件就会跟着重建，白屏和「旧数字停半秒」都会回来
   await expect(page.locator('.head')).toContainText('当前账单')
   await expect(page.getByRole('button', { name: '出账单' })).toBeVisible()
 
   // ② 已出账：最近出的那一张，点了出账但可能还没转清
   await page.getByRole('tab', { name: '已出账' }).click()
-  await expect(page).toHaveURL(/\/bill\/current$/)
+  await expect(page).toHaveURL(/\/bill$/)
   // 先用会自动重试的断言等内容换过来：load() 是异步的，
   // 直接 innerText 读到的还是上一页的标题
   await expect(page.getByRole('button', { name: '出账单' }), '已出的账单上不该再有出账按钮').toHaveCount(0)
@@ -750,7 +761,7 @@ test('账单三页：未出账 / 已出账 / 以前，各管一段', async ({ pa
 
   // ③ 以前：**不含**已出账那一张，两处都列会让人以为是两张
   await page.getByRole('tab', { name: '以前' }).click()
-  await expect(page).toHaveURL(/\/bill\/past$/)
+  await expect(page).toHaveURL(/\/bill$/)
   const past = await page.locator('.q-item').allTextContents()
   expect(past.some((t) => t.includes(openLabel)), '已出账那张不该在「以前」里重复出现').toBe(false)
   // 不写死张数：跑过一轮 E2E 之后库里会多出几张，写死了红在一个跟这屏无关的地方
