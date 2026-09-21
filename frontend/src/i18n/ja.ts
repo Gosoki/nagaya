@@ -25,8 +25,7 @@ export default {
     deleteConfirm: 'この明細を削除しますか？差額は次回請求に反映されます。',
   },
   split: {
-    mode: '分担方法', ratio: '比率', exact: '金額指定',
-    weight: '比率', adjustment: '調整', amountCol: '金額', share: '負担額',
+    weight: '比率', adjustment: '調整', share: '負担額',
     total: '合計', diff: '差額', balanced: 'ぴったり',
     notBalanced: '{n} 合いません。合わないと保存できません',
     hint: '比率 0 ＝ 参加しない。調整額は比率で割ったあとに加減します。',

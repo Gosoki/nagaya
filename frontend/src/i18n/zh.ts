@@ -25,8 +25,7 @@ export default {
     deleteConfirm: '删掉这一笔？余额跟着变，差额进下一张账单。',
   },
   split: {
-    mode: '分摊方式', ratio: '按比例', exact: '固定金额',
-    weight: '比例', adjustment: '调整', amountCol: '金额', share: '应担',
+    weight: '比例', adjustment: '调整', share: '应担',
     total: '合计', diff: '差额', balanced: '刚好平',
     notBalanced: '还差 {n}，不平不能存',
     hint: '权重 0 ＝ 不参与。调整额是在按比例算完之后再加减的。',

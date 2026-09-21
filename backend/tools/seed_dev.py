@@ -64,11 +64,14 @@ def main() -> None:
         settings_svc.set_(s, "settle_due_day", 10)
 
         cats = {c.name: c for c in s.exec(select(Category))}
-        # 家賃走固定金额（D12：房间大小不同，不是比例）
+        # 家賃按房间大小分（D12）：45,000 / 40,000 / 35,000。
+        # 写成「同权 + 调整额」而不是固定金额 —— 均分是 40,000，Go 多担 5,000、
+        # Zen 少担 5,000，加回去正好是那三个数。界面上已经没有固定金额模式了。
         rent = cats["家賃"]
         rent.default_rule_json = {
-            "mode": "exact",
-            "exact": {str(go.id): 45_000, str(kan.id): 40_000, str(zen.id): 35_000},
+            "mode": "ratio",
+            "equal_weight": 1,
+            "adjustments": {str(go.id): 5_000, str(zen.id): -5_000},
         }
         s.add(rent)
         s.commit()

@@ -142,24 +142,24 @@ test('分摊编辑器：实时算钱、合计对得上', async ({ page }) => {
   await page.screenshot({ path: 'e2e/shots/04-split.png' })
 })
 
-test('固定金额模式：合计对不上就红字报差额且存不了', async ({ page }) => {
+test('权重全填 0：把缺口报出来，而且存不了', async ({ page }) => {
   await login(page)
-  await page.locator('input.amount').fill('120000')
-  // 分类现在是必选的：不选的话后端拿不到分类默认规则，会悄悄掉回全员均分
+  await page.locator('input.amount').fill('12000')
+  // 分类是必选的：不选的话后端拿不到分类默认规则，会悄悄掉回全员均分
   await page.getByRole('button', { name: '日用品' }).click()
-  await page.getByRole('button', { name: '固定金额' }).click()
 
-  const inputs = page.locator('.exact-col .num-input')
-  await inputs.nth(0).fill('45000')
-  await inputs.nth(1).fill('40000')
-  await inputs.nth(2).fill('30000')      // 差 5000
+  // 比例模式几乎永远自动配平 —— 调整额再怎么填都会从基数里扣回来。
+  // 唯一的例外就是所有人权重都 0：这笔钱没人担，整笔悬空，必须当场说清缺多少
+  const weights = page.locator('.weight-input')
+  const n = await weights.count()
+  for (let i = 0; i < n; i++) await weights.nth(i).fill('0')
 
   await expect(page.locator('.diff-line')).toBeVisible()
-  await expect(page.locator('.diff-line')).toContainText('5,000')
+  await expect(page.locator('.diff-line')).toContainText('12,000')
   await expect(page.getByRole('button', { name: '保存', exact: true })).toBeDisabled()
-  await page.screenshot({ path: 'e2e/shots/08-exact-unbalanced.png' })
+  await page.screenshot({ path: 'e2e/shots/08-all-zero.png' })
 
-  await inputs.nth(2).fill('35000')      // 补平
+  await weights.nth(0).fill('1')          // 只要有一个人担，就自动配平
   await expect(page.locator('.diff-line')).toHaveCount(0)
   await expect(page.getByRole('button', { name: '保存', exact: true })).toBeEnabled()
 })
@@ -397,24 +397,6 @@ test('归档一个分类，它名下的历史账目仍然显示原来的名字',
 
   await page.request.patch(`/api/categories/${target.id}`, { headers, data: { archived: false } })
   await page.request.delete(`/api/entries/${made.id}`, { headers })
-})
-
-test('账单页固定费：固定金额分类改了总额没改分摊，必须拦住并说出差多少', async ({ page }) => {
-  await login(page)
-  const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
-  await page.request.post('/api/statements', { headers })
-  await page.goto('/bill')
-  await expect(page.getByText('本期固定费')).toBeVisible()
-  // 家賃的分类规则是固定金额 45000/40000/35000。总额改成 30000 而不动每人金额，
-  // 合计就对不上了 —— 必须当场拦住，而且要说清差多少，不能只说一句「不平」
-  const yachin = page.locator('.q-expansion-item').filter({ hasText: '家賃' }).locator('.amount-input')
-  await yachin.fill('30000')
-  await yachin.blur()
-  const note = page.locator('.q-notification')
-  await expect(note).toContainText('家賃')
-  await expect(note).toContainText('90,000')      // 30000 − 120000
-  expect((await (await page.request.get('/api/bill', { headers })).json()).total_expense)
-    .toBe(0)                                       // 没存进去
 })
 
 test('固定费不必等到出账单：账单 Tab 一点就到', async ({ page }) => {

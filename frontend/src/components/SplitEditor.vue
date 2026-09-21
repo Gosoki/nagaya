@@ -1,37 +1,26 @@
 <!--
   分摊编辑器 —— SPEC §7.4 点名的「最难的一屏」。
 
-  每人一行：头像 + 权重 stepper（−/数字/＋）+ 实时金额。
-  底部固定条常驻「合计 ／ 差额」，固定金额模式下差额 ≠ 0 时红字且禁止保存。
+  每人一行：头像 + 权重 + 调整额 + 实时金额。
+
+  **只有「按比例」一种模式。** 原来还有个「固定金额」模式，但它是冗余的：
+  权重全 1、调整额填「目标金额 − 均分额」就能表达任意一组金额（家賃
+  45,000/40,000/35,000 ＝ 权重 1:1:1 加 +5,000/0/−5,000）。而且比例模式永远
+  自动配平，压根出不了「合计对不上」那种不自洽的状态 —— 那道保护本来就是
+  固定金额模式自己招来的。
 
   预览用前端的分摊引擎算（本地即时，不往返服务器）；**保存后以后端返回的
   shares 为准**，两边靠共享 fixture 锁住不漂（SPEC §7.3）。
 -->
 <template>
   <div>
-    <q-btn-toggle
-      v-model="mode"
-      spread
-      no-caps
-      unelevated
-      :toggle-color="props.color ?? 'primary'"
-      class="q-mb-md mode-toggle"
-      :options="[
-        { label: t('split.ratio'), value: 'ratio' },
-        { label: t('split.exact'), value: 'exact' },
-      ]"
-      @update:model-value="onModeChange"
-    />
-
     <!-- 列头：比例 / 调整 / 应担 三件事摆在一排，一眼看得出它们的关系。
          调整额原来藏在下面一个折叠里，看不见它是加在比例结果之上的 -->
     <div class="row items-center head-row text-caption text-grey-6">
       <div class="col name-col" />
-      <div v-if="mode === 'ratio'" class="col-auto weight-col text-center">{{ t('split.weight') }}</div>
-      <div v-if="mode === 'ratio'" class="col-auto adj-col text-right">{{ t('split.adjustment') }}</div>
-      <div v-else class="col-auto exact-col text-right">{{ t('split.amountCol') }}</div>
-      <!-- 固定金额模式不要「应担」这一列：输入框里就是金额，重复一遍没意义 -->
-      <div v-if="mode === 'ratio'" class="col-auto share-col text-right">{{ t('split.share') }}</div>
+      <div class="col-auto weight-col text-center">{{ t('split.weight') }}</div>
+      <div class="col-auto adj-col text-right">{{ t('split.adjustment') }}</div>
+      <div class="col-auto share-col text-right">{{ t('split.share') }}</div>
     </div>
 
     <div v-for="m in members" :key="m.id" class="row items-center member-row">
@@ -42,10 +31,9 @@
         <div class="name ellipsis">{{ m.display_name }}</div>
       </div>
 
-      <template v-if="mode === 'ratio'">
-        <div class="col-auto weight-col">
-          <input
-            class="num-input weight-input"
+      <div class="col-auto weight-col">
+        <input
+          class="num-input weight-input"
             type="number"
             inputmode="numeric"
             min="0"
@@ -64,20 +52,8 @@
             @input="onAdjInput(m.id, $event)"
           />
         </div>
-      </template>
-
-      <div v-else class="col-auto exact-col">
-        <input
-          class="num-input"
-          type="text"
-          inputmode="numeric"
-          :value="exactDisplay(m.id)"
-          @input="onExactInput(m.id, $event)"
-        />
-      </div>
 
       <div
-        v-if="mode === 'ratio'"
         class="col-auto share-col"
         :class="{ 'text-grey-5': (preview?.[String(m.id)] ?? 0) === 0 }"
       >
@@ -136,10 +112,8 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-const mode = ref<'ratio' | 'exact'>('ratio')
 const weights = ref<Record<string, number>>({})
 const adjustments = ref<Record<string, number>>({})
-const exact = ref<Record<string, number>>({})
 const touched = ref(false)
 
 /**
@@ -154,16 +128,21 @@ function resetWeights() {
   const seedMode = (seed?.mode as string) ?? 'ratio'
   const keys = props.members.map((m) => String(m.id))
 
+  // 老数据里还有 mode:'exact' 的规则（界面上已经没有这个模式了）。
+  // 原样换算成「权重全 1 + 调整额」：基数取 floor(总额/人数)，调整额就是
+  // 各人金额减掉基数 —— 加回去一分不差。总额取规则自己的和，不依赖当前金额。
   if (seed && seedMode === 'exact') {
     const seeded = (seed.exact ?? {}) as Record<string, number>
-    mode.value = 'exact'
-    exact.value = Object.fromEntries(keys.map((k) => [k, Number(seeded[k] ?? 0)]))
+    const total = keys.reduce((sum, k) => sum + Number(seeded[k] ?? 0), 0)
+    const base = Math.floor(total / (keys.length || 1))
     weights.value = Object.fromEntries(keys.map((k) => [k, 1]))
-    adjustments.value = {}
+    adjustments.value = Object.fromEntries(
+      keys.map((k) => [k, Number(seeded[k] ?? 0) - base]).filter(([, v]) => v !== 0),
+    )
+    typing.value = {}
     return
   }
 
-  mode.value = 'ratio'
   const seededW = (seed?.weights ?? null) as Record<string, number> | null
   const equal = Number(seed?.equal_weight ?? 1)
   weights.value = Object.fromEntries(
@@ -173,7 +152,6 @@ function resetWeights() {
   adjustments.value = Object.fromEntries(
     Object.entries(seededAdj).filter(([k, v]) => keys.includes(k) && Number(v) !== 0),
   )
-  exact.value = Object.fromEntries(keys.map((k) => [k, 0]))
   typing.value = {}
 }
 resetWeights()
@@ -187,11 +165,12 @@ watch(
   },
 )
 
-const rule = computed<Record<string, unknown>>(() =>
-  mode.value === 'exact'
-    ? { mode: 'exact', exact: exact.value }
-    : { mode: 'ratio', weights: weights.value, adjustments: adjustments.value, remainder_to: 'payer' },
-)
+const rule = computed<Record<string, unknown>>(() => ({
+  mode: 'ratio',
+  weights: weights.value,
+  adjustments: adjustments.value,
+  remainder_to: 'payer',
+}))
 
 const order = computed(() => props.members.map((m) => String(m.id)))
 const error = ref('')
@@ -205,17 +184,22 @@ const preview = computed<Record<string, number> | null>(() => {
       payer: props.payerId === null ? null : String(props.payerId),
     })
   } catch (e) {
-    // 固定金额对不上是常态（正在输入中），底部差额那条已经在提示了，不必再红一行
-    if (e instanceof SplitError && e.code !== 'sum_mismatch') error.value = e.message
+    // 权重全 0 时不另外红一行「没人参与分摊」：底下的合计已经把缺口报出来了，
+    // 而且旁边就写着「权重 0 ＝ 不参与」，再说一遍是噪音
+    if (e instanceof SplitError && e.code !== 'weights_all_zero') error.value = e.message
     return null
   }
 })
 
 const previewTotal = computed(() =>
-  mode.value === 'exact'
-    ? Object.values(exact.value).reduce((s, v) => s + v, 0)
-    : Object.values(preview.value ?? {}).reduce((s, v) => s + v, 0),
+  Object.values(preview.value ?? {}).reduce((s, v) => s + v, 0),
 )
+
+/**
+ * 比例模式**几乎**永远配平 —— 调整额再怎么填都会从基数里扣回来。
+ * 唯一的例外是三个人权重全填 0：那就没人担这笔钱，整笔悬空。
+ * 这时候要把缺多少报出来，并且不许存。
+ */
 const balanced = computed(() => !props.amount || previewTotal.value === props.amount)
 
 watch(
@@ -225,13 +209,6 @@ watch(
   },
   { immediate: true, deep: true },
 )
-
-function onModeChange() {
-  touched.value = true
-  if (mode.value === 'exact' && props.amount && preview.value) {
-    exact.value = { ...preview.value }        // 从比例切过来时，带着刚才算好的数字，不用重敲
-  }
-}
 
 function onWeightInput(id: number, e: Event) {
   touched.value = true
@@ -247,13 +224,6 @@ function normalize(raw: string): { text: string; value: number } {
   return { text: d ? sign + n.toLocaleString('en-US') : sign, value: neg ? -n : n }
 }
 
-function onExactInput(id: number, e: Event) {
-  touched.value = true
-  const { text, value } = normalize((e.target as HTMLInputElement).value)
-  typing.value = { ...typing.value, [`e${id}`]: text }
-  exact.value = { ...exact.value, [String(id)]: value }
-}
-
 function onAdjInput(id: number, e: Event) {
   touched.value = true
   const { text, value } = normalize((e.target as HTMLInputElement).value)
@@ -264,12 +234,6 @@ function onAdjInput(id: number, e: Event) {
   adjustments.value = next
 }
 
-const exactDisplay = (id: number) => {
-  const held = typing.value[`e${id}`]
-  if (held !== undefined) return held
-  const v = exact.value[String(id)] ?? 0
-  return v ? v.toLocaleString('en-US') : ''
-}
 const adjDisplay = (id: number) => {
   const held = typing.value[`a${id}`]
   if (held !== undefined) return held
@@ -281,14 +245,12 @@ const adjDisplay = (id: number) => {
 defineExpose({
   reset() {
     touched.value = false
-    mode.value = 'ratio'
     resetWeights()
   },
 })
 </script>
 
 <style scoped>
-.mode-toggle { border: 1px solid rgba(0, 0, 0, 0.12); border-radius: 8px; }
 
 /* 375px 下的列宽预算：左右各 16 padding → 343 可用。
    比例改成数字框之后不用再塞两个 40px 的按钮，省出来的宽度给调整列。 */
@@ -302,7 +264,6 @@ defineExpose({
 .name-col { min-width: 0; }
 .weight-col { width: 62px; padding-right: 12px; }
 .adj-col { width: 92px; }
-.exact-col { width: 150px; }
 .share-col { width: 78px; text-align: right; font-variant-numeric: tabular-nums; font-size: 15px; }
 
 .member-row { min-height: 48px; }
