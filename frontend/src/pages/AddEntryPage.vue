@@ -6,6 +6,16 @@
 -->
 <template>
   <q-page class="page">
+    <!-- 编辑模式：顶上一条返回 + 这笔在哪张账单上。
+         「已出账也能改」这件事必须当场说清楚差额去哪了，否则没人敢按保存 -->
+    <div v-if="editingId !== null" class="edit-head">
+      <q-btn dense flat round icon="arrow_back" @click="goBack" />
+      <div class="col text-weight-medium">{{ t('entry.editTitle') }}</div>
+    </div>
+    <q-banner v-if="billedLabel" dense class="bg-blue-1 text-blue-9 edit-note">
+      {{ t('entry.editBilled', { label: billedLabel }) }}
+    </q-banner>
+
     <q-btn-toggle
       v-model="kind"
       spread no-caps unelevated
@@ -23,7 +33,7 @@
     <!-- 分类：大色块网格，一点即选。转账没有分类 -->
     <div v-if="kind !== 'settlement'" class="cat-grid">
       <button
-        v-for="c in meta.dailyCategories"
+        v-for="c in gridCategories"
         :key="c.id"
         class="cat"
         :class="{ on: categoryId === c.id }"
@@ -33,22 +43,6 @@
         <q-icon :name="c.icon" size="22px" :color="categoryId === c.id ? 'white' : undefined" />
         <span>{{ c.name }}</span>
       </button>
-    </div>
-
-    <!-- 固定费入口：家賃/水电煤网随时可填，不用等到出账单那一步 -->
-    <div v-if="kind !== 'settlement'" class="q-px-md q-pb-xs">
-      <q-btn
-        class="full-width monthly-entry"
-        flat
-        no-caps
-        align="left"
-        icon="event_repeat"
-        :label="t('monthly.title')"
-        :to="{ name: 'monthly' }"
-      >
-        <q-space />
-        <q-icon name="chevron_right" size="18px" />
-      </q-btn>
     </div>
 
     <div class="q-px-md">
@@ -77,14 +71,24 @@
         />
         <q-btn dense flat no-caps icon="event" :label="dateLabel" class="text-grey-7">
           <q-popup-proxy cover transition-show="scale">
-            <q-date v-model="date" mask="YYYY-MM-DD" today-btn minimal />
+            <div>
+              <q-date v-model="date" mask="YYYY-MM-DD" today-btn minimal :options="dateAllowed" />
+              <!-- 已出过账的日期选不了：那张单子锁着，记进去也不会出现在上面，
+                   只会让人以为补上了。要补记就写在备注里 -->
+              <div v-if="minDate && editingId === null" class="text-caption text-grey-7 q-pa-sm date-hint">
+                {{ t('entry.dateLocked', { date: minDate }) }}
+              </div>
+            </div>
           </q-popup-proxy>
         </q-btn>
       </div>
 
+      <!-- 默认展开：日常网格只剩三个按钮之后竖向空间够用，
+           直接看到每人分多少，比藏起来更踏实 -->
       <q-expansion-item
         v-if="kind !== 'settlement'"
         dense
+        default-opened
         class="q-mt-sm split-panel"
         header-class="q-px-none text-primary"
         :label="t('entry.splitDetail')"
@@ -95,7 +99,7 @@
           :amount="signedAmount"
           :members="meta.activeMembers"
           :payer-id="payerId"
-          :seed-rule="selectedCategoryRule"
+          :seed-rule="ownRule ?? selectedCategoryRule"
           @change="onSplitChange"
         />
       </q-expansion-item>
@@ -116,9 +120,10 @@
         :disable="!canSave"
         :loading="busy"
         :label="t('entry.save')"
-        @click="save(false)"
+        @click="editingId === null ? save(false) : saveEdit()"
       />
       <q-btn
+        v-if="editingId === null"
         class="col-auto q-ml-sm"
         color="primary"
         size="lg"
@@ -127,6 +132,17 @@
         :disable="!canSave"
         :label="t('entry.saveAndNext')"
         @click="save(true)"
+      />
+      <q-btn
+        v-else
+        class="col-auto q-ml-sm"
+        color="negative"
+        size="lg"
+        no-caps
+        outline
+        icon="delete"
+        :label="t('common.delete')"
+        @click="removeEntry"
       />
       </div>
     </div>
@@ -137,10 +153,11 @@
 import { useQuasar } from 'quasar'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 
-import { ApiError } from 'src/api/client'
+import { ApiError, api } from 'src/api/client'
 import { formatYen } from 'src/i18n'
-import type { EntryKind } from 'src/api/types'
+import type { Entry, EntryKind } from 'src/api/types'
 import AmountInput from 'src/components/AmountInput.vue'
 import MemberPicker from 'src/components/MemberPicker.vue'
 import SplitEditor from 'src/components/SplitEditor.vue'
@@ -151,6 +168,8 @@ import { useMeta } from 'src/stores/meta'
 
 const { t } = useI18n()
 const $q = useQuasar()
+const route = useRoute()
+const router = useRouter()
 const meta = useMeta()
 const auth = useAuth()
 const ledger = useLedger()
@@ -165,14 +184,34 @@ const title = ref('')
 const date = ref(new Date().toISOString().slice(0, 10))
 const busy = ref(false)
 
+/** 路由带了 id ＝ 在改一笔已经记下的账（已出账的也算）。空 ＝ 记新的一笔 */
+const editingId = computed(() => (route.params.id ? Number(route.params.id) : null))
+const version = ref(0)
+const billedLabel = ref<string | null>(null)
+/** 改的时候分摊要从**这笔自己的规则**起步，不是分类默认值 —— 否则一打开就被改回默认 */
+const ownRule = ref<Record<string, unknown> | null>(null)
+
 const rule = ref<Record<string, unknown> | null>(null)
 const splitValid = ref(true)
 const splitDiff = ref(0)
 const amountEl = ref<InstanceType<typeof AmountInput> | null>(null)
 const splitEl = ref<InstanceType<typeof SplitEditor> | null>(null)
 
+/** 改一笔电费时，网格里得有「電気」这个分类可选，所以编辑模式不筛掉固定费 */
+const gridCategories = computed(() =>
+  editingId.value === null ? meta.dailyCategories : meta.categories.filter((c) => !c.archived),
+)
+
 /** 收入在库里存负数（SPEC §5）；界面上只让人填正数，符号这里加 */
 const signedAmount = computed(() => (kind.value === 'income' ? -amount.value : amount.value))
+
+/** 上次出账那天（含）之前的日期不给选 */
+const minDate = computed(() => ledger.prevCutAt?.slice(0, 10) ?? null)
+// 只有**新记**的账才限日期：新的一笔不管写哪天都落进当前草稿，选回已出账的范围
+// 只会让人以为补进了那张单子。改已有的账不受这条约束 —— 它归哪张单子由
+// statement_id 定死，改日期不会让它换单子
+const dateAllowed = (d: string) =>
+  editingId.value !== null || !minDate.value || d.replace(/\//g, '-') >= minDate.value
 
 const dateLabel = computed(() => {
   const today = new Date().toISOString().slice(0, 10)
@@ -204,9 +243,76 @@ const splitSummary = computed(() => {
   return meta.activeMembers.map((m) => m.display_name).join(' / ')
 })
 
-onMounted(() => {
+onMounted(async () => {
+  if (editingId.value !== null) {
+    await loadForEdit(editingId.value)
+    return
+  }
   payerId.value = meta.setting<number | null>('default_payer_id', null) ?? auth.me?.id ?? null
 })
+
+async function loadForEdit(id: number) {
+  try {
+    const e = await api.get<Entry>(`/api/entries/${id}`)
+    kind.value = e.kind
+    amount.value = Math.abs(e.amount_jpy)
+    categoryId.value = e.category_id
+    payerId.value = e.payer_id
+    toMemberId.value = e.to_member_id
+    title.value = e.title
+    date.value = e.date
+    version.value = e.version
+    ownRule.value = e.split_rule_json
+    billedLabel.value = e.statement_label
+  } catch (err) {
+    $q.notify({ type: 'negative', message: err instanceof ApiError ? err.text : String(err) })
+    goBack()
+  }
+}
+
+function goBack() {
+  if (window.history.length > 1) router.back()
+  else void router.push({ name: 'entries' })
+}
+
+async function saveEdit() {
+  if (!canSave.value || payerId.value === null || editingId.value === null) return
+  busy.value = true
+  try {
+    await ledger.update(editingId.value, version.value, {
+      kind: kind.value,
+      date: date.value,
+      amount_jpy: signedAmount.value,
+      payer_id: payerId.value,
+      to_member_id: kind.value === 'settlement' ? toMemberId.value : null,
+      category_id: kind.value === 'settlement' ? null : categoryId.value,
+      title: title.value,
+      rule: kind.value === 'settlement' ? null : rule.value,
+    })
+    await ledger.refresh()
+    $q.notify({ type: 'positive', message: t('entry.saved'), timeout: 1200 })
+    goBack()
+  } catch (e) {
+    $q.notify({
+      type: 'negative',
+      message: e instanceof ApiError ? e.text : String(e),
+      timeout: 4000,
+    })
+  } finally {
+    busy.value = false
+  }
+}
+
+function removeEntry() {
+  if (editingId.value === null) return
+  $q.dialog({ title: t('common.delete'), message: t('entry.deleteConfirm'), cancel: true }).onOk(
+    async () => {
+      await api.del(`/api/entries/${editingId.value}`)
+      await ledger.refresh()
+      goBack()
+    },
+  )
+}
 watch(
   () => meta.settings.length,
   () => {
@@ -218,6 +324,7 @@ watch(
 
 function pickCategory(id: number) {
   categoryId.value = categoryId.value === id ? null : id
+  ownRule.value = null       // 换了分类就用新分类的默认分摊，跟记新账时一致
 }
 
 function onSplitChange(next: Record<string, unknown> | null, valid: boolean, diff: number) {
@@ -277,10 +384,23 @@ function reset(keepGoing: boolean) {
 </script>
 
 <style scoped>
+/* 编辑模式的头：返回 + 标题，跟内容同一层，不额外占一条 header */
+.edit-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+}
+.edit-note {
+  margin: 0 12px 4px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+}
 .page {
   /* 底部有两层：固定操作栏（约 64px）压在底部 Tab（50px）之上。
      留够位置，否则展开分摊后最后一个人的那一行会被操作栏盖住。 */
-  padding-bottom: calc(132px + env(safe-area-inset-bottom));
+  padding-bottom: calc(var(--nagaya-footer-h) + 90px + env(safe-area-inset-bottom));
 }
 .kind-toggle { border-bottom: 1px solid rgba(0, 0, 0, 0.08); }
 .label { font-size: 14px; }
@@ -308,19 +428,14 @@ function reset(keepGoing: boolean) {
 }
 .cat.on { color: #fff; }
 
-/* 固定费入口：做成一条低调的行，视觉上和上面的分类色块分开，避免误触 */
-.monthly-entry {
-  border: 1px dashed rgba(0, 0, 0, 0.18);
-  border-radius: 10px;
-  color: #666;
-  font-size: 13px;
-}
 
+.actions :deep(.q-btn) { min-height: 44px; }
+.date-hint { max-width: 290px; border-top: 1px solid rgba(0, 0, 0, 0.08); }
 .actions {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: calc(50px + env(safe-area-inset-bottom));   /* 压在底部 Tab 之上 */
+  bottom: calc(var(--nagaya-footer-h) + env(safe-area-inset-bottom));   /* 压在底部 Tab 之上 */
   padding: 6px 12px 8px;
   /* 不用半透明：内容从按钮底下透出来会看着像渲染坏了 */
   background: #fff;

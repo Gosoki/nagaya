@@ -1,4 +1,4 @@
-<!-- 账目列表：按日期分组。左滑删除（软删，进回收站）。 -->
+<!-- 账目列表：按日期分组。点一条去改，左滑删除（软删，进回收站）。 -->
 <template>
   <q-page class="q-pb-xl">
     <q-pull-to-refresh @refresh="onRefresh">
@@ -8,6 +8,31 @@
 
       <template v-for="group in grouped" :key="group.date">
         <div class="date-head">{{ group.date }}</div>
+
+        <!-- 那天出过的账单：在流水里留个印子，点进去看每人该付多少 -->
+        <q-list v-if="statementsOn(group.date).length" separator>
+          <q-item
+            v-for="st in statementsOn(group.date)"
+            :key="'st' + st.id"
+            clickable
+            class="statement-row"
+            @click="openStatement(st.id)"
+          >
+            <q-item-section avatar>
+              <q-avatar size="34px" color="primary" text-color="white">
+                <q-icon name="task_alt" size="18px" />
+              </q-avatar>
+            </q-item-section>
+            <q-item-section>
+              <q-item-label>{{ t('bill.statementItem') }} · {{ st.label }}</q-item-label>
+              <q-item-label caption>{{ st.covers_from }} 〜 {{ st.covers_to }}</q-item-label>
+            </q-item-section>
+            <q-item-section side>
+              <q-icon name="chevron_right" color="grey-6" />
+            </q-item-section>
+          </q-item>
+        </q-list>
+
         <q-list separator>
           <q-slide-item
             v-for="e in group.items"
@@ -19,7 +44,7 @@
               <q-icon name="delete" />
             </template>
 
-            <q-item>
+            <q-item clickable @click="editEntry(e.id)">
               <q-item-section avatar>
                 <q-avatar size="34px" :style="{ background: colorOf(e) }" text-color="white">
                   <q-icon :name="iconOf(e)" size="18px" />
@@ -48,11 +73,13 @@
 
 <script setup lang="ts">
 import { useQuasar } from 'quasar'
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 
 import { ApiError } from 'src/api/client'
-import type { Entry } from 'src/api/types'
+import { api } from 'src/api/client'
+import type { Entry, Statement } from 'src/api/types'
 import { formatYen } from 'src/i18n'
 import { useLedger } from 'src/stores/ledger'
 import { useMeta } from 'src/stores/meta'
@@ -62,6 +89,26 @@ const $q = useQuasar()
 const meta = useMeta()
 const ledger = useLedger()
 
+const statements = ref<Statement[]>([])
+const router = useRouter()
+
+onMounted(async () => {
+  statements.value = await api.get<Statement[]>('/api/statements')
+})
+
+/** 某一天出过的账单（按 cut_at 的日期归） */
+const statementsOn = (date: string) =>
+  statements.value.filter((st) => st.cut_at.slice(0, 10) === date)
+
+/** 点一条就去改它。已出账的也能改，差额进下一张账单的「上期结转」 */
+function editEntry(id: number) {
+  void router.push({ name: 'entry-edit', params: { id: String(id) } })
+}
+
+function openStatement(id: number) {
+  void router.push({ name: 'bill', params: { statementId: String(id) } })
+}
+
 const grouped = computed(() => {
   const map = new Map<string, Entry[]>()
   for (const e of ledger.entries) {
@@ -69,7 +116,14 @@ const grouped = computed(() => {
     list.push(e)
     map.set(e.date, list)
   }
-  return [...map.entries()].map(([date, items]) => ({ date, items }))
+  // 出过账单的日子即使当天没有账目也要出现在时间线上
+  for (const st of statements.value) {
+    const d = st.cut_at.slice(0, 10)
+    if (!map.has(d)) map.set(d, [])
+  }
+  return [...map.entries()]
+    .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+    .map(([date, items]) => ({ date, items }))
 })
 
 // 用含归档的反查表：归档过的分类，它名下的历史账目也要能显示原来的名字和图标
@@ -106,6 +160,7 @@ async function remove(e: Entry) {
 </script>
 
 <style scoped>
+.statement-row { background: #f5f7ff; }
 .date-head {
   padding: 10px 16px 4px;
   font-size: 12px;

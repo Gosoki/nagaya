@@ -62,7 +62,7 @@ for module in (auth, members, categories, entries, ledger, settings):
     app.include_router(module.router)
 
 
-@app.get("/api/health")
+@app.api_route("/api/health", methods=["GET", "HEAD"])
 def health() -> dict[str, str]:
     return {"status": "ok"}
 
@@ -70,22 +70,47 @@ def health() -> dict[str, str]:
 # 打包后前端 dist 挂在同一个端口上 —— 「两个代码库」不等于「两个服务」（SPEC §7.2）
 DIST = Path(__file__).parents[2] / "frontend" / "dist" / "pwa"
 
+#: assets/ 下全是内容哈希文件名，内容一变文件名就变，可以永久缓存
+IMMUTABLE = "public, max-age=31536000, immutable"
+#: 其余（index.html / sw.js / manifest / 图标）必须每次回源确认。
+#: 注意是 no-cache 不是 no-store —— 仍然走 etag，命中 304 只花一个往返。
+REVALIDATE = "no-cache"
+
 if DIST.is_dir():
 
-    @app.get("/{full_path:path}", include_in_schema=False)
+    @app.api_route("/{full_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
     def spa(full_path: str) -> FileResponse:
-        """SPA 回退。
+        """SPA 回退 + 缓存头。
 
-        不能用 `StaticFiles(html=True)` 了事 —— 它只在**目录**路径上回退 index.html，
-        `/balance` 这种客户端路由会直接 404。手机上表现为「刷新一下就白屏」，
-        而 PWA 从主屏冷启动走的正是 start_url 之外的任意路径，必须治。
+        三件事，每一件都对应一个真实故障：
+
+        1. **回退**：不能用 `StaticFiles(html=True)` —— 它只在目录路径上回退 index.html，
+           `/bill` 这种客户端路由会直接 404，手机上表现为「刷新一下就白屏」。
+
+        2. **带后缀的路径不存在就老实 404**，绝不拿 index.html 冒充。
+           否则新版删掉旧 chunk 之后，旧页面 `import('/assets/XxxPage-旧hash.js')`
+           会拿到 200 的 HTML，浏览器拒绝按 JS 执行，动态 import 抛错、路由导航被
+           reject —— 界面上就是**点了 Tab 没反应**。用户报的「余额账目点不开」就是它。
+
+        3. **缓存头**：一个都不发的话浏览器会按启发式规则（自上次修改起时长的 10%）
+           自作主张缓存 index.html，产物放一周就有十几个小时完全不问服务器，
+           三个人于是跑着不同版本的记账 app。
+
+        HEAD 也要注册：FastAPI 的 `@app.get` 不像 Starlette 那样自动补 HEAD，
+        不注册的话 `curl -I` 和用 HEAD 探活的监控都会拿到 405。
         """
         if full_path.startswith("api/"):
             # /api 下的未知路径要老老实实 404，被 index.html 吞掉会让前端
             # 拿到一坨 HTML 去 JSON.parse，报出去的错完全指不到问题上
             raise HTTPException(status.HTTP_404_NOT_FOUND, "no such API")
+
         candidate = (DIST / full_path).resolve()
         # resolve 之后再比对根目录，挡住 ../ 穿越
         if full_path and candidate.is_file() and candidate.is_relative_to(DIST.resolve()):
-            return FileResponse(candidate)
-        return FileResponse(DIST / "index.html")
+            cache = IMMUTABLE if full_path.startswith("assets/") else REVALIDATE
+            return FileResponse(candidate, headers={"Cache-Control": cache})
+
+        if "." in full_path.rsplit("/", 1)[-1]:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "no such file")
+
+        return FileResponse(DIST / "index.html", headers={"Cache-Control": REVALIDATE})

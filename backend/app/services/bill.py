@@ -145,15 +145,36 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
             }
         )
 
+    # 已出账的单子用**当初冻结的那份**转账方案 —— 那才是真发到群里、大家照着转的钱。
+    # 事后改了这张单子上的账，差额走下一张的「上期结转」，历史方案不该跟着变：
+    # 方案一变，「已收到」的勾（按方案下标对位）就会对到别的行上去。
     simplify = bool(settings_svc.get(session, "simplify_debts"))
-    transfers: list[Transfer] = (
-        plan_simplified(closing)
-        if simplify
-        else plan_pairwise(_pair_debts(session, _entries_before(session, statement) + entries))
-    )
+    frozen_plan = (statement.snapshot_json or {}).get("transfers") if statement else None
+    if frozen_plan is not None:
+        transfers: list[Transfer] = [Transfer(**t) for t in frozen_plan]
+    else:
+        transfers = (
+            plan_simplified(closing)
+            if simplify
+            else plan_pairwise(_pair_debts(session, _entries_before(session, statement) + entries))
+        )
 
     dates = [e.date for e in entries]
+    prev = session.exec(
+        select(Statement)
+        .where(Statement.cut_at < (statement.cut_at if statement else now_utc()))
+        .order_by(Statement.cut_at.desc())
+    ).first()
+    # 刚出过账又出一张，多半是临时结的小账，固定费还没到下一轮 —— 默认别带上。
+    # 阈值在设置里，代码只认这个数怎么用。
+    ref = statement.cut_at if statement else now_utc()
+    gap_days = (ref - prev.cut_at).days if prev else None
+    threshold = int(settings_svc.get(session, "monthly_gap_days"))
     return {
+        "prev_cut_at": prev.cut_at.isoformat() if prev else None,
+        "prev_label": prev.label if prev else None,
+        "days_since_prev_cut": gap_days,
+        "suggest_monthly": gap_days is None or gap_days >= threshold,
         "statement_id": statement.id if statement else None,
         "label": statement.label if statement else None,
         "is_draft": statement is None,
@@ -166,6 +187,9 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
         "members": rows,
         "transfers": [t._asdict() for t in transfers],
         "simplified": simplify,
+        # 「含 7〜8 月水费」这类标注**只收跨出本单覆盖范围的**。
+        # 本期内的常规项也标的话，这句话会变成一长串，把「这个月为什么贵了一万二」
+        # 这个唯一有用的信号自己淹掉。
         "covers": [
             {
                 "entry_id": e.id,
@@ -175,10 +199,12 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
                 "period_end": e.period_end.isoformat() if e.period_end else None,
             }
             for e in entries
-            if e.period_start or e.period_end
+            if _reaches_outside(e, dates)
         ],
         # 出账之后又被改过的话要说出来，否则下一张的「上期结转」没人解释得清
         "edited_after_cut": _edited_after_cut(session, statement),
+        # 这张单子上的转账记完了没有 —— 「转账按钮都点过了就显示结清」
+        **_settlement_progress(session, statement),
     }
 
 
@@ -238,9 +264,25 @@ def build_total_expense(session: Session, statement: Statement) -> int:
 # ------------------------------------------------------------------ 出账
 
 
-def cut_statement(session: Session, *, actor_id: int | None, label: str | None = None) -> Statement:
-    """出账单：把这一刻之前所有没出账的账目归到一张单子上，并冻结快照。"""
+def cut_statement(
+    session: Session,
+    *,
+    actor_id: int | None,
+    label: str | None = None,
+    include_monthly: bool = True,
+) -> Statement:
+    """出账单：把这一刻之前没出账的账目归到一张单子上，并冻结快照。
+
+    `include_monthly=False` 时**把固定费留在草稿里**，只出日常那部分 ——
+    月中想把日用品先结一轮、又不想等水电煤账单的时候用。
+    """
     entries = unbilled(session)
+    if not include_monthly:
+        monthly_ids = {
+            c.id
+            for c in session.exec(select(Category).where(Category.monthly == True))  # noqa: E712
+        }
+        entries = [e for e in entries if e.category_id not in monthly_ids]
     if not entries:
         raise BillError("nothing_to_cut", "现在没有待出账的账目")
 
@@ -261,7 +303,13 @@ def cut_statement(session: Session, *, actor_id: int | None, label: str | None =
         session.add(e)
     session.flush()
 
-    statement.snapshot_json = build_bill(session, statement)
+    # 快照里不存结算进度：它是**实时**的（转账是出账之后才发生的），
+    # 而快照算在 snapshot_json 还没写入的那一刻，plan 为空会被当成「已结清」，
+    # 冻结下来就是个假值，早晚误导人
+    snapshot = build_bill(session, statement)
+    snapshot.pop("settled", None)
+    snapshot.pop("settled_transfers", None)
+    statement.snapshot_json = snapshot
     session.add(statement)
     session.add(
         AuditLog(
@@ -301,11 +349,16 @@ def monthly_rows(session: Session) -> dict[str, Any]:
             .order_by(Category.display_order, Category.id)
         )
     )
-    mine = {
-        e.category_id: e
-        for e in unbilled(session)
-        if e.kind != EntryKind.settlement and e.category_id is not None
-    }
+    # 同一个分类在这张草稿里可能有不止一笔（两个人同时填、或者填完重试了一次）。
+    # 面板一行只显示得下一笔，**但账单是全都算的** —— 不把重复说出来的话，
+    # 用户看到「家賃 170,000」，完全不知道还有一笔 120,000 也在总额里。
+    mine: dict[int, Entry] = {}
+    dup: dict[int, int] = {}
+    for e in unbilled(session):
+        if e.kind == EntryKind.settlement or e.category_id is None:
+            continue
+        mine[e.category_id] = e
+        dup[e.category_id] = dup.get(e.category_id, 0) + 1
     hints, hint_labels = _last_billed_amount(session, [c.id for c in categories])
 
     rows = []
@@ -327,6 +380,8 @@ def monthly_rows(session: Session) -> dict[str, Any]:
                 "date": entry.date.isoformat() if entry else None,
                 "hint": hints.get(c.id),
                 "hint_label": hint_labels.get(c.id),
+                #: 本期这个分类一共有几笔。>1 说明面板没显示全，界面上必须提示
+                "entry_count": dup.get(c.id, 0),
             }
         )
 
@@ -367,3 +422,58 @@ def _last_billed_amount(
             cache[e.statement_id] = st.label if st else ""
         labels[e.category_id] = cache[e.statement_id]
     return amounts, labels
+
+
+def _settlement_progress(session: Session, statement: Statement | None) -> dict[str, Any]:
+    """这张账单开出来的转账，记完了几笔。
+
+    判据是「按这张单子的方案，该转的钱有没有转够」：
+    出账之后、下一张出账之前记的转账，按「谁给谁」配对累加，
+    每一对都够了就算结清 —— 也就是用户说的「转账按钮都点过了」。
+    """
+    if statement is None:
+        return {"settled": False, "settled_transfers": []}
+    plan = (statement.snapshot_json or {}).get("transfers") or []
+    if not plan:
+        return {"settled": True, "settled_transfers": []}
+
+    nxt = session.exec(
+        select(Statement).where(Statement.cut_at > statement.cut_at).order_by(Statement.cut_at)
+    ).first()
+    rows = session.exec(
+        select(Entry).where(
+            Entry.kind == EntryKind.settlement,
+            Entry.deleted_at.is_(None),
+            Entry.created_at > statement.cut_at,
+        )
+    ).all()
+    if nxt is not None:
+        rows = [e for e in rows if e.created_at < nxt.cut_at]
+
+    paid: dict[tuple[int, int], int] = {}
+    for e in rows:
+        if e.to_member_id is None:
+            continue
+        key = (e.payer_id, e.to_member_id)
+        paid[key] = paid.get(key, 0) + e.amount_jpy
+
+    done = []
+    for t in plan:
+        key = (t["from_id"], t["to_id"])
+        done.append(paid.get(key, 0) >= t["amount"])
+    return {"settled": all(done), "settled_transfers": done}
+
+
+def _reaches_outside(entry: Entry, dates: list[dt.date]) -> bool:
+    """这条账目的计费期间是不是伸到了这张账单覆盖范围之外。
+
+    只有伸出去的才值得在账单上单独标一句（水费两个月一收、家賃前払い）。
+    本期内的常规项标了等于噪音。
+    """
+    if not (entry.period_start or entry.period_end) or not dates:
+        return False
+    lo, hi = min(dates), max(dates)
+    for bound in (entry.period_start, entry.period_end):
+        if bound is not None and not (lo <= bound <= hi):
+            return True
+    return False

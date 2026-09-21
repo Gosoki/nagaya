@@ -56,6 +56,7 @@ def statement_bill(
 
 @router.post("/statements", response_model=StatementOut, status_code=status.HTTP_201_CREATED)
 def cut_statement(
+    include_monthly: bool = True,
     session: Session = Depends(get_session),
     member: Member = Depends(current_member),
 ):
@@ -64,5 +65,5 @@ def cut_statement(
     **不锁定**任何东西 —— 余额全局累计，事后改了也不会算错钱，
     只是下一张账单会把「这张出账后被改过」标出来。
     """
-    st = bill_svc.cut_statement(session, actor_id=member.id)
+    st = bill_svc.cut_statement(session, actor_id=member.id, include_monthly=include_monthly)
     return st

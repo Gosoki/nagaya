@@ -7,25 +7,46 @@
   一键复制的文本是直接贴进 LINE 群的，所以格式按等宽对齐排，手机上看着是一张表。
 -->
 <template>
-  <q-page class="q-pb-xl">
+  <q-page class="page">
     <div v-if="!bill" class="text-center text-grey-6 q-mt-xl">{{ t('bill.noPeriod') }}</div>
 
     <template v-else>
       <div class="head q-pa-md">
-        <div class="row items-center">
-          <div>
-            <div class="text-h6">{{ bill.is_draft ? t('bill.draft') : bill.label }}</div>
-            <div v-if="bill.covers_from" class="text-caption text-grey-7">
-              {{ t('bill.coversRange', { from: bill.covers_from, to: bill.covers_to }) }}
-            </div>
+        <div class="row items-baseline">
+          <div class="text-subtitle1 text-weight-medium">
+            {{ bill.is_draft ? t('bill.draft') : bill.label }}
           </div>
           <q-space />
-          <div class="text-right">
-            <div class="text-h6">{{ formatYen(bill.total_expense) }}</div>
-            <div class="text-caption text-warning">{{ dueText }}</div>
-          </div>
+          <div class="text-caption text-grey-6 q-mr-xs">{{ t('bill.total') }}</div>
+          <div class="text-h6">{{ formatYen(bill.total_expense) }}</div>
         </div>
-        <div v-if="coversText" class="text-caption text-grey-7 q-mt-xs">{{ coversText }}</div>
+        <div v-if="!bill.is_draft && bill.settled" class="row items-center q-gutter-xs q-mt-xs">
+          <q-badge color="positive" :label="t('bill.settledBadge')" />
+        </div>
+        <div class="row items-baseline text-caption text-grey-6">
+          <div v-if="bill.covers_from">
+            {{ t('bill.coversRange', { from: bill.covers_from, to: bill.covers_to }) }}
+          </div>
+          <q-space />
+          <!-- 草稿账单没必要喊「未结清」：还没出账当然没结清，天天亮着就成了噪音。
+               报笔数更有用；出过的账单才说结算状态 -->
+          <div v-if="bill.is_draft">
+            <span v-if="bill.prev_label" class="q-mr-sm">
+              {{ t('bill.lastCut', { label: bill.prev_label }) }}
+            </span>
+            {{ t('bill.entryCount', { n: bill.entry_count }) }}
+          </div>
+          <div v-else class="text-warning">{{ dueText }}</div>
+        </div>
+        <div v-if="coversText" class="text-caption text-grey-6 q-mt-xs">{{ coversText }}</div>
+
+        <!-- 自己那笔摆在最显眼处。读账单的人要的就是这一个数字，
+             埋在半屏之下的话，他先看到的全是别人的录入框 -->
+        <div v-if="mine" class="mine q-mt-sm" :class="mine.closing < 0 ? 'owe' : 'owed'">
+          {{ mineText }}
+        </div>
+      </div>
+      <div class="hidden">
         <!-- 不锁历史，但改动必须可见：否则下一张的「上期结转」没人解释得清 -->
         <q-banner v-if="bill.edited_after_cut" dense class="bg-orange-1 text-orange-9 q-mt-sm rounded-borders">
           {{ t('bill.editedAfterCut', {
@@ -39,8 +60,39 @@
       <!-- 本期固定费：出账单时顺手把家賃/水电煤网填了，账单跟着重算 -->
       <MonthlyFixed v-if="bill.is_draft" @saved="load" />
 
+      <!-- 固定费之下，把这期其他的开销也摆出来：
+           不然账单上只看得见固定项，日用品/食費那些钱是从哪来的就说不清 -->
+      <div class="others">
+        <div class="text-subtitle2 q-px-md q-pt-md q-pb-xs">{{ t('bill.others') }}</div>
+        <q-list v-if="others.length" separator>
+          <q-item v-for="e in others" :key="e.id" dense clickable @click="editEntry(e.id)">
+            <q-item-section avatar>
+              <q-avatar size="26px" :style="{ background: colorOfEntry(e) }" text-color="white">
+                <q-icon :name="iconOfEntry(e)" size="14px" />
+              </q-avatar>
+            </q-item-section>
+            <q-item-section>
+              <q-item-label>{{ labelOfEntry(e) }}</q-item-label>
+              <q-item-label caption>
+                {{ e.date.slice(5) }} · {{ meta.byId[e.payer_id]?.display_name }}
+              </q-item-label>
+            </q-item-section>
+            <q-item-section side :class="e.amount_jpy < 0 ? 'text-positive' : 'text-grey-9'">
+              {{ formatYen(e.amount_jpy) }}
+            </q-item-section>
+            <q-item-section side><q-icon name="chevron_right" color="grey-5" size="18px" /></q-item-section>
+          </q-item>
+        </q-list>
+        <div v-else class="text-caption text-grey-6 q-px-md q-pb-md">{{ t('bill.othersEmpty') }}</div>
+      </div>
+
+      <div class="text-subtitle2 q-px-md q-pt-md q-pb-xs">{{ t('bill.perMember') }}</div>
       <q-list separator>
-        <q-item v-for="row in bill.members" :key="row.member_id">
+        <q-item
+          v-for="row in bill.members"
+          :key="row.member_id"
+          :class="{ 'bg-blue-1': row.member_id === auth.me?.id }"
+        >
           <q-item-section avatar>
             <q-avatar size="32px" :style="{ background: colorOf(row.member_id) }" text-color="white">
               {{ nameOf(row.member_id).slice(0, 1) }}
@@ -71,42 +123,48 @@
           {{ bill.transfers.length ? t('bill.plan', { n: bill.transfers.length }) : t('bill.planEmpty') }}
         </div>
         <q-card v-for="(tr, i) in bill.transfers" :key="i" flat bordered class="q-mb-sm">
-          <q-card-section class="row items-center q-py-sm">
+          <q-card-section class="row items-center q-py-sm q-px-md">
             <div class="col">
-              <span class="text-weight-medium">{{ nameOf(tr.from_id) }}</span>
-              <q-icon name="arrow_forward" size="16px" class="q-mx-xs text-grey-6" />
-              <span class="text-weight-medium">{{ nameOf(tr.to_id) }}</span>
-              <div class="text-h6">{{ formatYen(tr.amount) }}</div>
+              <div class="text-caption text-grey-7">
+                {{ nameOf(tr.from_id) }}
+                <q-icon name="arrow_forward" size="13px" class="q-mx-xs" />
+                {{ nameOf(tr.to_id) }}
+              </div>
+              <div class="text-subtitle1 text-weight-medium">{{ formatYen(tr.amount) }}</div>
             </div>
+            <!-- 收钱的人说「已收到」，付钱的人说「我转了」—— 记的是同一笔，
+                 只是措辞对得上谁在操作。都不是的人不显示按钮：
+                 原来对所有人显示「已收到」，Kan 一点就替 Go 确认了收款，
+                 而 Go 那边钱还没到 -->
+            <q-icon
+              v-if="bill.settled_transfers[i]"
+              name="check_circle"
+              color="positive"
+              size="24px"
+            />
             <q-btn
+              v-else-if="auth.me?.id === tr.to_id || auth.me?.id === tr.from_id"
+              dense
               color="primary"
               no-caps
               unelevated
-              :disable="!bill.is_draft"
+              padding="6px 14px"
               :loading="busy === i"
-              :label="t('bill.received')"
+              :label="auth.me?.id === tr.to_id ? t('bill.received') : t('bill.iPaid')"
               @click="confirmReceived(tr, i)"
             />
           </q-card-section>
         </q-card>
       </div>
 
-      <div class="q-px-md q-gutter-sm column">
-        <q-btn outline color="primary" no-caps icon="content_copy" :label="t('bill.copy')" @click="copyBill" />
-        <q-btn
-          v-if="bill.is_draft"
-          color="primary" no-caps unelevated icon="task_alt"
-          :label="t('bill.cut')"
-          :disable="!bill.entry_count"
-          @click="doCut"
-        />
+      <div class="q-px-md q-pb-md">
         <q-btn
           v-if="statements.length"
-          flat color="grey-8" no-caps icon="history" :label="t('bill.history')"
+          flat dense color="grey-7" no-caps icon="history" :label="t('bill.history')"
         >
           <q-menu>
             <q-list style="min-width: 180px">
-              <q-item v-if="!viewing" clickable v-close-popup @click="open(null)">
+              <q-item v-if="viewing" clickable v-close-popup @click="open(null)">
                 <q-item-section>{{ t('bill.draft') }}</q-item-section>
               </q-item>
               <q-item v-for="st in statements" :key="st.id" clickable v-close-popup @click="open(st.id)">
@@ -119,7 +177,61 @@
           </q-menu>
         </q-btn>
       </div>
+
+      <!-- 主操作固定在拇指区，和记一笔那屏一个规矩：这一页很长，
+           「出账单」压在最底下的话每次都要先滚到底 -->
+      <div class="actions">
+        <q-btn
+          class="col"
+          outline
+          color="primary"
+          no-caps
+          icon="content_copy"
+          :label="t('bill.copy')"
+          @click="copyBill"
+        />
+        <q-btn
+          v-if="bill.is_draft"
+          class="col-auto q-ml-sm"
+          color="primary"
+          no-caps
+          unelevated
+          icon="task_alt"
+          :label="t('bill.cut')"
+          :disable="!bill.entry_count"
+          @click="doCut"
+        />
+      </div>
+
     </template>
+
+    <!-- 出账完成：立刻告诉大家谁该转多少 -->
+    <q-dialog v-model="showCutResult">
+      <q-card style="width: 92vw">
+        <q-card-section class="q-pb-none">
+          <div class="text-subtitle1 text-weight-medium">{{ t('bill.cutDoneTitle') }}</div>
+          <div class="text-caption text-grey-7 q-mt-xs">{{ t('bill.cutDoneHint') }}</div>
+        </q-card-section>
+        <q-card-section>
+          <div v-if="!cutResult?.transfers.length" class="text-grey-7">{{ t('bill.planEmpty') }}</div>
+          <div
+            v-for="(tr, i) in cutResult?.transfers ?? []"
+            :key="i"
+            class="row items-baseline q-py-xs"
+          >
+            <div>{{ nameOf(tr.from_id) }}</div>
+            <q-icon name="arrow_forward" size="14px" class="q-mx-xs text-grey-6" />
+            <div>{{ nameOf(tr.to_id) }}</div>
+            <q-space />
+            <div class="text-subtitle1 text-weight-medium">{{ formatYen(tr.amount) }}</div>
+          </div>
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn flat no-caps :label="t('bill.copy')" @click="copyBill" />
+          <q-btn v-close-popup flat no-caps color="primary" :label="t('common.confirm')" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
 
     <!-- 剪贴板在非 HTTPS 下用不了（局域网 http 访问就会撞上），退回让人手动长按复制 -->
     <q-dialog v-model="showFallback">
@@ -137,12 +249,13 @@
 import { useQuasar } from 'quasar'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import { ApiError, api } from 'src/api/client'
-import type { Statement } from 'src/api/types'
+import type { Entry, Statement } from 'src/api/types'
 import MonthlyFixed from 'src/components/MonthlyFixed.vue'
 import { formatYen } from 'src/i18n'
+import { useAuth } from 'src/stores/auth'
 import { useLedger } from 'src/stores/ledger'
 import { useMeta } from 'src/stores/meta'
 
@@ -164,6 +277,12 @@ interface Bill {
   covers_from: string | null
   covers_to: string | null
   edited_after_cut: { count: number; frozen_total: number | null; live_total: number } | null
+  prev_cut_at: string | null
+  prev_label: string | null
+  days_since_prev_cut: number | null
+  suggest_monthly: boolean
+  settled: boolean
+  settled_transfers: boolean[]
   total_expense: number
   total_income: number
   entry_count: number
@@ -176,17 +295,49 @@ interface Bill {
 const { t } = useI18n()
 const $q = useQuasar()
 const route = useRoute()
+const router = useRouter()
+
+/** 点一条明细就去改它。已出账的照样能改：差额自己进下一张的「上期结转」 */
+function editEntry(id: number) {
+  void router.push({ name: 'entry-edit', params: { id: String(id) } })
+}
 const meta = useMeta()
+const auth = useAuth()
 const ledger = useLedger()
 
 const bill = ref<Bill | null>(null)
 const statements = ref<Statement[]>([])
+const draftEntries = ref<Entry[]>([])
 const viewing = ref<number | null>(null)   // null ＝ 当前这张还没出的草稿
 const busy = ref<number | null>(null)
 const showFallback = ref(false)
+const cutResult = ref<Bill | null>(null)
 
 const nameOf = (id: number) => meta.byId[id]?.display_name ?? String(id)
 const colorOf = (id: number) => meta.byId[id]?.color ?? '#90a4ae'
+
+/** 自己在这张账单上的那一行 */
+const showCutResult = computed({
+  get: () => cutResult.value !== null,
+  set: (v) => {
+    if (!v) cutResult.value = null
+  },
+})
+
+const mine = computed(
+  () => bill.value?.members.find((r) => r.member_id === auth.me?.id) ?? null,
+)
+const mineText = computed(() => {
+  const row = mine.value
+  if (!row) return ''
+  if (row.closing === 0) return t('bill.youSettled')
+  if (row.closing > 0) return t('bill.youReceive', { amount: formatYen(row.closing) })
+  const to = bill.value?.transfers.find((x) => x.from_id === row.member_id)
+  return t('bill.youPay', {
+    to: to ? nameOf(to.to_id) : '',
+    amount: formatYen(Math.abs(row.closing)),
+  })
+})
 
 const dueText = computed(() => {
   const day = meta.setting<number | null>('settle_due_day', null)
@@ -217,7 +368,25 @@ async function load() {
   bill.value = id
     ? await api.get<Bill>(`/api/statements/${id}/bill`)
     : await api.get<Bill>('/api/bill')
+  draftEntries.value = await api.get<Entry[]>(
+    id ? `/api/entries?statement_id=${id}&limit=200` : '/api/entries?unbilled_only=true&limit=200',
+  )
 }
+
+/** 这张账单上非固定费的明细（日用品/食費/收入之类）。转账不算，它们在下面的方案里 */
+const others = computed(() =>
+  draftEntries.value.filter((e) => {
+    if (e.kind === 'settlement') return false
+    const cat = e.category_id === null ? undefined : meta.categoryById[e.category_id]
+    return !cat?.monthly
+  }),
+)
+
+const categoryOfEntry = (e: Entry) =>
+  e.category_id === null ? undefined : meta.categoryById[e.category_id]
+const colorOfEntry = (e: Entry) => categoryOfEntry(e)?.color ?? '#90a4ae'
+const iconOfEntry = (e: Entry) => categoryOfEntry(e)?.icon ?? 'receipt_long'
+const labelOfEntry = (e: Entry) => e.title || categoryOfEntry(e)?.name || t(`kind.${e.kind}`)
 
 async function open(id: number | null) {
   viewing.value = id
@@ -282,6 +451,9 @@ function confirmReceived(tr: BillTransfer, index: number) {
     if (!amount || amount <= 0) return
     busy.value = index
     try {
+      // 转账发生在出账之后，所以它进的是**下一张**草稿 —— 这是对的：
+      // 账单是对「出账那一刻」的陈述，之后收到的钱属于下一轮。
+      // 但记账的入口留在这张单子上，因为方案就在这儿。
       await ledger.create({
         kind: 'settlement',
         date: new Date().toISOString().slice(0, 10),
@@ -300,12 +472,39 @@ function confirmReceived(tr: BillTransfer, index: number) {
 
 /** 出账单：把这一刻之前记的账归到一张单子上。**不锁定任何东西** */
 function doCut() {
-  $q.dialog({ title: t('bill.cut'), message: t('bill.cutConfirm'), cancel: true }).onOk(async () => {
+  // 默认勾上＝这张单子把固定费也结了。不勾＝把固定费留在草稿里，只结日常那部分。
+  // 刚出过账又出一张（后端按设置里的天数判定），固定费那轮还没到，默认就别带上 ——
+  // 但得把理由写出来，不然框子自己跳成没勾会让人以为坏了。
+  const withMonthlyByDefault = bill.value?.suggest_monthly !== false
+  // 只有默认没勾上时才多说一句。Quasar 的对话框不认换行，要换行就得开 html
+  const gap = bill.value?.days_since_prev_cut ?? 0
+  let hint = ''
+  if (!withMonthlyByDefault) {
+    hint = gap === 0 ? t('bill.monthlyOffHintToday') : t('bill.monthlyOffHint', { n: gap })
+  }
+  $q.dialog({
+    title: t('bill.cut'),
+    message: hint ? `${t('bill.cutConfirm')}<br><br>${hint}` : t('bill.cutConfirm'),
+    html: Boolean(hint),
+    cancel: true,
+    options: {
+      type: 'checkbox',
+      model: withMonthlyByDefault ? ['monthly'] : [],
+      items: [{ label: t('bill.includeMonthly'), value: 'monthly' }],
+    },
+  }).onOk(async (picked: string[]) => {
     try {
-      await api.post('/api/statements')
-      viewing.value = null
+      const withMonthly = picked.includes('monthly')
+      const st = await api.post<Statement>(`/api/statements?include_monthly=${withMonthly}`)
+      // 出完账立刻把「谁给谁多少」摆出来 —— 这是出账之后马上要做的事，
+      // 不该让人再自己翻回去找
+      const cut = await api.get<Bill>(`/api/statements/${st.id}/bill`)
+      cutResult.value = cut
+      viewing.value = st.id
       await load()
-      $q.notify({ type: 'positive', message: t('bill.cutDone'), timeout: 1500 })
+      // 记一笔那屏的「日期不许选回已出账范围」靠 ledger.prevCutAt，
+      // 出完账不刷新的话它还是出账前的旧值，锁就形同虚设
+      await ledger.refresh()
     } catch (e) {
       $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e) })
     }
@@ -315,6 +514,27 @@ function doCut() {
 
 <style scoped>
 .head { border-bottom: 1px solid rgba(0, 0, 0, 0.08); }
+/* 自己那笔：这一屏最该一眼看到的东西 */
+.mine { font-size: 17px; font-weight: 600; }
+.mine.owe { color: #c10015; }
+.mine.owed { color: #21ba45; }
+
+/* 主操作条：压在底部 Tab 之上 */
+.actions :deep(.q-btn) { min-height: 44px; }
+.actions {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--nagaya-footer-h) + env(safe-area-inset-bottom));
+  display: flex;
+  padding: 8px 12px;
+  background: #fff;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+}
+.page {
+  /* 给固定操作条留位，否则滚到底时最后一块会被它盖住 */
+  padding-bottom: calc(var(--nagaya-footer-h) + 78px + env(safe-area-inset-bottom));
+}
 .bill-text {
   white-space: pre-wrap;
   word-break: break-word;

@@ -66,6 +66,15 @@ onMounted(async () => {
 })
 </script>
 
+<!-- 非 scoped：底栏高度给固定操作条用。
+     两个页面都曾把它写死成 50px，而实际是 57px（56 tabs + 1 border），
+     于是主操作按钮和 Tab 只隔 1px，拇指偏一点就点错。 -->
+<style>
+:root {
+  --nagaya-footer-h: 57px;
+}
+</style>
+
 <style scoped>
 /* 刘海屏/手势条：底栏内缩到安全区以内，否则最后一个 tab 会被手势条压住 */
 .footer-safe {

@@ -13,9 +13,9 @@ import datetime as dt
 import pytest
 from sqlmodel import Session, select
 
-from app.models import EntryKind, Statement
+from app.models import EntryKind, Statement, now_utc
 from app.services import settings as settings_svc
-from app.services.bill import BillError, build_bill, cut_statement
+from app.services.bill import BillError, build_bill, cut_statement, entries_of
 from app.services.ledger import balances, create_entry, update_entry
 
 SEP = dt.date(2026, 9, 10)
@@ -101,11 +101,11 @@ def test_income_and_prepayment_show_up(session: Session, members) -> None:
     assert sum(r["closing"] for r in bill["members"]) == 0
 
 
-def test_editing_after_cut_is_allowed_and_visible(session: Session, members) -> None:
-    """**不锁定，但要可见。**
+def test_editing_a_billed_entry_is_visible(session: Session, members) -> None:
+    """已出账的账目随时能改 —— 但改了必须看得见。
 
-    钱不会算错（余额全局累计），可要是下一张账单上冒出个「上期结转」没人解释得清，
-    那就是另一种伤害。所以出账后被改过的账单必须自己说出来。
+    没有锁：余额是全局累计的，改了钱也不会算错，差额进下一张的「上期结转」。
+    留痕才是要紧事，否则下一张单子上冒出来的结转没人解释得清。
     """
     a, *_ = members
     e = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
@@ -165,3 +165,209 @@ def test_statements_are_ordered_and_labelled(session: Session, members) -> None:
     assert first.covers_from == SEP and first.covers_to == SEP
     assert second.covers_from == OCT
     assert "出账" in first.label
+
+
+def test_settled_when_every_planned_transfer_is_recorded(session: Session, members) -> None:
+    """「转账按钮都点过了就显示结清」。"""
+    a, b, c = members
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                 amount=120_000, payer_id=a.id)
+    st = cut_statement(session, actor_id=a.id)
+
+    bill = build_bill(session, st)
+    assert bill["settled"] is False
+    assert bill["settled_transfers"] == [False, False]
+
+    for t in bill["transfers"]:
+        create_entry(session, actor_id=t["from_id"], kind=EntryKind.settlement,
+                     on=dt.date(2026, 10, 15), amount=t["amount"],
+                     payer_id=t["from_id"], to_member_id=t["to_id"])
+
+    done = build_bill(session, st)
+    assert done["settled_transfers"] == [True, True]
+    assert done["settled"] is True
+
+
+def test_partial_settlement_is_not_settled(session: Session, members) -> None:
+    """只还了一部分不算结清 —— 那是赊账，差额进下一张。"""
+    a, b, c = members
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                 amount=120_000, payer_id=a.id)
+    st = cut_statement(session, actor_id=a.id)
+    plan = build_bill(session, st)["transfers"]
+
+    create_entry(session, actor_id=plan[0]["from_id"], kind=EntryKind.settlement,
+                 on=dt.date(2026, 10, 15), amount=plan[0]["amount"] // 2,
+                 payer_id=plan[0]["from_id"], to_member_id=plan[0]["to_id"])
+    bill = build_bill(session, st)
+    assert bill["settled"] is False
+    assert bill["settled_transfers"][0] is False
+
+
+def test_cut_without_monthly_leaves_fixed_costs_in_draft(session: Session, members) -> None:
+    """提前出个小账：只结日常那部分，固定费留在草稿里等账单来。"""
+    from app.models import Category
+
+    a, *_ = members
+    rent = Category(name="家賃", monthly=True)
+    daily = Category(name="日用品", monthly=False)
+    session.add(rent)
+    session.add(daily)
+    session.commit()
+    session.refresh(rent)
+    session.refresh(daily)
+
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                 amount=120_000, payer_id=a.id, category_id=rent.id)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                 amount=1_380, payer_id=a.id, category_id=daily.id)
+
+    st = cut_statement(session, actor_id=a.id, include_monthly=False)
+    assert build_bill(session, st)["total_expense"] == 1_380       # 只出了日常
+    assert build_bill(session, None)["total_expense"] == 120_000   # 家賃还在草稿里
+
+
+def test_cut_without_monthly_refuses_when_nothing_daily(session: Session, members) -> None:
+    from app.models import Category
+
+    a, *_ = members
+    rent = Category(name="家賃", monthly=True)
+    session.add(rent)
+    session.commit()
+    session.refresh(rent)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                 amount=120_000, payer_id=a.id, category_id=rent.id)
+
+    with pytest.raises(BillError) as exc:
+        cut_statement(session, actor_id=a.id, include_monthly=False)
+    assert exc.value.code == "nothing_to_cut"
+
+
+def test_covers_only_when_billing_period_reaches_outside(session: Session, members) -> None:
+    """「含 7〜8 月水费」只在计费期间真的伸出本单范围时才标。
+
+    本期内的常规项也标的话，这句话会变成一长串，把「这个月为什么贵了一万二」
+    这个唯一有用的信号自己淹掉。
+    """
+    a, *_ = members
+    # 跨出去的：7〜8 月的水费，9 月这张单子上收到
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                 amount=12_000, payer_id=a.id, title="水道",
+                 period_start=dt.date(2026, 7, 1), period_end=dt.date(2026, 8, 31))
+    # 没跨出去的：期间就落在本单覆盖的日期里
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=dt.date(2026, 9, 12),
+                 amount=8_700, payer_id=a.id, title="電気",
+                 period_start=SEP, period_end=dt.date(2026, 9, 12))
+
+    bill = build_bill(session, None)
+    assert [c["title"] for c in bill["covers"]] == ["水道"]
+
+
+def test_bill_reports_previous_cut_time(session: Session, members) -> None:
+    """前端要拿它显示「上次出账」，也用来挡住把日期选回上一张账单里。"""
+    a, *_ = members
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                 amount=1_000, payer_id=a.id)
+    assert build_bill(session, None)["prev_cut_at"] is None
+
+    first = cut_statement(session, actor_id=a.id)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=OCT,
+                 amount=2_000, payer_id=a.id)
+    draft = build_bill(session, None)
+    assert draft["prev_cut_at"] is not None
+    assert draft["prev_label"] == first.label
+
+
+def test_snapshot_does_not_freeze_settlement_progress(session: Session, members) -> None:
+    """快照里不该有 settled —— 转账是出账之后才发生的，冻结下来就是假值。"""
+    a, *_ = members
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                 amount=120_000, payer_id=a.id)
+    st = cut_statement(session, actor_id=a.id)
+    assert "settled" not in st.snapshot_json
+    assert "settled_transfers" not in st.snapshot_json
+    # 实时那份仍然要算得出来
+    assert build_bill(session, st)["settled"] is False
+
+
+def test_suggest_monthly_turns_off_right_after_a_cut(session: Session, members) -> None:
+    """刚出过账又出一张，多半是临时结的小账 —— 固定费默认别带上。
+
+    只影响勾选框的默认值，出账逻辑本身不看它；阈值在设置里，不写死。
+    """
+    a, *_ = members
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                 amount=1_000, payer_id=a.id)
+
+    # 头一张账单没有「上次」，当然该带上固定费
+    first_draft = build_bill(session, None)
+    assert first_draft["days_since_prev_cut"] is None
+    assert first_draft["suggest_monthly"] is True
+
+    st = cut_statement(session, actor_id=a.id)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=OCT,
+                 amount=2_000, payer_id=a.id)
+
+    def backdate(days: int) -> dict:
+        st.cut_at = now_utc() - dt.timedelta(days=days)
+        session.add(st)
+        session.commit()
+        return build_bill(session, None)
+
+    near = backdate(5)
+    assert near["days_since_prev_cut"] == 5
+    assert near["suggest_monthly"] is False
+
+    far = backdate(25)
+    assert far["days_since_prev_cut"] == 25
+    assert far["suggest_monthly"] is True
+
+    # 阈值可调：改小了，5 天也算隔得够久
+    settings_svc.set_(session, "monthly_gap_days", 3)
+    assert backdate(5)["suggest_monthly"] is True
+
+
+def test_overpayment_comes_back_in_the_next_bill(session: Session, members) -> None:
+    """改了已出账的账，多付的钱在下一张账单里自己扣回来 —— 这是不上锁的全部底气。
+
+    顺带守住另一半：**那张已出的单子，转账方案和「已收到」的勾不许跟着变**。
+    方案是真发到群里、大家照着转的钱；它一变，按下标对位的勾就会对到别的行上去。
+    """
+    a, b, c = members
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                 amount=30_000, payer_id=a.id)
+    st = cut_statement(session, actor_id=a.id)
+
+    issued = build_bill(session, st)
+    plan_before = [dict(t) for t in issued["transfers"]]
+    assert plan_before, "这张单子本来就该有转账方案"
+
+    # 大家照着方案转完钱
+    for t in plan_before:
+        create_entry(session, actor_id=t["from_id"], kind=EntryKind.settlement, on=SEP,
+                     amount=t["amount"], payer_id=t["from_id"], to_member_id=t["to_id"])
+    assert build_bill(session, st)["settled"] is True
+
+    # 事后发现这笔其实只有 18,000 —— 大家多付了
+    e = next(x for x in entries_of(session, st.id) if x.kind == EntryKind.expense)
+    update_entry(session, e, actor_id=a.id, version=e.version, fields={"amount_jpy": 18_000})
+
+    after = build_bill(session, st)
+    assert [dict(t) for t in after["transfers"]] == plan_before   # 历史方案不动
+    assert after["settled"] is True                               # 勾也不动
+    assert after["edited_after_cut"]["count"] == 1                # 但要标出来
+
+    # 下一张草稿：改小后每人只该担 6,000，可是当初照 10,000 转的钱已经付出去了 ——
+    # 差额 4,000 一分不差地摆在下一张上，变成「a 该还 b、c 各 4,000」
+    draft = build_bill(session, None)
+    assert row_of(draft, b.id)["opening"] == -6_000      # 已出账那部分的应担
+    assert row_of(draft, b.id)["transferred_out"] == 10_000
+    assert row_of(draft, b.id)["closing"] == 4_000       # 多付了 4,000，应收
+    assert row_of(draft, c.id)["closing"] == 4_000
+    assert row_of(draft, a.id)["closing"] == -8_000
+    assert sum(r["closing"] for r in draft["members"]) == 0
+    assert sorted((t["from_id"], t["to_id"], t["amount"]) for t in draft["transfers"]) == [
+        (a.id, b.id, 4_000),
+        (a.id, c.id, 4_000),
+    ]
+    assert sum(balances(session).values()) == 0

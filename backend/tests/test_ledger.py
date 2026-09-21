@@ -143,11 +143,11 @@ def test_settlement_lands_in_the_current_draft(session, members) -> None:
     assert balances(session)[b.id] == 0     # 但钱已经算清了
 
 
-def test_editing_a_billed_entry_is_allowed_and_self_corrects(session, members) -> None:
-    """已出账的账目仍然能改 —— 不锁定。
+def test_editing_a_billed_entry_self_corrects(session, members) -> None:
+    """已出账的账目也随便改，钱不会算错。
 
-    余额全局累计，差额会原样出现在下一张账单的「上期结转」里，钱不会算错。
-    所以不需要「关账」那道门，只需要把改动**显示出来**。
+    余额全局累计，差额会原样出现在下一张账单的「上期结转」里 ——
+    多付了就在下张扣回来，少付了就补上，不需要任何锁。
     """
     from app.services.bill import cut_statement
     from app.services.ledger import update_entry

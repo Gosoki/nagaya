@@ -113,7 +113,7 @@ test('分摊编辑器：实时算钱、合计对得上', async ({ page }) => {
   await page.locator('input.amount').fill('10000')
   await page.locator('.split-panel [role="button"]').first().click()
 
-  const shares = page.locator('.share')
+  const shares = page.locator('.member-row .share-col')
   // 必须验可见：q-expansion-item 折叠着的时候内容也在 DOM 里，
   // 光用 toHaveCount 断言，即使根本没展开也会绿。
   await expect(shares.first()).toBeVisible()
@@ -347,7 +347,7 @@ test('账单页固定费：没录的项只给灰色参考，绝不预填成真�
     expect(b.value, '上期金额被预填成真值了').toBe('')
   }
   expect(boxes.some((b) => b.placeholder !== ''), '一个参考值都没有，说明 hint 没接上').toBe(true)
-  await expect(page.getByRole('button', { name: '没有改动' })).toBeDisabled()
+  await expect(page.getByText('改完自动保存')).toBeVisible()
   await page.screenshot({ path: 'e2e/shots/13-monthly-hint.png' })
 
 })
@@ -363,8 +363,8 @@ test('账单页固定费：填一项存下去，账单跟着涨且留在这张�
   // 总额一改就和每人金额对不上，会被正确拦下 —— 那是另一条用例要验的事
   const denki = page.locator('.q-expansion-item').filter({ hasText: '電気' }).locator('.amount-input')
   await denki.fill('9100')
-  await page.getByRole('button', { name: /保存 \d+ 项/ }).click()
-  await expect(page.getByRole('button', { name: '没有改动' })).toBeVisible({ timeout: 10_000 })
+  await denki.blur()                                  // 离开输入框就存，没有保存按钮
+  await expect(page.getByText('改完自动保存')).toBeVisible({ timeout: 10_000 })
 
   // 草稿账单的总额跟着涨 —— 这笔确实进了当前这张，没跑到别处
   const bill = await (await page.request.get('/api/bill', { headers })).json()
@@ -405,7 +405,7 @@ test('账单页固定费：固定金额分类改了总额没改分摊，必须�
   // 合计就对不上了 —— 必须当场拦住，而且要说清差多少，不能只说一句「不平」
   const yachin = page.locator('.q-expansion-item').filter({ hasText: '家賃' }).locator('.amount-input')
   await yachin.fill('30000')
-  await page.getByRole('button', { name: /保存 \d+ 项/ }).click()
+  await yachin.blur()
   const note = page.locator('.q-notification')
   await expect(note).toContainText('家賃')
   await expect(note).toContainText('90,000')      // 30000 − 120000
@@ -413,16 +413,39 @@ test('账单页固定费：固定金额分类改了总额没改分摊，必须�
     .toBe(0)                                       // 没存进去
 })
 
-test('固定费不必等到出账单：记一笔那屏就有入口', async ({ page }) => {
+test('固定费不必等到出账单：账单 Tab 一点就到', async ({ page }) => {
   await login(page)
-  await page.getByText('本期固定费').click()
-  await expect(page).toHaveURL(/\/monthly$/)
+  // 记一笔那屏不再放固定费入口 —— 账单已经是 Tab，一点就到，再放一个是重复
+  await expect(page.getByText('本期固定费')).toHaveCount(0)
+  await expect(page.locator('.cat')).toHaveCount(3)
+
+  await page.getByRole('tab', { name: '账单' }).click()
   await expect(page.getByText('本期固定费')).toBeVisible()
   await expect(page.locator('.amount-input').first()).toBeVisible()
-  // 账单在 Tab 上，一点就到，这屏不用再放一个重复的入口
-  await expect(page.getByRole('tab', { name: '账单' })).toBeVisible()
   await expectNoHorizontalScroll(page)
   await page.screenshot({ path: 'e2e/shots/14-monthly-standalone.png' })
+})
+
+test('记一笔：分摊默认就是展开的', async ({ page }) => {
+  await login(page)
+  await page.locator('input.amount').fill('3000')
+  // 不用点「改分摊」，每人分多少直接看得见
+  await expect(page.locator('.member-row .share-col').first()).toBeVisible()
+  const texts = await page.locator('.member-row .share-col').allTextContents()
+  expect(texts.reduce((s, t) => s + Number(t.replace(/[^\d-]/g, '')), 0)).toBe(3000)
+})
+
+test('账单页在固定费下面也列出本期其他开销', async ({ page }) => {
+  await login(page)
+  await page.getByRole('tab', { name: '账单' }).click()
+  await expect(page.getByText('本期其他')).toBeVisible()
+  // 种子数据里有日用品和返现，都不是固定费，应当出现在这一块
+  await expect(page.getByText('トイレットペーパー')).toBeVisible()
+  // 固定费不该在这里重复出现
+  const others = page.locator('.others')
+  await expect(others.getByText('家賃')).toHaveCount(0)
+  await expectNoHorizontalScroll(page)
+  await page.screenshot({ path: 'e2e/shots/17-bill-others.png', fullPage: true })
 })
 
 test('自己加一项固定费，它就留在这张表里', async ({ page }) => {
@@ -518,4 +541,45 @@ test('账单 Tab 上就能看到并填固定费', async ({ page }) => {
   await expect(page.getByText(/转账方案/)).toBeVisible()
   await expectNoHorizontalScroll(page)
   await page.screenshot({ path: 'e2e/shots/16-bill-tab.png', fullPage: true })
+})
+
+test('点一条账目进去改：金额改得动，自定义分摊不会被打回默认', async ({ page }) => {
+  await login(page)
+  const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
+
+  // 自备前提：记一笔带「调整」的账（3000，有人少担 600）
+  await page.locator('input.amount').fill('3000')
+  await page.getByRole('button', { name: '日用品' }).click()
+  await page.getByPlaceholder('备注（选填）').fill('E2E改这笔')
+  await page.locator('.adj-col .num-input').first().fill('-600')
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.locator('.q-notification')).toContainText('已记下')
+
+  // 从账目列表点进去
+  await page.goto('/entries')
+  await page.getByText('E2E改这笔').click()
+  await expect(page.getByText('改这一笔')).toBeVisible()
+  await expect(page.locator('input.amount')).toHaveValue('3,000')
+
+  // **这条是要害**：分摊要从这笔自己的规则起步。
+  // 从分类默认值起步的话，一打开就被悄悄改回 1:1:1，按下保存才发现钱变了。
+  await expect(page.locator('.adj-col .num-input').first()).toHaveValue('-600')
+  const shares = await page.locator('.member-row .share-col').allTextContents()
+  expect(shares.map((s) => Number(s.replace(/[^\d-]/g, ''))).sort((a, b) => a - b))
+    .toEqual([600, 1200, 1200])
+
+  // 改金额存回去
+  await page.locator('input.amount').fill('4500')
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.locator('.q-notification')).toContainText('已记下')
+
+  await page.goto('/entries')
+  await expect(page.locator('.q-item').filter({ hasText: 'E2E改这笔' })).toContainText('4,500')
+
+  // 分摊照旧按「少担 600」算：(4500+600)/3 = 1700，那个人 1100
+  const rows = await (await page.request.get('/api/entries?limit=20', { headers })).json()
+  const saved = rows.find((e: { title: string }) => e.title === 'E2E改这笔')
+  expect(saved.amount_jpy).toBe(4500)
+  expect(Object.values(saved.shares as Record<string, number>).sort((a, b) => a - b))
+    .toEqual([1100, 1700, 1700])
 })

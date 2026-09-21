@@ -23,64 +23,67 @@
       @update:model-value="onModeChange"
     />
 
-    <div v-for="m in members" :key="m.id" class="row items-center q-py-sm member-row">
-      <q-avatar size="30px" :style="{ background: m.color }" text-color="white" class="q-mr-sm">
-        {{ m.display_name.slice(0, 1) }}
-      </q-avatar>
-      <div class="col-auto name">{{ m.display_name }}</div>
+    <!-- 列头：比例 / 调整 / 应担 三件事摆在一排，一眼看得出它们的关系。
+         调整额原来藏在下面一个折叠里，看不见它是加在比例结果之上的 -->
+    <div class="row items-center head-row text-caption text-grey-6">
+      <div class="col name-col" />
+      <div v-if="mode === 'ratio'" class="col-auto weight-col text-center">{{ t('split.weight') }}</div>
+      <div v-if="mode === 'ratio'" class="col-auto adj-col text-right">{{ t('split.adjustment') }}</div>
+      <div v-else class="col-auto exact-col text-right">{{ t('split.amountCol') }}</div>
+      <!-- 固定金额模式不要「应担」这一列：输入框里就是金额，重复一遍没意义 -->
+      <div v-if="mode === 'ratio'" class="col-auto share-col text-right">{{ t('split.share') }}</div>
+    </div>
 
-      <q-space />
+    <div v-for="m in members" :key="m.id" class="row items-center member-row">
+      <div class="col name-col row items-center no-wrap">
+        <q-avatar size="28px" :style="{ background: m.color }" text-color="white" class="q-mr-sm">
+          {{ m.display_name.slice(0, 1) }}
+        </q-avatar>
+        <div class="name ellipsis">{{ m.display_name }}</div>
+      </div>
 
       <template v-if="mode === 'ratio'">
-        <q-btn
-          dense flat round icon="remove" size="sm"
-          :disable="(weights[String(m.id)] ?? 0) <= 0"
-          @click="bump(m.id, -1)"
-        />
-        <div class="weight">{{ weights[String(m.id)] ?? 0 }}</div>
-        <q-btn dense flat round icon="add" size="sm" @click="bump(m.id, 1)" />
+        <div class="col-auto weight-col row items-center justify-center no-wrap">
+          <q-btn
+            dense flat round icon="remove" padding="9px"
+            :disable="(weights[String(m.id)] ?? 0) <= 0"
+            @click="bump(m.id, -1)"
+          />
+          <div class="weight">{{ weights[String(m.id)] ?? 0 }}</div>
+          <q-btn dense flat round icon="add" padding="9px" @click="bump(m.id, 1)" />
+        </div>
+        <div class="col-auto adj-col">
+          <input
+            class="num-input"
+            type="text"
+            inputmode="numeric"
+            placeholder="0"
+            :value="adjDisplay(m.id)"
+            @input="onAdjInput(m.id, $event)"
+          />
+        </div>
       </template>
 
-      <input
-        v-else
-        class="exact-input"
-        type="text"
-        inputmode="numeric"
-        :value="exactDisplay(m.id)"
-        @input="onExactInput(m.id, $event)"
-      />
+      <div v-else class="col-auto exact-col">
+        <input
+          class="num-input"
+          type="text"
+          inputmode="numeric"
+          :value="exactDisplay(m.id)"
+          @input="onExactInput(m.id, $event)"
+        />
+      </div>
 
-      <!-- 固定金额模式下不显示这一列：输入框里就是金额，重复一遍没意义；
-           而且合计不平时预览算不出来，会全列显示 ¥0，看着像把钱算没了 -->
       <div
         v-if="mode === 'ratio'"
-        class="share"
+        class="col-auto share-col"
         :class="{ 'text-grey-5': (preview?.[String(m.id)] ?? 0) === 0 }"
       >
         {{ formatYen(preview?.[String(m.id)] ?? 0) }}
       </div>
     </div>
 
-    <q-expansion-item
-      v-if="mode === 'ratio'"
-      dense
-      :label="t('split.adjustment')"
-      header-class="text-grey-7 q-px-none"
-      class="q-mt-xs"
-    >
-      <div v-for="m in members" :key="m.id" class="row items-center q-py-xs">
-        <div class="col-4 text-grey-8">{{ m.display_name }}</div>
-        <input
-          class="adj-input col"
-          type="text"
-          inputmode="numeric"
-          placeholder="0"
-          :value="adjDisplay(m.id)"
-          @input="onAdjInput(m.id, $event)"
-        />
-      </div>
-      <div class="text-caption text-grey-6 q-mt-xs">{{ t('split.hint') }}</div>
-    </q-expansion-item>
+    <div class="text-caption text-grey-6 q-mt-xs">{{ t('split.hint') }}</div>
 
     <q-separator class="q-my-sm" />
 
@@ -266,22 +269,29 @@ defineExpose({
 
 <style scoped>
 .mode-toggle { border: 1px solid rgba(0, 0, 0, 0.12); border-radius: 8px; }
-.member-row { min-height: 44px; }        /* 触控目标不小于 44px */
+
+/* 375px 下的列宽预算：左右各 16 padding → 343 可用。
+   固定列 84+66+84 = 234，名字列拿剩下的并在必要时省略号收缩。 */
+.head-row { padding-bottom: 2px; }
+.name-col { min-width: 0; }
+.weight-col { width: 112px; }
+.adj-col { width: 62px; }
+.exact-col { width: 150px; }
+.share-col { width: 78px; text-align: right; font-variant-numeric: tabular-nums; font-size: 15px; }
+
+.member-row { min-height: 48px; }
+/* 44px 说的是**按钮本身**，不是整行 —— 原来 ± 只有 24×24，
+   三行挤在一起，拇指很容易点到相邻的那个甚至相邻成员 */
+.member-row :deep(.q-btn) { min-width: 40px; min-height: 40px; }
 .name { font-size: 15px; }
 .weight {
-  min-width: 28px;
+  min-width: 24px;
   text-align: center;
   font-variant-numeric: tabular-nums;
   font-size: 16px;
 }
-.share {
-  min-width: 92px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  font-size: 15px;
-}
-.exact-input,
-.adj-input {
+.num-input {
+  width: 100%;
   border: none;
   border-bottom: 1px solid rgba(0, 0, 0, 0.2);
   outline: none;
@@ -289,9 +299,9 @@ defineExpose({
   text-align: right;
   font-size: 15px;
   padding: 4px 2px;
-  width: 130px;
   font-variant-numeric: tabular-nums;
   color: inherit;
 }
+.num-input::placeholder { color: #ccc; }
 .total-bar { font-size: 15px; }
 </style>

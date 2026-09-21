@@ -20,21 +20,23 @@
     <div class="row items-center q-px-md q-pt-md q-pb-xs">
       <div class="text-subtitle2">{{ t('monthly.title') }}</div>
       <q-space />
-      <q-btn
-        dense
-        no-caps
-        unelevated
-        :color="dirtyCount ? 'primary' : 'grey-4'"
-        :text-color="dirtyCount ? 'white' : 'grey-7'"
-        :disable="!dirtyCount"
-        :loading="busy"
-        :label="dirtyCount ? t('monthly.save', { n: dirtyCount }) : t('monthly.nothingChanged')"
-        @click="save"
-      />
+      <!-- 没有保存按钮：离开输入框就存。这里只报状态。
+           dirtyCount > 0 只会在存失败时出现 —— 那时必须显眼，别让人以为存好了 -->
+      <div class="text-caption row items-center" :class="dirtyCount ? 'text-negative' : 'text-grey-6'">
+        <q-spinner v-if="busy" size="14px" class="q-mr-xs" />
+        {{ busy ? t('monthly.saving') : dirtyCount ? t('monthly.unsaved', { n: dirtyCount }) : t('monthly.autoSaved') }}
+      </div>
     </div>
 
     <q-list separator>
-      <q-expansion-item v-for="row in rows" :key="row.category_id" dense expand-icon-class="text-grey-5">
+      <q-expansion-item
+        v-for="row in rows"
+        :key="row.category_id"
+        dense
+        expand-icon-class="text-grey-5"
+        header-style="min-height:52px"
+        @update:model-value="(open: boolean) => !open && saveRow(row)"
+      >
         <template #header>
           <q-item-section avatar>
             <q-avatar size="30px" :style="{ background: row.color }" text-color="white">
@@ -43,7 +45,9 @@
           </q-item-section>
           <q-item-section>
             <q-item-label>{{ row.name }}</q-item-label>
-            <q-item-label caption :class="stateClass(row)">{{ stateText(row) }}</q-item-label>
+            <q-item-label v-if="stateText(row)" caption :class="stateClass(row)">
+              {{ stateText(row) }}
+            </q-item-label>
           </q-item-section>
           <q-item-section side>
             <input
@@ -55,6 +59,7 @@
               :value="row.text"
               @click.stop
               @input="onInput(row, $event)"
+              @blur="saveRow(row)"
             />
           </q-item-section>
         </template>
@@ -125,7 +130,7 @@
 
 <script setup lang="ts">
 import { useQuasar } from 'quasar'
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { ApiError, api } from 'src/api/client'
@@ -148,6 +153,8 @@ interface ApiRow {
   date: string | null
   hint: number | null
   hint_label: string | null
+  /** 本期这个分类一共有几笔。>1 说明这一行没显示全 */
+  entry_count: number
 }
 interface MonthlyData {
   default_date: string
@@ -240,56 +247,73 @@ function onRule(row: Row, rule: Record<string, unknown> | null, valid: boolean, 
 /** 本来有值、被清空了 —— 保存时删掉那笔。软删，进回收站，捞得回来 */
 const willDelete = (row: Row) => row.entry_id !== null && row.text === ''
 
+/**
+ * 这一行的状态说明。**正常录好的不出声** —— 黑色实数本身就说明录了，
+ * 五行里重复五次「已录」只是噪音。只有需要你注意的才说话。
+ */
 function stateText(row: Row): string {
+  if (row.entry_count > 1) return t('monthly.duplicate', { n: row.entry_count })
   if (willDelete(row)) return t('monthly.willDelete')
-  if (row.entry_id !== null) return t('monthly.recorded')
-  if (row.hint === null) return t('monthly.noHint')
+  if (row.entry_id !== null) return ''            // 正常已录：不出声
+  if (row.hint === null) return ''                // 从没录过也没参考：留空，别写「没录过」占位
   return t('monthly.hintFrom', { label: row.hint_label ?? '' })
 }
 const stateClass = (row: Row) =>
-  willDelete(row) ? 'text-negative' : row.entry_id !== null ? 'text-positive' : 'text-grey-6'
+  row.entry_count > 1
+    ? 'text-warning'
+    : willDelete(row)
+      ? 'text-negative'
+      : row.entry_id !== null
+        ? 'text-positive'
+        : 'text-grey-6'
 
-/**
- * 待保存的行数。**和保存循环用同一个判据**（`row.dirty`）。
- *
- * 原来这里另写了一套 `r.text !== String(r.amount)`，而 text 带千分位、amount 是裸数字：
- * 金额 ≥1000 时恒不等（计数虚高），<1000 时恒相等 —— 于是「只改分摊、不动金额」的行
- * 被判成没改动，保存按钮直接锁死，改了也存不进去。两套判据本来就不该存在。
- */
+/** 还没存上的行数（存失败才会 >0）。和 saveRow 用同一个判据 */
 const dirtyCount = computed(() => rows.value.filter((r) => r.dirty).length)
 
-async function save() {
-  const invalid = rows.value.find((r) => r.dirty && !r.rule_valid)
-  if (invalid) {
+/**
+ * 存一行。**离开输入框就调它**，没有保存按钮。
+ *
+ * 逐行存而不是整屏一把存：一行失败只影响那一行，它自己留在 dirty 状态继续显示错误，
+ * 别的行该存的已经存好了。整屏一把存的老做法在部分失败时会把没存上的输入一起清掉。
+ */
+async function saveRow(row: Row) {
+  if (!row.dirty || busy.value) return
+  if (!row.rule_valid) {
     $q.notify({
       type: 'negative',
-      message: `${invalid.name}: ${t('split.notBalanced', { n: formatPlain(invalid.rule_diff) })}`,
+      message: `${row.name}: ${t('split.notBalanced', { n: formatPlain(row.rule_diff) })}`,
       timeout: 5000,
     })
     return
   }
+  const value = valueOf(row)
   busy.value = true
-  let failed = 0
-  // 串行：SQLite 单写者，并发写容易撞 database is locked
-  for (const row of rows.value) {
-    if (!row.dirty) continue
-    const value = valueOf(row)
-    try {
-      if (willDelete(row)) {
-        await api.del(`/api/entries/${row.entry_id}`)
-      } else if (row.entry_id !== null) {
-        // **只发真正改过的字段**。尤其不发 payer_id —— 这一屏没有付款人选择器，
-        // 带上它就等于把别人垫的钱悄悄改到自己头上
-        await api.patch(`/api/entries/${row.entry_id}?version=${row.version}`, {
+  try {
+    if (willDelete(row)) {
+      await api.del(`/api/entries/${row.entry_id}`)
+      row.entry_id = null
+      row.version = null
+      row.amount = null
+    } else if (row.entry_id !== null) {
+      // **只发真正改过的字段**。尤其不发 payer_id —— 这一屏没有付款人选择器，
+      // 带上它就等于把别人垫的钱悄悄改到自己头上
+      const saved = await api.patch<{ id: number; version: number; amount_jpy: number }>(
+        `/api/entries/${row.entry_id}?version=${row.version}`,
+        {
           amount_jpy: value,
           period_start: row.period_start,
           period_end: row.period_end,
           ...(row.rule_override
             ? { rule: row.rule_override, member_ids: meta.activeMembers.map((m) => m.id) }
             : {}),
-        })
-      } else if (value > 0) {
-        await api.post('/api/entries', {
+        },
+      )
+      row.version = saved.version
+      row.amount = saved.amount_jpy
+    } else if (value > 0) {
+      const saved = await api.post<{ id: number; version: number; amount_jpy: number }>(
+        '/api/entries',
+        {
           kind: 'expense',
           date: data.value!.default_date,
           amount_jpy: value,
@@ -301,29 +325,35 @@ async function save() {
           rule: row.rule_override,
           // 和分摊预览用的是同一批人，避免预览与落库分摊到不同的人头上
           member_ids: meta.activeMembers.map((m) => m.id),
-        })
-      }
-      // **写成功就当场清掉这一行的 dirty**：后面的 load() 万一抛错，
-      // 这一行也不会还停在「待保存」状态让人再点一次，重复写一笔
-      row.dirty = false
-    } catch (e) {
-      failed += 1
-      $q.notify({
-        type: 'negative',
-        message: `${row.name}: ${e instanceof ApiError ? e.text : String(e)}`,
-        timeout: 5000,
-      })
+        },
+      )
+      row.entry_id = saved.id
+      row.version = saved.version
+      row.amount = saved.amount_jpy
+    } else {
+      row.dirty = false          // 空着又没录过：没什么可存的
+      return
     }
+    row.dirty = false
+    row.rule_override = null
+    emit('saved')                // 账单总额/转账方案跟着刷新
+  } catch (e) {
+    // 失败就留在 dirty，输入原样保着，人能看见也能改了重来
+    $q.notify({
+      type: 'negative',
+      message: `${row.name}: ${e instanceof ApiError ? e.text : String(e)}`,
+      timeout: 5000,
+    })
+  } finally {
+    busy.value = false
   }
-  busy.value = false
-  try {
-    await load()
-  } catch {
-    /* 重载失败不该把已经存好的结果说成失败 */
-  }
-  emit('saved')
-  if (failed) $q.notify({ type: 'warning', message: t('monthly.partialFail', { n: failed }) })
 }
+
+/** 离开这一屏时把还没存的行兜底存掉 —— 比如填完直接切了 Tab */
+async function flush() {
+  for (const row of rows.value) await saveRow(row)
+}
+onBeforeUnmount(flush)
 
 /**
  * 删掉一项固定费 —— **归档，不是真删**。
@@ -402,9 +432,13 @@ defineExpose({ reload: load })
   background: transparent;
   text-align: right;
   font-size: 16px;
-  padding: 4px 2px;
   font-variant-numeric: tabular-nums;
-  color: inherit;
+  /* **不能用 inherit**：会继承 Quasar 次级文字色 rgba(0,0,0,.54)，
+     跟 #c8c8c8 的占位只差一档。而「正常已录不显示标签」的全部理由
+     就是「实数本身看得出录了」—— 前提是它真的够黑 */
+  color: rgba(0, 0, 0, 0.87);
+  height: 44px;              /* 触控目标；原来 33px，相邻两行之间留出一条会误展开的带 */
+  padding: 0 2px;
 }
 /* 灰色占位＝上次的参考，不是值。改过的才变实色 */
 .amount-input::placeholder { color: #c8c8c8; }

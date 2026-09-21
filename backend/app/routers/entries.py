@@ -56,6 +56,19 @@ def list_entries(
     return [to_entry_out(session, e) for e in session.exec(stmt)]
 
 
+@router.get("/{entry_id}", response_model=EntryOut)
+def get_entry(
+    entry_id: int,
+    session: Session = Depends(get_session),
+    _: Member = Depends(current_member),
+):
+    """单独取一笔 —— 编辑页按 id 直接开，刷新和深链都能用。"""
+    entry = session.get(Entry, entry_id)
+    if entry is None or entry.deleted_at is not None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "账目不存在")
+    return to_entry_out(session, entry)
+
+
 @router.post("", response_model=EntryOut, status_code=status.HTTP_201_CREATED)
 def create_entry(
     body: EntryIn,

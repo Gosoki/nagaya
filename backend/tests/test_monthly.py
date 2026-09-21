@@ -90,8 +90,10 @@ def test_deleted_entries_do_not_become_hints(session, members) -> None:
     c = cats(session)
     e = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG,
                      amount=8_700, payer_id=a.id, category_id=c["電気"].id)
+    delete_entry(session, e, actor_id=a.id)      # 出账前删掉
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG,
+                 amount=1, payer_id=a.id, category_id=c["水道"].id)
     cut_statement(session, actor_id=a.id)
-    delete_entry(session, e, actor_id=a.id)
     assert rows_by_name(session)["電気"]["hint"] is None
 
 
@@ -105,3 +107,23 @@ def test_rule_falls_back_to_category_default(session, members) -> None:
     session.add(c["家賃"])
     session.commit()
     assert rows_by_name(session)["家賃"]["rule"]["mode"] == "exact"
+
+
+def test_duplicate_entries_in_one_category_are_reported(session, members) -> None:
+    """同一分类本期有两笔时必须说出来。
+
+    面板一行只显示得下一笔，账单却是两笔都算。不提示的话，用户看到
+    「家賃 170,000」，完全不知道总额里还有一笔 120,000。
+    """
+    a, *_ = members
+    c = cats(session)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                 amount=120_000, payer_id=a.id, category_id=c["家賃"].id)
+    rows = rows_by_name(session)
+    assert rows["家賃"]["entry_count"] == 1
+
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                 amount=170_000, payer_id=a.id, category_id=c["家賃"].id)
+    rows = rows_by_name(session)
+    assert rows["家賃"]["entry_count"] == 2, "重复没被报出来"
+    assert rows["家賃"]["amount"] == 170_000          # 面板只显示得下最后一笔

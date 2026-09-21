@@ -114,6 +114,9 @@ class Statement(SQLModel, table=True):
     covers_from: Optional[dt.date] = Field(default=None, description="这张单子里最早一笔的日期，展示用")
     covers_to: Optional[dt.date] = Field(default=None, description="最晚一笔的日期，展示用")
     cut_by: Optional[int] = Field(default=None, foreign_key="member.id")
+    #: 出完账就锁上，防的是「手滑改了已经发给室友的那张账单」。
+    #: 但**留了明路**：详情页上「解锁修改」一点就开，改完那张单子会自己标出
+    #: 「出账后被改过」—— 锁不该变成想补录也没门。
     snapshot_json: Optional[dict[str, Any]] = Field(
         default=None,
         sa_column=Column(JSON),
