@@ -117,9 +117,11 @@ onMounted(async () => {
    块与块之间用 8px 的灰带断开 —— 1px 细线在手机上分不出「同一块里的两行」
    和「两块之间」，整页会糊成一长条 */
 .bill-section { border-bottom: 8px solid #f2f2f2; }
-/* 每一块的标题条。未出账和已出账两页、四个块共用这一份，免得又各写各的 */
+/* 每一块的标题条。未出账和已出账两页、四个块共用这一份，免得又各写各的。
+   高度写死 44：只有「本期固定费」那条右边带着 16px 的合计，撑出 44 高，
+   别的标题条只有 14px 的字、自然高度 41 —— 不钉死的话同一页上四条不齐 */
 .section-head {
-  min-height: var(--nagaya-fee-row-h);
+  min-height: 44px;
   padding-top: 16px;
   padding-bottom: 4px;
 }

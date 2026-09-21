@@ -535,6 +535,13 @@ function doCut() {
   min-height: var(--nagaya-fee-row-h);
   padding-right: var(--nagaya-fee-amount-gap);
 }
+/* 第二行起要把分隔线那 1px **加在行高之外**。
+   未出账那页的行是 q-expansion-item，1px 落在外层、把那一格撑成 41；
+   这边的行有 min-height 而且是 border-box，1px 被吃进 40 里 —— 于是五行下来
+   两页差 4px。这一条就是补回那 1px */
+.monthly-list .q-item + .q-item {
+  min-height: calc(var(--nagaya-fee-row-h) + 1px);
+}
 .monthly-list .amount,
 .section-head .amount {
   font-size: var(--nagaya-fee-amount-fs);
