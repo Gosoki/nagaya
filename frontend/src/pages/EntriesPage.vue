@@ -99,6 +99,7 @@ import { useI18n } from 'vue-i18n'
 
 import { api } from 'src/api/client'
 import type { Entry, EntryKind, Statement } from 'src/api/types'
+import { jstDateOf } from 'src/date'
 import { formatYen } from 'src/i18n'
 import { useLedger } from 'src/stores/ledger'
 import { KIND_COLOR } from 'src/theme'
@@ -115,9 +116,9 @@ onMounted(async () => {
   statements.value = await api.get<Statement[]>('/api/statements')
 })
 
-/** 某一天出过的账单（按 cut_at 的日期归） */
+/** 某一天出过的账单。cut_at 是 UTC 时间戳，得按**日本时间**归日 —— 见 src/date.ts */
 const statementsOn = (date: string) =>
-  statements.value.filter((st) => st.cut_at.slice(0, 10) === date)
+  statements.value.filter((st) => jstDateOf(st.cut_at) === date)
 
 /**
  * 点一条就去改它。已出账的也能改，差额进下一张账单的「上期结转」。
@@ -216,7 +217,7 @@ const grouped = computed(() => {
   }
   // 出过账单的日子即使当天没有账目也要出现在时间线上（筛选时不补，那几行已经藏了）
   for (const st of anyFilter.value ? [] : statements.value) {
-    const d = st.cut_at.slice(0, 10)
+    const d = jstDateOf(st.cut_at)
     if (!map.has(d)) map.set(d, [])
   }
   return [...map.entries()]

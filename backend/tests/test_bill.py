@@ -163,6 +163,21 @@ def test_statements_are_ordered_and_labelled(session: Session, members) -> None:
     assert "出账" in first.label
 
 
+def test_empty_draft_covers_nothing(session: Session, members) -> None:
+    """出完账草稿就空了 —— 覆盖期**两端一起留空**，不许只给一头。
+
+    起始日改成「上次出账那天」之后踩过：草稿一笔都没有时 covers_from 照样有值、
+    covers_to 是 None，界面上显示成「2026-09-22 〜 」，断了一截。
+    """
+    a, *_ = members
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=1_000, payer_id=a.id)
+    cut_statement(session, actor_id=a.id)
+
+    draft = build_bill(session, None)
+    assert draft["entry_count"] == 0
+    assert draft["covers_from"] is None and draft["covers_to"] is None
+
+
 def test_settled_when_every_planned_transfer_is_recorded(session: Session, members) -> None:
     """「转账按钮都点过了就显示结清」。"""
     a, b, c = members

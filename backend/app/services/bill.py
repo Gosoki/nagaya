@@ -183,8 +183,10 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
         # 起始日 ＝ **上一次出账那天**，不是这张单子里最早那笔的日期。
         # 「7 月那张从 7/2 开始」是错觉 —— 7/1 没人花钱而已，它管的是
         # 6/30 出账之后的一切。头一张没有上一次，只能从第一笔算起。
+        # 一笔都没有就是**什么都没覆盖**，两端一起留空。
+        # 只给 from 不给 to 的话，界面上会显示成「2026-09-22 〜 」这样断一截
         "covers_from": (
-            jst_date(prev.cut_at).isoformat() if prev else (min(dates).isoformat() if dates else None)
+            (jst_date(prev.cut_at).isoformat() if prev else min(dates).isoformat()) if dates else None
         ),
         "covers_to": max(dates).isoformat() if dates else None,
         "total_expense": total_expense,

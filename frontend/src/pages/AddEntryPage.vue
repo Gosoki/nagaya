@@ -153,7 +153,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
 import { ApiError, api } from 'src/api/client'
-import { todayJst } from 'src/date'
+import { jstDateOf, todayJst } from 'src/date'
 import { formatYen } from 'src/i18n'
 import type { Entry, EntryKind } from 'src/api/types'
 import AmountInput from 'src/components/AmountInput.vue'
@@ -210,7 +210,7 @@ const kindInk = computed(() => KIND_COLOR[kind.value])
 const signedAmount = computed(() => (kind.value === 'income' ? -amount.value : amount.value))
 
 /** 上次出账那天（含）之前的日期不给选 */
-const minDate = computed(() => ledger.prevCutAt?.slice(0, 10) ?? null)
+const minDate = computed(() => (ledger.prevCutAt ? jstDateOf(ledger.prevCutAt) : null))
 // 只有**新记**的账才限日期：新的一笔不管写哪天都落进当前草稿，选回已出账的范围
 // 只会让人以为补进了那张单子。改已有的账不受这条约束 —— 它归哪张单子由
 // statement_id 定死，改日期不会让它换单子

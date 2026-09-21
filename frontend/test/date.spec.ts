@@ -10,7 +10,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { todayJst } from '../src/date'
+import { jstDateOf, todayJst } from '../src/date'
 
 afterEach(() => vi.useRealTimers())
 
@@ -26,6 +26,16 @@ describe('业务日期按日本时间算', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-22T09:00:00Z')) // JST 18:00
     expect(todayJst()).toBe('2026-09-22')
+  })
+
+  it('后端的 UTC 时间戳也要按日本时间归日', () => {
+    // 日本时间 2026-09-22 00:30 出的账，后端存的是 naive UTC 2026-09-21T15:30
+    expect(jstDateOf('2026-09-21T15:30:00')).toBe('2026-09-22')
+    expect('2026-09-21T15:30:00'.slice(0, 10), '前提：截字符串确实会退到前一天').toBe('2026-09-21')
+    // 白天出的账两者一致
+    expect(jstDateOf('2026-08-30T03:00:00')).toBe('2026-08-30')
+    // 已经带 Z 的也不能被重复加
+    expect(jstDateOf('2026-09-21T15:30:00Z')).toBe('2026-09-22')
   })
 
   it('跨年那一夜也不许错', () => {
