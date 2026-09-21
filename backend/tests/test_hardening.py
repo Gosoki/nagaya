@@ -224,3 +224,26 @@ def test_settings_reject_ids_that_point_nowhere(client: TestClient, auth) -> Non
         assert r.status_code == 400, f"{bad!r} 被收下了"
     assert client.put("/api/settings/default_payer_id", headers=auth,
                       json={"value": None}).status_code == 200
+
+
+def test_text_and_date_have_bounds(session: Session, members) -> None:
+    """备注 10k 字、日期 9999-12-31 原来都是收的。
+
+    前者撑爆界面也把库养胖；后者会把草稿账单的覆盖期顶到 9999 年 ——
+    而覆盖期就印在账单最上面那一行。
+    """
+    a, *_ = members
+    c = _cat(session)
+    mk = lambda **kw: ledger.create_entry(  # noqa: E731
+        session, actor_id=a.id, kind=EntryKind.expense, on=kw.pop("on", TODAY),
+        amount=100, payer_id=a.id, category_id=c.id, **kw,
+    )
+    with pytest.raises(ledger.LedgerError) as e:
+        mk(title="あ" * (ledger.MAX_TITLE + 1))
+    assert e.value.code == "text_too_long"
+    with pytest.raises(ledger.LedgerError):
+        mk(note="x" * (ledger.MAX_NOTE + 1))
+    for bad in (dt.date(9999, 12, 31), dt.date(1900, 1, 1)):
+        with pytest.raises(ledger.LedgerError) as e:
+            mk(on=bad)
+        assert e.value.code == "bad_date"

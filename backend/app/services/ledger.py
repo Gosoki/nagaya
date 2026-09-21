@@ -60,7 +60,18 @@ def active_members(session: Session, on: dt.date | None = None) -> list[Member]:
 MAX_AMOUNT = 1_000_000_000_000
 
 
+#: 文本字段的上限。不设的话 10 万字的备注也照收 —— 界面被撑爆，库也白胖。
+#: 前端的备注框本来就是 maxlength=40，这里给的是接口层的兜底
+MAX_TITLE = 200
+MAX_NOTE = 2_000
+#: 业务日期的上下界。9999-12-31 原来是收的，而它会把草稿账单的覆盖期顶到 9999 年
+MIN_DATE = dt.date(2000, 1, 1)
+MAX_DATE_AHEAD = 366        # 最多提前一年（预付一整年的房租是真会有的事）
+
+
 def _validate_amount(kind: EntryKind, amount: int) -> None:
+    # bool 这一支只挡得住**服务层**的调用（测试、种子、carry）：走 HTTP 进来的话
+    # Pydantic 早就把 true 转成 1 了，轮不到这里说话
     if not isinstance(amount, int) or isinstance(amount, bool):
         raise LedgerError("not_integer", f"金额必须是整数日元，收到 {amount!r}")
     if abs(amount) > MAX_AMOUNT:
@@ -77,6 +88,20 @@ def _validate_amount(kind: EntryKind, amount: int) -> None:
         raise LedgerError("bad_sign", "收入金额存为负数（返现是大家一起收的钱）")
     if kind == EntryKind.settlement and amount < 0:
         raise LedgerError("bad_sign", "转账金额要填正数；方向反了就把转出/转入对调")
+
+
+def _validate_text(title: str, note: str) -> None:
+    if len(title) > MAX_TITLE:
+        raise LedgerError("text_too_long", f"备注最多 {MAX_TITLE} 字", field="title", limit=MAX_TITLE)
+    if len(note) > MAX_NOTE:
+        raise LedgerError("text_too_long", f"说明最多 {MAX_NOTE} 字", field="note", limit=MAX_NOTE)
+
+
+def _validate_date(on: dt.date) -> None:
+    if not isinstance(on, dt.date):
+        raise LedgerError("bad_date", f"日期不对：{on!r}")
+    if on < MIN_DATE or on > today_jst() + dt.timedelta(days=MAX_DATE_AHEAD):
+        raise LedgerError("bad_date", f"日期超出范围：{on}", min=MIN_DATE.isoformat())
 
 
 def _check_refs(
@@ -131,6 +156,8 @@ def create_entry(
     _check_refs(session, payer_id=payer_id, to_member_id=to_member_id,
                 member_ids=member_ids, category_id=category_id, bundle_id=bundle_id)
     _validate_amount(kind, amount)
+    _validate_text(title, note)
+    _validate_date(on)
 
     if kind == EntryKind.settlement:
         if to_member_id is None:
@@ -347,6 +374,8 @@ def update_entry(
                 member_ids=member_ids, category_id=fields.get("category_id"),
                 bundle_id=fields.get("bundle_id"))
     _validate_amount(kind, amount)
+    _validate_text(fields.get("title", entry.title), fields.get("note", entry.note))
+    _validate_date(on)
 
     entry.kind, entry.date, entry.amount_jpy = kind, on, amount
     entry.payer_id, entry.to_member_id = payer_id, to_member_id

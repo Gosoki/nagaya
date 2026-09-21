@@ -38,7 +38,9 @@ app = FastAPI(title="nagaya 長屋", description="合租记账", version="0.1.0"
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv("NAGAYA_CORS", "http://localhost:9000,http://localhost:5173").split(","),
-    allow_credentials=True,
+    # 不开 credentials：认证走的是 Authorization 头 + localStorage，从来不用 cookie。
+    # 开着只是白白多一个面
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

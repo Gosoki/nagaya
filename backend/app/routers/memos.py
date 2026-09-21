@@ -16,6 +16,17 @@ from app.schemas import MemoIn, MemoOut
 
 router = APIRouter(prefix="/api/memos", tags=["memos"])
 
+#: 和账目的备注一个道理：不设上限的话 50 万字的 body 也照收
+MAX_TITLE = 200
+MAX_BODY = 10_000
+
+
+def _check_len(title: str | None, body: str | None) -> None:
+    if title is not None and len(title) > MAX_TITLE:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"名字最多 {MAX_TITLE} 字")
+    if body is not None and len(body) > MAX_BODY:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"内容最多 {MAX_BODY} 字")
+
 
 @router.get("", response_model=list[MemoOut])
 def list_memos(session: Session = Depends(get_session), _: Member = Depends(current_member)):
@@ -30,6 +41,7 @@ def create_memo(
 ):
     if not (body.title or "").strip():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "备忘要有个名字")
+    _check_len(body.title, body.body)
     # 新的排在最后：列表顺序是人自己排出来的，新条目不该插队
     last = session.exec(select(Memo).order_by(Memo.display_order.desc())).first()  # type: ignore[attr-defined]
     row = Memo(
@@ -59,6 +71,7 @@ def update_memo(
     fields = body.model_dump(exclude_unset=True)
     if "title" in fields and not (fields["title"] or "").strip():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "备忘要有个名字")
+    _check_len(fields.get("title"), fields.get("body"))
     for key, value in fields.items():
         setattr(row, key, value.strip() if key == "title" else value)
     row.updated_at = now_utc()

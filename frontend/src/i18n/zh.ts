@@ -161,6 +161,8 @@ export default {
     duplicate_member: '参与人里有重复',
     bad_member_key: '分摊规则里的成员写错了',
     null_field: '这些字段不能清空：{fields}',
+    text_too_long: '字太多了，精简一下',
+    bad_date: '这个日期不对',
     unknown: '出错了：{message}',
   },
 }

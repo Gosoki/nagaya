@@ -161,6 +161,8 @@ export default {
     duplicate_member: '参加者が重複しています',
     bad_member_key: '分担ルールのメンバー指定が不正です',
     null_field: '次の項目は空にできません：{fields}',
+    text_too_long: '文字数が多すぎます',
+    bad_date: 'この日付は指定できません',
     unknown: 'エラー：{message}',
   },
 }
