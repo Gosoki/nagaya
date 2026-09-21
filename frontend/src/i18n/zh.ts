@@ -106,7 +106,6 @@ export default {
     loginNameHint: '登录用的名字，只有自己看得到',
     password: '密码', change: '修改',
     oldPassword: '当前密码', newPassword: '新密码（至少 6 位）',
-    passwordHint: '要先报出当前密码 —— 手机搁桌上没锁屏，别人顺手就能改掉',
     passwordChanged: '密码改好了',
   },
   settings: {

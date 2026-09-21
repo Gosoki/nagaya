@@ -133,7 +133,6 @@
               :label="t('common.save')"
               @click="savePassword"
             />
-            <div class="text-caption text-grey-6 q-mt-xs">{{ t('profile.passwordHint') }}</div>
           </div>
         </q-item-section>
       </q-item>

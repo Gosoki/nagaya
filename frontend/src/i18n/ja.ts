@@ -106,7 +106,6 @@ export default {
     loginNameHint: 'ログイン用の名前。自分にしか見えません',
     password: 'パスワード', change: '変更',
     oldPassword: '現在のパスワード', newPassword: '新しいパスワード（6 文字以上）',
-    passwordHint: '現在のパスワードが必要です',
     passwordChanged: 'パスワードを変更しました',
   },
   settings: {
