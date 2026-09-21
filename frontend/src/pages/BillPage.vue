@@ -160,10 +160,9 @@
               </div>
               <div class="text-subtitle1 text-weight-medium">{{ formatYen(tr.amount) }}</div>
             </div>
-            <!-- 收钱的人说「已收到」，付钱的人说「我转了」—— 记的是同一笔，
-                 只是措辞对得上谁在操作。都不是的人不显示按钮：
-                 原来对所有人显示「已收到」，Kan 一点就替 Go 确认了收款，
-                 而 Go 那边钱还没到 -->
+<!-- 转出方和转入方看到的是同一个「已完成」，记的也是同一笔。
+                 **跟这笔没关系的人不显示按钮**：原来对所有人显示「已收到」，
+                 Kan 一点就替 Go 确认了收款，而 Go 那边钱还没到 -->
             <q-icon
               v-if="bill.settled_transfers[i]"
               name="check_circle"
@@ -178,7 +177,7 @@
               unelevated
               padding="6px 14px"
               :loading="busy === i"
-              :label="auth.me?.id === tr.to_id ? t('bill.received') : t('bill.iPaid')"
+              :label="t('bill.done')"
               @click="confirmReceived(tr, i)"
             />
           </q-card-section>
@@ -497,11 +496,11 @@ async function copyBill() {
   }
 }
 
-/** 点「已收到」＝记一笔转账。金额可改小，差额自动结转 —— 这就是赊账。 */
+/** 点「已完成」＝记一笔转账。金额可改小，差额自动结转 —— 这就是赊账。 */
 function confirmReceived(tr: BillTransfer, index: number) {
   $q.dialog({
-    title: t('bill.received'),
-    message: t('bill.receivedHint', { from: nameOf(tr.from_id), to: nameOf(tr.to_id) }),
+    title: t('bill.done'),
+    message: t('bill.doneHint', { from: nameOf(tr.from_id), to: nameOf(tr.to_id) }),
     prompt: { model: String(tr.amount), type: 'number' },
     cancel: true,
   }).onOk(async (value: string) => {

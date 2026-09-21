@@ -147,7 +147,7 @@ test('固定金额模式：合计对不上就红字报差额且存不了', async
   await page.locator('.split-panel [role="button"]').first().click()
   await page.getByRole('button', { name: '固定金额' }).click()
 
-  const inputs = page.locator('.exact-input')
+  const inputs = page.locator('.exact-col .num-input')
   await inputs.nth(0).fill('45000')
   await inputs.nth(1).fill('40000')
   await inputs.nth(2).fill('30000')      // 差 5000
@@ -304,17 +304,19 @@ test('PWA 产物齐全：manifest 与 service worker 都在', async ({ page }) =
   expect((await page.request.get('/icons/apple-touch-icon.png')).ok()).toBe(true)
 })
 
-test('完整闭环：出账单 → 点「已收到」→ 那个人归零', async ({ page }) => {
+test('完整闭环：出账单 → 点「已完成」→ 那个人归零', async ({ page }) => {
   await login(page)
   await page.goto('/bill')
   await expect(page.getByText(/转账方案/)).toBeVisible()
 
+  // 卡片上是「转出方 → 转入方」加一行金额。转完钱归零的是转出方那个人。
   const firstCard = page.locator('.q-card').first()
-  const who = (await firstCard.locator('.text-weight-medium').first().textContent())!.trim()
-  const amount = Number((await firstCard.locator('.text-h6').textContent())!.replace(/[^\d]/g, ''))
-  expect(amount).toBeGreaterThan(0)
+  const pair = (await firstCard.locator('.text-caption').first().textContent())!.trim()
+  const who = pair.split(/\s+/)[0]!
+  const amount = Number((await firstCard.locator('.text-subtitle1').textContent())!.replace(/[^\d]/g, ''))
+  expect(amount, '转账卡片上没读到金额，多半是选择器过期了').toBeGreaterThan(0)
 
-  await firstCard.getByRole('button', { name: '已收到' }).click()
+  await firstCard.getByRole('button', { name: '已完成' }).click()
   await page.locator('.q-dialog input').fill(String(amount))
   await page.getByRole('button', { name: 'OK' }).click()
   await expect(page.locator('.q-dialog')).toHaveCount(0)
