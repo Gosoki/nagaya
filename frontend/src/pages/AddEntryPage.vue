@@ -50,8 +50,10 @@
     </div>
 
     <div class="q-px-md">
-      <!-- 谁付的 / 转账时是谁转给谁 -->
-      <div class="row items-center q-mt-sm q-mb-xs">
+      <!-- 谁付的 / 转给谁 / 备注 三行统一行高，中间拉细分隔线 ——
+           原来它们各自飘着，看上去像三段无关的文字，不像一个表单 -->
+      <div class="fields">
+      <div class="row items-center field">
         <div class="col-auto text-grey-7 label">
           {{ kind === 'income' ? t('entry.receiver') : t('entry.payer') }}
         </div>
@@ -59,13 +61,13 @@
         <MemberPicker v-model="payerId" :members="meta.activeMembers" />
       </div>
 
-      <div v-if="kind === 'settlement'" class="row items-center q-mb-xs">
+      <div v-if="kind === 'settlement'" class="row items-center field">
         <div class="col-auto text-grey-7 label">{{ t('entry.to') }}</div>
         <q-space />
         <MemberPicker v-model="toMemberId" :members="meta.activeMembers.filter((m) => m.id !== payerId)" />
       </div>
 
-      <div class="row items-center q-gutter-sm q-mt-sm">
+      <div class="row items-center q-gutter-sm field">
         <q-input
           v-model="title"
           dense borderless
@@ -85,6 +87,7 @@
             </div>
           </q-popup-proxy>
         </q-btn>
+      </div>
       </div>
 
       <!-- 不做折叠：日常网格只剩三个按钮之后竖向空间够用，
@@ -392,18 +395,26 @@ function reset(keepGoing: boolean) {
   padding: 4px 8px;
 }
 .edit-note {
-  margin: 0 12px 4px;
+  margin: 0 16px 4px;
   border-radius: 6px;
   font-size: 12px;
   line-height: 1.5;
 }
 .page {
   /* 底部有两层：固定操作栏（约 64px）压在底部 Tab（50px）之上。
-     留够位置，否则展开分摊后最后一个人的那一行会被操作栏盖住。 */
+     留够位置，否则最后一个人那一行会被操作栏盖住。 */
   padding-bottom: calc(var(--nagaya-footer-h) + 90px + env(safe-area-inset-bottom));
 }
 .kind-toggle { border-bottom: 1px solid rgba(0, 0, 0, 0.08); }
 .label { font-size: 14px; }
+
+.fields { border-top: 1px solid rgba(0, 0, 0, 0.06); }
+.field {
+  min-height: 52px;                       /* 三行一样高，拇指点哪一行都一样 */
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+.fields .field:last-child { border-bottom: none; }
+.split-panel { padding-top: 4px; }
 
 .cat-grid {
   display: grid;
@@ -411,7 +422,7 @@ function reset(keepGoing: boolean) {
      右边会空出一格，整排偏左，看着像上面的金额没居中 */
   grid-template-columns: repeat(4, 1fr);
   gap: 8px;
-  padding: 4px 12px 8px;
+  padding: 6px 16px 10px;
 }
 .cat {
   display: flex;
@@ -438,10 +449,16 @@ function reset(keepGoing: boolean) {
   left: 0;
   right: 0;
   bottom: calc(var(--nagaya-footer-h) + env(safe-area-inset-bottom));   /* 压在底部 Tab 之上 */
-  padding: 6px 12px 8px;
+  padding: 6px 16px 8px;
   /* 不用半透明：内容从按钮底下透出来会看着像渲染坏了 */
   background: #fff;
   border-top: 1px solid rgba(0, 0, 0, 0.08);
+}
+/* 操作栏本身横贯到底（那条上边线要通），但里面的按钮跟页面一样收窄居中 */
+.actions > * {
+  max-width: var(--nagaya-max-w);
+  margin-left: auto;
+  margin-right: auto;
 }
 .diff-line {
   font-size: 12px;

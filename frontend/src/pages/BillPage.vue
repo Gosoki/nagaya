@@ -585,7 +585,9 @@ function doCut() {
   right: 0;
   bottom: calc(var(--nagaya-footer-h) + env(safe-area-inset-bottom));
   display: flex;
-  padding: 8px 12px;
+  /* 页面收到 --nagaya-max-w 居中，这条压在它上面的操作栏也得跟着收，
+     否则宽屏上按钮会跑到内容外面去 */
+  padding: 8px max(12px, calc((100% - var(--nagaya-max-w)) / 2));
   background: #fff;
   border-top: 1px solid rgba(0, 0, 0, 0.08);
 }

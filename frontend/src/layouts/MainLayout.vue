@@ -72,6 +72,13 @@ onMounted(async () => {
 <style>
 :root {
   --nagaya-footer-h: 57px;
+  /* 手机是主场。平板/电脑上不收一下的话，列表会被拉成「名字贴最左、
+     数字贴最右」中间一片空白 —— 收到一个手机宽度居中，全站一致 */
+  --nagaya-max-w: 480px;
+}
+.q-page {
+  max-width: var(--nagaya-max-w);
+  margin: 0 auto;
 }
 </style>
 
