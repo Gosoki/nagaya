@@ -12,10 +12,6 @@
       <q-btn dense flat round icon="arrow_back" @click="goBack" />
       <div class="col text-weight-medium">{{ t('entry.editTitle') }}</div>
     </div>
-    <q-banner v-if="billedLabel" dense class="bg-blue-1 text-blue-9 edit-note">
-      {{ t('entry.editBilled', { label: billedLabel }) }}
-    </q-banner>
-
     <!-- 位置和高度跟账单那页的页签一致，但选中的是**实心色块**不是下划线：
          选错记账类型的代价比选错账单页签大得多，值得给更硬的提示 -->
     <q-btn-toggle
@@ -55,6 +51,12 @@
         </q-btn>
       </div>
     </div>
+
+    <!-- 「这笔已经出过账」的提示贴着金额放：改动最可能发生在金额上，
+         提示离得越近越有用。原来顶在最上面，滚一下就看不见了 -->
+    <q-banner v-if="billedLabel" dense class="bg-blue-1 text-blue-9 edit-note">
+      {{ t('entry.editBilled', { label: billedLabel }) }}
+    </q-banner>
 
     <AmountInput ref="amountEl" v-model="amount" :color="kindInk" />
 
@@ -196,10 +198,21 @@ const splitDiff = ref(0)
 const amountEl = ref<InstanceType<typeof AmountInput> | null>(null)
 const splitEl = ref<InstanceType<typeof SplitEditor> | null>(null)
 
-/** 改一笔电费时，网格里得有「电费」这个分类可选，所以编辑模式不筛掉固定费 */
-const gridCategories = computed(() =>
-  editingId.value === null ? meta.dailyCategories : meta.categories.filter((c) => !c.archived),
-)
+/**
+ * 网格里**只放日常分类**。
+ *
+ * 固定费（房租/电费/燃气/水费/网费）不在这儿填 —— 它们有自己那一屏，
+ * 而且账目里点一条固定费也是跳去那一屏，根本到不了这个编辑页。
+ * 摆在这儿只会让人以为「在这儿也能记房租」，记出来的那笔还落不进固定费面板。
+ *
+ * 唯一的例外是这笔账本来就归某个不在网格里的分类（比如直接输地址进来改一笔
+ * 房租）：那就把它自己那一格补上，否则网格里一个选中的都没有，像是分类丢了。
+ */
+const gridCategories = computed(() => {
+  const daily = meta.dailyCategories
+  const own = categoryId.value === null ? undefined : meta.categoryById[categoryId.value]
+  return own && !daily.some((c) => c.id === own.id) ? [...daily, own] : daily
+})
 
 /** 支出蓝 / 收入绿 / 转账黄 —— 金额、主按钮、段选中态都跟着它走，
     一眼就知道自己在记哪种账，不用回头看顶上选中的是哪个 */

@@ -69,11 +69,14 @@
           />
         </div>
 
+      <!-- 还没填金额时给一条短横，不是一排 ¥0。
+           ¥0 是个**看起来算过了**的数字，而这时候根本没得算 —— 固定费那一屏
+           一排全是 ¥0，看着就像坏了 -->
       <div
         class="share-col"
-        :class="{ 'text-grey-5': (preview?.[String(m.id)] ?? 0) === 0 }"
+        :class="{ 'text-grey-5': !amount || (preview?.[String(m.id)] ?? 0) === 0 }"
       >
-        {{ formatYen(preview?.[String(m.id)] ?? 0) }}
+        {{ amount ? formatYen(preview?.[String(m.id)] ?? 0) : '—' }}
       </div>
     </div>
 
@@ -84,9 +87,9 @@
     <div class="row items-center total-bar">
       <div class="text-grey-7">{{ t('split.total') }}</div>
       <q-space />
-      <div :class="balanced ? 'text-grey-8' : 'text-negative text-weight-medium'">
-        {{ formatYen(previewTotal) }}
-        <span v-if="!balanced">（{{ t('split.diff') }} {{ formatYen(amount - previewTotal) }}）</span>
+      <div :class="!amount ? 'text-grey-5' : balanced ? 'text-grey-8' : 'text-negative text-weight-medium'">
+        {{ amount ? formatYen(previewTotal) : '—' }}
+        <span v-if="amount && !balanced">（{{ t('split.diff') }} {{ formatYen(amount - previewTotal) }}）</span>
       </div>
     </div>
     <div v-if="error" class="text-negative text-caption q-mt-xs">{{ error }}</div>

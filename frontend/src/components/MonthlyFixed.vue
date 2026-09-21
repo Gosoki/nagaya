@@ -96,8 +96,8 @@
         <div class="q-px-md q-pb-md">
           <!-- 谁付的。改它 ＝ 定下「这一项以后都算谁垫的」，同时把本期已录的那笔
                一并改过来 —— 这两件事在固定费上本来就是一回事 -->
-          <div v-if="!historic" class="row items-center q-mb-sm">
-            <div class="text-caption text-grey-7 q-mr-sm">{{ t('entry.payer') }}</div>
+          <div class="payer-row">
+            <div class="text-caption text-grey-6 q-mb-xs">{{ t('entry.payer') }}</div>
             <MemberPicker
               :model-value="payerOf(row)"
               :members="meta.activeMembersSelfFirst"
@@ -487,20 +487,26 @@ const newName = ref('')
 const adding = ref(false)
 
 /**
- * 定下这一项谁垫。
+ * 改这一笔算谁垫的。
  *
- * 两件事一起做：改分类的常驻默认（以后都按它），以及改本期已经录的那一笔
- * （不改的话，屏幕上写着 Kan、库里还是 Go，两边对不上）。
+ * **当前草稿**：改两处 —— 分类的常驻默认（以后都按它），和本期已录的那一笔。
+ *
+ * **翻旧账单**：只改那一笔，不碰分类默认。修正「上个月的网费其实是 Zen 付的」
+ * 是一次更正，不是在说「网费以后都算 Zen 的」。
+ * 改完钱自己会平回来：余额是全局累计的，差额进下一张的「上期结转」，
+ * 而这张单子上会挂出「出账后被改过」的提示 —— 不锁历史，但改动必须看得见。
  */
 async function setPayer(row: Row, payerId: number) {
   if (payerOf(row) === payerId) return
   busy.value = true
   try {
-    const saved = await api.patch<Category>(`/api/categories/${row.category_id}`, {
-      default_payer_id: payerId,
-    })
-    meta.categories = meta.categories.map((c) => (c.id === saved.id ? saved : c))
-    row.default_payer_id = payerId
+    if (!historic.value) {
+      const saved = await api.patch<Category>(`/api/categories/${row.category_id}`, {
+        default_payer_id: payerId,
+      })
+      meta.categories = meta.categories.map((c) => (c.id === saved.id ? saved : c))
+      row.default_payer_id = payerId
+    }
 
     if (row.entry_id !== null) {
       const e = await api.patch<{ version: number }>(
