@@ -35,8 +35,30 @@ export default defineConfig({
       workbox: {
         // API 一律走网络，绝不能缓存 —— 账本读到旧数据比读不到更糟。
         // 不另写 runtimeCaching 的 NetworkOnly 规则：没匹配上的请求本来就直接走网络，
-        // 多一条规则等于多一层可能出问题的东西。
+        // 多一层规则等于多一层可能出问题的东西。
         navigateFallbackDenylist: [/^\/api/],
+
+        // **导航请求（刷新、点链接、打开 PWA）先问服务器。**
+        // 默认行为是把 index.html 预缓存起来、导航一律吃缓存，于是发了新版要刷好几次
+        // 才看得到：第一次刷出来的还是缓存里的旧壳子，新 SW 在后台装好、接管、再自己
+        // reload 一次，才轮到新版。局域网自托管，先问一下服务器几乎没有代价。
+        // 离线时落回缓存，离线草稿那条路不受影响。
+        navigateFallback: undefined,
+        // 光去掉 navigateFallback 不够：预缓存默认带 directoryIndex: 'index.html'，
+        // 于是访问 `/` 会先命中预缓存里那份 index.html，下面这条规则根本轮不到。
+        // 症状就是「发了新版，刷几次还是旧画面」——服务器上早就是新的了。
+        directoryIndex: null,
+        runtimeCaching: [
+          {
+            urlPattern: ({ request }) => request.mode === 'navigate',
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'nagaya-shell',
+              networkTimeoutSeconds: 3,      // 服务器不在就别干等
+              expiration: { maxEntries: 16 },
+            },
+          },
+        ],
       },
     }),
   ],
