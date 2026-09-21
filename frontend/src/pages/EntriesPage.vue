@@ -97,7 +97,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 
 import { api } from 'src/api/client'
@@ -114,8 +114,12 @@ const ledger = useLedger()
 
 const statements = ref<Statement[]>([])
 const router = useRouter()
+const route = useRoute()
 
 onMounted(async () => {
+  // 带着 ?category= 进来的（固定费面板上「本期有 N 笔」点进来）：直接筛好
+  const wanted = Number(route.query.category)
+  if (wanted) fCategory.value = wanted
   statements.value = await api.get<Statement[]>('/api/statements')
 })
 

@@ -8,7 +8,7 @@ import random
 import pytest
 from sqlmodel import Session, select
 
-from app.models import Entry, EntryKind, EntryShare, Member
+from app.models import Category, Entry, EntryKind, EntryShare, Member
 from app.services import settings as settings_svc
 from app.services.ledger import LedgerError, balances, create_entry, update_entry
 
@@ -276,3 +276,27 @@ def test_two_people_editing_the_same_entry_cannot_both_win(session: Session, mem
     fresh = session.get(Entry, e.id)
     assert fresh.amount_jpy == 5_000, "先到的那个人的修改不许被盖掉"
     assert sum(shares_of(session, e.id).values()) == 5_000
+
+
+def test_changing_category_adopts_the_new_category_rule(session: Session, members) -> None:
+    """改一笔账的分类，分摊要跟着换成新分类的默认规则。
+
+    界面上换分类时分摊预览当场就变了；后端继续沿用旧规则的话，
+    存下去的和人刚看见的不是一回事。
+    """
+    a, b, c = members
+    cheap = Category(name="日用品", icon="x", color="#111", display_order=0)
+    rent = Category(name="房租", icon="y", color="#222", display_order=1,
+                    default_rule_json={"mode": "ratio", "equal_weight": 1,
+                                       "adjustments": {str(a.id): 3_000, str(c.id): -3_000}})
+    session.add(cheap); session.add(rent); session.commit()
+    session.refresh(cheap); session.refresh(rent)
+
+    e = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=9_000,
+                     payer_id=a.id, category_id=cheap.id,
+                     category_rule=cheap.default_rule_json)
+    assert shares_of(session, e.id) == {a.id: 3_000, b.id: 3_000, c.id: 3_000}
+
+    update_entry(session, e, actor_id=a.id, version=e.version,
+                 fields={"category_id": rent.id}, category_rule=rent.default_rule_json)
+    assert shares_of(session, e.id) == {a.id: 6_000, b.id: 3_000, c.id: 0}

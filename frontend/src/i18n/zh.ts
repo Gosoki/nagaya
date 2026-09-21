@@ -45,7 +45,7 @@ export default {
     addItem: '加一项固定费',
     addPlaceholder: '名字，比如 停车位',
     added: '加好了，下个月它会自己出现在这儿',
-    duplicate: '本期有 {n} 笔，这里只显示最后一笔（账单按 {n} 笔算）',
+    duplicate: '另有 {n} 笔 ›',
     removeItem: '删掉这一项',
     removeConfirm: '「{name}」以后不再出现在固定费里。历史账目不受影响，随时能加回来。',
     removeKeepsEntry: '本期已录的 {amount} 会留在账单上。',

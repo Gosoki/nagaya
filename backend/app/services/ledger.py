@@ -293,6 +293,7 @@ def update_entry(
     entry.version = version + 1     # ORM 手里那份跟上，后面 add() 才不会写回旧值
     before = _snapshot(session, entry)
     prev_kind = entry.kind          # 下面几行就要被覆盖掉，先留一份
+    prev_category_id = entry.category_id
 
     for key in ("title", "note", "category_id", "bundle_id"):
         if key in fields:
@@ -335,8 +336,12 @@ def update_entry(
             from_entry = [int(k) for k in participants(entry.split_rule_json)] if inheritable else []
             ids = from_rule or from_entry or [m.id for m in active_members(session, on)]
 
+        # 换了分类就该用新分类的默认分摊 —— 界面上分摊预览当场就变成新分类的样子了，
+        # 继续沿用旧规则的话，存下去和刚才看到的不是一回事
+        category_changed = entry.category_id != prev_category_id
         global_rule = settings_svc.get(session, "default_rule")
-        base = rule if rule is not None else (entry.split_rule_json if (member_ids is None and inheritable) else None)
+        keep_old = member_ids is None and inheritable and not category_changed
+        base = rule if rule is not None else (entry.split_rule_json if keep_old else None)
         expanded = expand(pick_rule(base, category_rule, global_rule), ids)
         if not expanded.get("remainder_to"):
             expanded["remainder_to"] = settings_svc.get(session, "remainder_to")

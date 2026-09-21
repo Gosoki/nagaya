@@ -125,7 +125,10 @@ export const useBills = defineStore('bills', () => {
    * 同一张单子，会各发各的
    */
   function run(key: BillKey): Promise<void> {
-    const slot = cacheKey(key) ?? key
+    // 'current' 单独占一个槽，不跟 'st:N' 合并：它比别人多干一件事 ——
+    // 重取单子列表。并到某个 'st:N' 的在飞请求上的话，别人刚出的那张新账单
+    // 就一直进不到列表里，这一页会一直显示上一张
+    const slot = key === 'current' ? 'current' : (cacheKey(key) ?? key)
     const already = inflight.get(slot)
     if (already) return already
     pending.value += 1

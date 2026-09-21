@@ -39,7 +39,7 @@
         dense
         expand-icon-class="text-grey-5"
         header-style="min-height: var(--nagaya-fee-row-h)"
-        @update:model-value="(open: boolean) => !open && saveRow(row)"
+        @update:model-value="(open: boolean) => !open && saveQueued(row)"
       >
         <template #header>
           <q-item-section avatar>
@@ -54,7 +54,22 @@
                  把行盒撑高 1px、名字再偏 0.5px —— 于是有状态的行和没状态的行，
                  名字在一列里上下跳。普通行内文字就没这问题，撑不撑得起由 strut 说了算 -->
             <q-item-label class="name-line">
-              {{ row.name }}<span v-if="stateText(row)" class="state" :class="stateClass(row)">{{ stateText(row) }}</span>
+              {{ row.name }}
+              <!-- 同一分类本期有好几笔时，这一行只显示得下一笔。**得给条路进去** ——
+                   否则多出来的那几笔在界面上既打不开也删不掉，钱却实实在在算在账单里 -->
+              <button
+                v-if="row.entry_count > 1"
+                class="state dup-link"
+                :class="stateClass(row)"
+                @click.stop="openCategoryEntries(row)"
+              >
+                {{ stateText(row) }}
+              </button>
+              <span
+                v-else-if="stateText(row)"
+                class="state"
+                :class="stateClass(row)"
+              >{{ stateText(row) }}</span>
             </q-item-label>
           </q-item-section>
           <q-item-section side>
@@ -67,7 +82,7 @@
               :value="row.text"
               @click.stop
               @input="onInput(row, $event)"
-              @blur="saveRow(row)"
+              @blur="saveQueued(row)"
             />
           </q-item-section>
         </template>
@@ -122,6 +137,7 @@
 import { useQuasar } from 'quasar'
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 
 import { ApiError, api } from 'src/api/client'
 import type { MonthlyData, MonthlyRow } from 'src/api/types'
@@ -151,6 +167,7 @@ const { t } = useI18n()
 const $q = useQuasar()
 const meta = useMeta()
 const bills = useBills()
+const router = useRouter()
 const auth = useAuth()
 
 const data = ref<MonthlyData | null>(null)
@@ -224,6 +241,11 @@ onMounted(() => {
   void load()
 })
 
+/** 去账目页看这个分类本期的全部几笔 —— 面板上只显示得下一笔 */
+function openCategoryEntries(row: Row) {
+  void router.push({ name: 'entries', query: { category: String(row.category_id) } })
+}
+
 function onInput(row: Row, e: Event) {
   const digits = (e.target as HTMLInputElement).value.replace(/\D/g, '')
   const n = Math.min(Number(digits || 0), 99_999_999)
@@ -249,7 +271,10 @@ const willDelete = (row: Row) => row.entry_id !== null && row.text === ''
  * 五行里重复五次「已录」只是噪音。只有需要你注意的才说话。
  */
 function stateText(row: Row): string {
-  if (row.entry_count > 1) return t('monthly.duplicate', { n: row.entry_count })
+  // 只报「还有几笔没显示出来」。原来那句写全了整个来龙去脉，四十来个字，
+  // 在 40px 高、右边还杵着输入框的一行里根本放不下，被省略号截掉大半 ——
+  // 而这句话现在是个入口，点进去就看得到全部
+  if (row.entry_count > 1) return t('monthly.duplicate', { n: row.entry_count - 1 })
   if (willDelete(row)) return t('monthly.willDelete')
   if (row.entry_id !== null) return ''            // 正常已录：不出声
   if (row.hint === null) return ''                // 从没录过也没参考：留空，别写「没录过」占位
@@ -266,10 +291,20 @@ const stateClass = (row: Row) =>
 
 /** 还没存上的行数（存失败才会 >0）。和 saveRow 用同一个判据 */
 const dirtyCount = computed(() => rows.value.filter((r) => r.dirty).length)
-/** 本期固定费合计。只算真填了的 —— 灰色占位是上次的参考，不是这期的钱 */
-const total = computed(() =>
-  rows.value.reduce((sum, r) => sum + (r.text ? valueOf(r) : 0), 0),
-)
+/**
+ * 本期固定费合计。
+ *
+ * 底数用后端给的那个，不是把行加起来 —— 同一分类本期有两笔时，面板一行只显示
+ * 得下一笔，加出来会少一笔，跟账单上的「本期固定费」当场对不上。
+ * 再叠上「已经输进去但还没存」的差额，这样边填边看也是准的。
+ */
+const total = computed(() => {
+  const base = data.value?.total ?? 0
+  const pending = rows.value
+    .filter((r) => r.dirty)
+    .reduce((sum, r) => sum + ((r.text ? valueOf(r) : 0) - (r.amount ?? 0)), 0)
+  return base + pending
+})
 
 /**
  * 存一行。**离开输入框就调它**，没有保存按钮。
@@ -277,8 +312,22 @@ const total = computed(() =>
  * 逐行存而不是整屏一把存：一行失败只影响那一行，它自己留在 dirty 状态继续显示错误，
  * 别的行该存的已经存好了。整屏一把存的老做法在部分失败时会把没存上的输入一起清掉。
  */
+/**
+ * 保存是**排队**的，不是「正忙就算了」。
+ *
+ * 原来第一行写 `if (busy.value) return`：在第一行的请求还没回来时去填第二行，
+ * 第二行的保存被直接丢掉；离屏时的 flush() 撞上同一个标志会把**每一行**都丢掉，
+ * 而那时组件已经在卸载，输入的金额就真没了。
+ */
+let queue: Promise<void> = Promise.resolve()
+
+function saveQueued(row: Row): Promise<void> {
+  queue = queue.then(() => saveRow(row)).catch(() => {})
+  return queue
+}
+
 async function saveRow(row: Row) {
-  if (!row.dirty || busy.value) return
+  if (!row.dirty) return
   if (!row.rule_valid) {
     $q.notify({
       type: 'negative',
@@ -341,6 +390,11 @@ async function saveRow(row: Row) {
       message: `${row.name}: ${e instanceof ApiError ? e.text : String(e)}`,
       timeout: 5000,
     })
+    // 版本冲突：手里这份 version 已经过期，不重新取的话再点多少次都是同一个 409。
+    // load() 会保留还没保存的输入，所以刷一下不会把人填的东西抹掉
+    if (e instanceof ApiError && e.code === 'version_conflict') {
+      await load().catch(() => {})
+    }
   } finally {
     busy.value = false
   }
@@ -348,7 +402,7 @@ async function saveRow(row: Row) {
 
 /** 离开这一屏时把还没存的行兜底存掉 —— 比如填完直接切了 Tab */
 async function flush() {
-  for (const row of rows.value) await saveRow(row)
+  for (const row of rows.value) await saveQueued(row)
 }
 onBeforeUnmount(flush)
 
@@ -458,6 +512,15 @@ defineExpose({ reload: load })
 .name-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* line-height 压到 1：12px 的状态字不许顶大行盒，行高交给 14px 名字的 strut 定 */
 .state { font-size: 12px; line-height: 1; margin-left: 6px; }
+/* 「本期有 N 笔」是个入口，长得要像能点 */
+.dup-link {
+  border: none;
+  background: none;
+  padding: 0;
+  font-family: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
 .add-row {
   border-top: 1px solid rgba(0, 0, 0, 0.06);
   min-height: var(--nagaya-fee-foot-h);

@@ -759,6 +759,36 @@ test('没选分类：写了备注就记成兜底分类，两样都没有才弹�
   expect(bEntry.category_id).toBe(a.category_id)
 })
 
+test('同一分类本期有两笔：面板说得出来，也点得进去，合计不少算', async ({ page }) => {
+  await login(page)
+  const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
+  const cats = await (await page.request.get('/api/categories', { headers })).json()
+  const rent = cats.find((c: { name: string }) => c.name === '房租')
+  // 再记一笔房租：面板一行只显示得下一笔，另一笔照样算进账单
+  await page.request.post('/api/entries', {
+    headers,
+    data: { kind: 'expense', date: '2026-09-21', amount_jpy: 7_777, payer_id: 1, category_id: rent.id, title: 'E2E重复房租' },
+  })
+
+  // 这笔是绕过前端直接 POST 的，整页加载一次让本地的账目列表也拿到它
+  await page.goto('/bill')
+  await expect(page.locator('.wrap')).toBeVisible()
+  // 面板的合计必须和账单上的「本期固定费」一致 —— 由后端给，不是把行加出来的
+  const panelTotal = (await page.locator('.section-head .amount').first().innerText()).trim()
+  const billTotal = await (await page.request.get('/api/bill', { headers })).json()
+  const monthly = (await (await page.request.get('/api/monthly', { headers })).json()).total
+  expect(Number(panelTotal.replace(/[^\d]/g, '')), '面板合计不能少算重复的那一笔').toBe(monthly)
+  expect(billTotal.total_expense).toBeGreaterThan(monthly - 1)
+
+  // 「本期有 2 笔」点得进去 —— 否则多出来的那笔在界面上既打不开也删不掉
+  const dup = page.locator('.dup-link').first()
+  await expect(dup).toBeVisible()
+  await dup.click()
+  await expect(page).toHaveURL(/\/entries\?category=/)
+  await expect(page.locator('.entry-row').first()).toBeVisible()
+  await expect(page.getByText('E2E重复房租')).toBeVisible()
+})
+
 test('账单两页：未出账 / 已出账，更早的从标题那个名字翻', async ({ page }) => {
   await login(page)
   await page.getByRole('tab', { name: '账单' }).click()

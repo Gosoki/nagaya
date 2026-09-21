@@ -123,6 +123,8 @@ export interface MonthlyRow {
 export interface MonthlyData {
   default_date: string
   rows: MonthlyRow[]
+  /** 本期固定费合计。**由后端给**：面板一行只显示得下一笔，同一分类有两笔时行加不出正确的数 */
+  total: number
 }
 
 export interface Setting {

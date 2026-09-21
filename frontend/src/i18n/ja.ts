@@ -45,7 +45,7 @@ export default {
     addItem: '固定費を追加',
     addPlaceholder: '名称（例：NHK受信料）',
     added: '追加しました。来月から自動で表示されます',
-    duplicate: '今期は {n} 件あります（表示は最新の 1 件、計算は {n} 件すべて）',
+    duplicate: '他に {n} 件 ›',
     removeItem: 'この項目を削除',
     removeConfirm: '「{name}」は今後この一覧に表示されません。過去の明細はそのまま残ります。',
     removeKeepsEntry: '今期に記録済みの {amount} は請求書に残ります。',

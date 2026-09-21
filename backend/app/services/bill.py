@@ -403,11 +403,15 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
     # 用户看到「家賃 170,000」，完全不知道还有一笔 120,000 也在总额里。
     mine: dict[int, Entry] = {}
     dup: dict[int, int] = {}
+    monthly_ids = {c.id for c in categories}
+    total = 0
     for e in (unbilled(session) if statement is None else entries_of(session, statement.id)):
         if e.kind == EntryKind.settlement or e.category_id is None:
             continue
         mine[e.category_id] = e
         dup[e.category_id] = dup.get(e.category_id, 0) + 1
+        if e.category_id in monthly_ids:
+            total += e.amount_jpy
     hints, hint_labels = _last_billed_amount(session, [c.id for c in categories])
 
     rows = []
@@ -439,6 +443,9 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
     return {
         "default_date": today_jst().isoformat(),
         "rows": rows,
+        # 面板一行只显示得下一笔，所以合计**不能由行加出来** —— 同一分类有两笔时
+        # 会少算一笔，而账单上的「本期固定费」是全算的，两个数当场对不上
+        "total": total,
     }
 
 
