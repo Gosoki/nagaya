@@ -196,7 +196,6 @@
            「出账单」压在最底下的话每次都要先滚到底 -->
       <div class="actions">
         <q-btn
-          class="col"
           outline
           color="primary"
           no-caps
@@ -206,7 +205,6 @@
         />
         <q-btn
           v-if="bill.is_draft"
-          class="col-auto q-ml-sm"
           color="primary"
           no-caps
           unelevated
@@ -215,6 +213,12 @@
           :disable="!bill.entry_count"
           @click="doCut"
         />
+        <!-- 已出的账单：右边这一半写「已出账」。做成静态块不是禁用按钮 ——
+             禁用按钮看着还是个按钮，会让人反复点它找反应 -->
+        <div v-else class="issued row items-center justify-center">
+          <q-icon name="task_alt" size="20px" class="q-mr-xs" />
+          {{ t('bill.issued') }}
+        </div>
       </div>
 
     </template>
@@ -563,12 +567,26 @@ function doCut() {
 
 /* 主操作条：压在底部 Tab 之上 */
 .actions :deep(.q-btn) { min-height: 44px; }
+/* 两块严格各占一半。用 grid 而不是 flex：flex 下两边算出来的 flex 一样，
+   实测仍然是 188/156，内容宽度还在暗中起作用；grid 的 1fr 1fr 是确定的 */
+.actions > * { min-width: 0; }
+/* 已出的账单右边这一半：写状态，不做成禁用按钮 ——
+   禁用按钮看着还是个按钮，会让人反复点它找反应 */
+.issued {
+  min-height: 44px;
+  border-radius: 4px;
+  background: #f2f2f5;
+  color: #9e9e9e;
+  font-size: 15px;
+}
 .actions {
   position: fixed;
   left: 0;
   right: 0;
   bottom: calc(var(--nagaya-footer-h) + env(safe-area-inset-bottom));
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
   /* 页面收到 --nagaya-max-w 居中，这条压在它上面的操作栏也得跟着收，
      否则宽屏上按钮会跑到内容外面去 */
   padding: 8px max(12px, calc((100% - var(--nagaya-max-w)) / 2));

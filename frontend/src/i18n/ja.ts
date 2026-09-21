@@ -79,7 +79,7 @@ export default {
     cut: '請求書を作成',
     cutConfirm: 'この時点までの明細をこの請求書にまとめます。以降の記帳は次回分になります。',
     cutEmpty: '対象の明細がありません',
-    cutDone: '作成しました',
+    cutDone: '作成しました', issued: '発行済み',
     tabDraft: '未請求', tabOpen: '請求済み', tabPast: '過去',
     noPast: 'これより前の請求書はありません', noOpen: 'まだ請求書がありません。「未請求」から発行してください',
     editedAfterCut: '作成後に {n} 件変更されています（当時 {frozen} → 現在 {live}）',
