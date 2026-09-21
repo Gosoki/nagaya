@@ -6,9 +6,11 @@
 
   ## 两条要命的约束
 
-  1. **上次的金额只作灰色占位，不是值。**
-     账本里预填的数字很危险 —— 长得跟亲手填的一模一样，某个月忘了改就
-     带着上月的电费把账单发出去了，谁都看不出来。不动它就等于没录。
+  1. **不填就是 0，而且照样能出账。**
+     这一屏不摆「上期是多少」当参考 —— 参考值就在输入框那个位置，
+     长得跟亲手填的没两样，某个月忘了改就带着上月的电费把账单发出去了。
+     每期真的不变的项（房租这种）去设置里开「和上期一样」，出账前自动记成
+     **黑字实数**，而且当场报出来；没开的项空着就空着，按 0 结。
 
   2. **改金额绝不能顺手改掉别的字段。**
      这一屏没有付款人选择器。以前 PATCH 复用 EntryIn（payer_id 必填），
@@ -84,7 +86,7 @@
               :class="{ dirty: row.dirty, 'to-delete': willDelete(row) }"
               type="text"
               inputmode="numeric"
-              :placeholder="row.hint === null ? '' : formatPlain(row.hint)"
+              placeholder="0"
               :value="row.text"
               @click.stop
               @input="onInput(row, $event)"
@@ -320,9 +322,7 @@ function stateText(row: Row): string {
   // 而这句话现在是个入口，点进去就看得到全部
   if (row.entry_count > 1) return t('monthly.duplicate', { n: row.entry_count - 1 })
   if (willDelete(row)) return t('monthly.willDelete')
-  if (row.entry_id !== null) return ''            // 正常已录：不出声
-  if (row.hint === null) return ''                // 从没录过也没参考：留空，别写「没录过」占位
-  return t('monthly.hintFrom', { label: row.hint_label ?? '' })
+  return ''                                       // 已录不出声；没录的也不出声，空框＝0
 }
 const stateClass = (row: Row) =>
   row.entry_count > 1

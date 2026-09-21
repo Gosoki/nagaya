@@ -136,8 +136,6 @@ export interface MonthlyRow {
   version: number | null
   rule: Record<string, unknown> | null
   date: string | null
-  hint: number | null
-  hint_label: string | null
   /** 本期这个分类一共有几笔。>1 说明这一行没显示全 */
   entry_count: number
 }

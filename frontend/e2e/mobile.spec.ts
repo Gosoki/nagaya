@@ -417,7 +417,7 @@ test('完整闭环：出账单 → 点「确认已完成」→ 那个人归零',
   await deleteLatestEntry(page)      // 把这笔转账撤掉，别把开发库越跑越脏
 })
 
-test('账单页固定费：没录的项只给灰色参考，绝不预填成真值', async ({ page }) => {
+test('账单页固定费：没录的项一个数字都不给，空着就按 0 结', async ({ page }) => {
   await login(page)
   const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
 
@@ -431,14 +431,17 @@ test('账单页固定费：没录的项只给灰色参考，绝不预填成真�
     (els as HTMLInputElement[]).map((e) => ({ value: e.value, placeholder: e.placeholder })),
   )
   expect(boxes.length, '固定费行没渲染出来').toBeGreaterThan(0)
-  // **最要命的一条**：上期金额只能待在 placeholder 里。
-  // 一旦它变成 value，某个月忘了改就会带着上月的电费把账单发出去，而且谁都看不出来。
+  // **最要命的一条**：上期金额不许出现在这一屏 —— 不光是 value，placeholder 也一样。
+  // 参考值就摆在输入框那个位置，长得跟亲手填的没两样，某个月忘了改就带着上月的
+  // 电费把账单发出去了。每期真的不变的项走「和上期一样」，记成黑字实数。
   for (const b of boxes) {
     expect(b.value, '上期金额被预填成真值了').toBe('')
+    expect(b.placeholder, '上期金额漏进了灰色占位').toBe('0')
   }
-  expect(boxes.some((b) => b.placeholder !== ''), '一个参考值都没有，说明 hint 没接上').toBe(true)
+  // 一项都没填 ＝ 固定费这块是 0，不是「缺数据」——「¥0」在这儿就是那句话的证据
+  await expect(page.locator('.bill-section').filter({ hasText: '本期固定费' })).toContainText('¥0')
   await expect(page.getByText('改完自动保存')).toBeVisible()
-  await page.screenshot({ path: 'e2e/shots/13-monthly-hint.png' })
+  await page.screenshot({ path: 'e2e/shots/13-monthly-empty.png' })
 
 })
 
@@ -811,11 +814,18 @@ test('同一分类本期有两笔：面板说得出来，也点得进去，合�
   // 这笔是绕过前端直接 POST 的，整页加载一次让本地的账目列表也拿到它
   await page.goto('/bill')
   await expect(page.locator('.wrap')).toBeVisible()
-  // 面板的合计必须和账单上的「本期固定费」一致 —— 由后端给，不是把行加出来的
-  const panelTotal = (await page.locator('.section-head .amount').first().innerText()).trim()
+  // 面板的合计必须和账单上的「本期固定费」一致 —— 由后端给，不是把行加出来的。
+  // 用 poll 而不是读一次：这一屏是**缓存先上屏、再后台校正**，上面那笔是绕过前端
+  // 直接 POST 的，所以第一帧必然是旧数。读一次就等于跟渲染赛跑，红得毫无道理
   const billTotal = await (await page.request.get('/api/bill', { headers })).json()
   const monthly = (await (await page.request.get('/api/monthly', { headers })).json()).total
-  expect(Number(panelTotal.replace(/[^\d]/g, '')), '面板合计不能少算重复的那一笔').toBe(monthly)
+  await expect
+    .poll(
+      async () =>
+        Number((await page.locator('.section-head .amount').first().innerText()).replace(/[^\d]/g, '')),
+      { message: '面板合计不能少算重复的那一笔' },
+    )
+    .toBe(monthly)
   expect(billTotal.total_expense).toBeGreaterThan(monthly - 1)
 
   // 「本期有 2 笔」点得进去 —— 否则多出来的那笔在界面上既打不开也删不掉
@@ -852,14 +862,21 @@ test('固定费谁垫的：跟着分类走，不是「谁填的算谁」', async
     })
   }
 
+  // 名字不写死：种子里谁垫网费是会变的（现在是 Zen 全垫），写死就得跟着种子改
+  const members = await (await page.request.get('/api/members', { headers })).json()
+  const nameOf = (id: number) =>
+    members.find((m: { id: number }) => m.id === id)?.display_name as string
+
   await page.goto('/bill')
   // 行头上看得见谁垫的 —— 这是这一屏唯一会悄悄出错的地方
   const wifi = page.locator('.q-expansion-item').filter({ hasText: '网费' })
-  await expect(wifi).toContainText('Kan')
+  await expect(wifi).toContainText(nameOf(payer))
 
-  // 改成别人：分类的常驻默认和本期那笔要一起变
+  // 改成别人：分类的常驻默认和本期那笔要一起变。
+  // 挑「当前没选中」的那一格 —— 写死某个名字的话，哪天种子把默认改成他，
+  // 这一点就成了空点击，断言红在一个跟本意毫无关系的地方
   await wifi.locator('[role="button"]').first().click()
-  await wifi.locator('.pick').filter({ hasText: 'Zen' }).click()
+  await wifi.locator('.pick:not(.on)').first().click()
   await expect.poll(async () => (await catOf('网费')).default_payer_id).not.toBe(payer)
   const moved = await catOf('网费')
   await expect
@@ -885,6 +902,11 @@ test('固定费项目在设置里管：加、删、和上期一样', async ({ pa
     return all.find((c: { archived: boolean }) => !c.archived) ?? all.at(-1)
   }
 
+  // 进屏之前先把房租那个开关归零：它是共享状态，上一条用例红在半路就会留着开的，
+  // 于是这里「点一下应该变成开」当场变成空点击
+  await page.request.patch(`/api/categories/${(await catOf('房租')).id}`,
+    { headers, data: { same_as_last: false } })
+
   await page.getByRole('tab', { name: '更多' }).click()
   await page.getByRole('tab', { name: '设置' }).click()
   await expect(page.locator('.fixed-row[data-name="房租"]')).toBeVisible()
@@ -904,9 +926,12 @@ test('固定费项目在设置里管：加、删、和上期一样', async ({ pa
   await page.locator('.color-cell').nth(3).click()
   await expect.poll(async () => (await catOf('E2E停车位')).color).toBe('#c62828')
 
-  // 「和上期一样」默认关着 —— 这是「上次金额只作灰色占位」那条规矩的底线
+  // 「和上期一样」默认关着 —— 这是「没开开关就一个数字都不许自动填」那条规矩的底线。
+  // 断在**刚加出来的这一项**上，不断在房租：房租是共享状态，别的用例碰过就红在这儿，
+  // 而那跟「默认值是什么」根本是两回事
+  expect((await catOf('E2E停车位')).same_as_last, '新加的项默认必须是关的').toBe(false)
+  // 房租只拿来验「点得动」。进这一屏之前就已经归零过（见开头），所以这一下必然是开
   const rent = page.locator('.fixed-row[data-name="房租"]')
-  expect((await catOf('房租')).same_as_last, '默认必须是关的').toBe(false)
   await rent.locator('.q-toggle').click()
   await expect.poll(async () => (await catOf('房租')).same_as_last).toBe(true)
 

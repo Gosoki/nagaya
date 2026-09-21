@@ -388,9 +388,9 @@ class BillError(ValueError):
 def monthly_rows(session: Session, statement: Statement | None = None) -> dict[str, Any]:
     """每月一次的固定项在某张账单里的状态。statement 传 None ＝ 当前草稿。
 
-    没录的给「上次这项记了多少」当灰色参考 —— 注意它只是 placeholder，不是值。
-    账本里预填的数字很危险：长得跟亲手填的一模一样，某个月忘了改就带着上月的
-    电费把账单发出去了，谁都看不出来。
+    **没录的就是没录，amount 给 None**，界面上是个空框，出账时按 0 算。
+    这里不给「上次记了多少」当参考：要每期自动填上的项，去分类上开
+    `same_as_last`，由 carry_same_as_last 记成**真值**（黑字，看得见）。
     """
     # 翻历史账单时**连归档的也要列**：那张单子上真有这笔钱，总额里也算着它。
     # 只按「现在还没归档」过滤的话，归档一个分类会让它名下的旧账凭空消失，
@@ -413,8 +413,6 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
         dup[e.category_id] = dup.get(e.category_id, 0) + 1
         if e.category_id in monthly_ids:
             total += e.amount_jpy
-    hints, hint_labels = _last_billed_amount(session, [c.id for c in categories])
-
     rows = []
     for c in categories:
         entry = mine.get(c.id)
@@ -438,8 +436,6 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
                 "version": entry.version if entry else None,
                 "rule": entry.split_rule_json if entry else c.default_rule_json,
                 "date": entry.date.isoformat() if entry else None,
-                "hint": hints.get(c.id),
-                "hint_label": hint_labels.get(c.id),
                 #: 本期这个分类一共有几笔。>1 说明面板没显示全，界面上必须提示
                 "entry_count": dup.get(c.id, 0),
             }
@@ -476,11 +472,11 @@ def carry_same_as_last(session: Session, *, actor_id: int | None) -> list[dict[s
     if not categories:
         return []
     already = {e.category_id for e in unbilled(session) if e.category_id is not None}
-    hints, _ = _last_billed_amount(session, [c.id for c in categories])
+    last = _last_billed_amount(session, [c.id for c in categories])
 
     made: list[dict[str, Any]] = []
     for c in categories:
-        amount = hints.get(c.id)
+        amount = last.get(c.id)
         if c.id in already or not amount:
             continue
         entry = ledger.create_entry(
@@ -497,15 +493,13 @@ def carry_same_as_last(session: Session, *, actor_id: int | None) -> list[dict[s
     return made
 
 
-def _last_billed_amount(
-    session: Session, category_ids: list[int]
-) -> tuple[dict[int, int], dict[int, str]]:
-    """每个分类**上一次出过账的**金额，以及那笔在哪张单子上。
+def _last_billed_amount(session: Session, category_ids: list[int]) -> dict[int, int]:
+    """每个分类**上一次出过账的**金额。只给「和上期一样」那几项抄。
 
     按分类回溯而不是只看上一张单子：水费两个月一收，上一张本来就没有它。
     """
     if not category_ids:
-        return {}, {}
+        return {}
     rows = session.exec(
         select(Entry)
         .where(
@@ -517,17 +511,10 @@ def _last_billed_amount(
         .order_by(Entry.date.desc(), Entry.id.desc())
     ).all()
     amounts: dict[int, int] = {}
-    labels: dict[int, str] = {}
-    cache: dict[int, str] = {}
     for e in rows:
-        if e.category_id in amounts:
-            continue
-        amounts[e.category_id] = e.amount_jpy
-        if e.statement_id not in cache:
-            st = session.get(Statement, e.statement_id)
-            cache[e.statement_id] = st.label if st else ""
-        labels[e.category_id] = cache[e.statement_id]
-    return amounts, labels
+        if e.category_id not in amounts:
+            amounts[e.category_id] = e.amount_jpy
+    return amounts
 
 
 def settlement_progress(session: Session, statement: Statement | None) -> dict[str, Any]:

@@ -43,8 +43,6 @@ export default {
     autoSaved: '自動保存',
     recorded: '記録済み',
     willDelete: '削除されます',
-    hintFrom: '{label} 参考',
-    noHint: '記録なし',
     addItem: '固定費を追加',
     addPlaceholder: '名称（例：NHK受信料）',
     added: '追加しました。来月から自動で表示されます',

@@ -43,8 +43,6 @@ export default {
     autoSaved: '改完自动保存',
     recorded: '已录',
     willDelete: '将删除',
-    hintFrom: '参考 {label}',
-    noHint: '没录过',
     addItem: '加一项固定费',
     addPlaceholder: '名字，比如 停车位',
     added: '加好了，下个月它会自己出现在这儿',

@@ -1,7 +1,8 @@
 """当前草稿账单上的「固定费」回归。
 
-要钉死的一条：**上次的金额只能是灰色参考（hint），绝不能变成本期的值（amount）。**
-一旦它变成真值，某个月忘了改就会带着上月的电费把账单发出去，而且谁都看不出来。
+要钉死的一条：**上期的金额只有开了「和上期一样」才会进来，而且进来就是黑字实数。**
+没开开关的项，草稿里一个数字都不许出现 —— 参考值就摆在输入框那个位置，
+长得跟亲手填的没两样，某个月忘了改就带着上月的电费把账单发出去了。没填按 0 结。
 """
 
 from __future__ import annotations
@@ -43,8 +44,8 @@ def test_only_monthly_unarchived_show_up(session, members) -> None:
     assert list(rows_by_name(session)) == ["家賃", "電気", "水道"]
 
 
-def test_unrecorded_rows_carry_hint_not_value(session, members) -> None:
-    """上次的金额只能出现在 hint 里。amount 必须是 None。"""
+def test_unrecorded_rows_stay_empty(session, members) -> None:
+    """没开「和上期一样」的项：上期出过多少都不许漏进这一期，连参考值都不给。"""
     a, *_ = members
     c = cats(session)
     create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG,
@@ -54,8 +55,8 @@ def test_unrecorded_rows_carry_hint_not_value(session, members) -> None:
     rows = rows_by_name(session)
     assert rows["電気"]["amount"] is None, "上次的金额被当成本期的值了"
     assert rows["電気"]["entry_id"] is None
-    assert rows["電気"]["hint"] == 8_700
-    assert rows["水道"]["hint"] is None           # 从来没录过，连参考都没有
+    # 整行里不能有任何一个字段捎着 8,700 回来 —— 前端拿它当 placeholder 就等于预填
+    assert 8_700 not in rows["電気"].values()
 
 
 def test_entries_in_the_current_draft_are_real_values(session, members) -> None:
@@ -69,10 +70,15 @@ def test_entries_in_the_current_draft_are_real_values(session, members) -> None:
     assert rows["電気"]["version"] == e.version   # 改它要带乐观锁
 
 
-def test_hint_looks_back_past_statements_without_that_item(session, members) -> None:
-    """水费两个月一收，上一张单子本来就没有它 —— 要按分类往回找。"""
+def test_carry_looks_back_past_statements_without_that_item(session, members) -> None:
+    """水费两个月一收，上一张单子本来就没有它 —— 要按分类往回找。
+
+    只看上一张的话，「和上期一样」在水费上永远搬不过来，而它恰恰是最该自动搬的那种。
+    """
     a, *_ = members
     c = cats(session)
+    c["水道"].same_as_last = True
+    session.add(c["水道"])
     create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=dt.date(2026, 7, 10),
                  amount=12_000, payer_id=a.id, category_id=c["水道"].id)
     cut_statement(session, actor_id=a.id)                       # 7 月那张
@@ -80,21 +86,22 @@ def test_hint_looks_back_past_statements_without_that_item(session, members) -> 
                  amount=8_700, payer_id=a.id, category_id=c["電気"].id)
     cut_statement(session, actor_id=a.id)                       # 8 月那张（没有水费）
 
-    rows = rows_by_name(session)
-    assert rows["水道"]["hint"] == 12_000
-    assert rows["電気"]["hint"] == 8_700
+    assert [m["amount"] for m in carry_same_as_last(session, actor_id=a.id)] == [12_000]
 
 
-def test_deleted_entries_do_not_become_hints(session, members) -> None:
+def test_deleted_entries_are_not_carried(session, members) -> None:
+    """删掉的那笔不算「上期」—— 否则「和上期一样」会把一笔已经作废的钱抄回来。"""
     a, *_ = members
     c = cats(session)
+    c["電気"].same_as_last = True
+    session.add(c["電気"])
     e = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG,
                      amount=8_700, payer_id=a.id, category_id=c["電気"].id)
     delete_entry(session, e, actor_id=a.id)      # 出账前删掉
     create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG,
                  amount=1, payer_id=a.id, category_id=c["水道"].id)
     cut_statement(session, actor_id=a.id)
-    assert rows_by_name(session)["電気"]["hint"] is None
+    assert carry_same_as_last(session, actor_id=a.id) == []
 
 
 def test_rule_falls_back_to_category_default(session, members) -> None:
@@ -152,7 +159,7 @@ def test_monthly_rows_of_a_past_statement_only_lists_what_is_on_it(session, memb
     names = [r["name"] for r in monthly_rows(session, st)["rows"]]
     assert names == ["家賃"]                       # 水道 这期没有，就不该出现
 
-    # 当前草稿仍然两项都列（没录的那项给灰色参考值）
+    # 当前草稿仍然两项都列（没录的那项是个空框，出账时按 0 结）
     assert [r["name"] for r in monthly_rows(session)["rows"]] == ["家賃", "水道"]
 
 
@@ -201,8 +208,7 @@ def test_carry_only_touches_items_that_opted_in(session: Session, members) -> No
     """「和上期一样」只搬明确开了开关的那几项。
 
     这条规矩的另一半是**默认不搬**：电费燃气每期都不一样，自动按上期记上，
-    就等于「某个月忘了改，带着上月的电费把账单发出去」—— 那正是灰色占位
-    当初要防的事。
+    就等于「某个月忘了改，带着上月的电费把账单发出去」。
     """
     a, *_ = members
     c = cats(session)
@@ -222,7 +228,7 @@ def test_carry_only_touches_items_that_opted_in(session: Session, members) -> No
     rows = {r["name"]: r for r in monthly_rows(session)["rows"]}
     assert rows["家賃"]["amount"] == 120_000, "搬过来的是真值"
     assert rows["電気"]["amount"] is None, "没开开关的一分都不许自动记"
-    assert rows["電気"]["hint"] == 8_000, "它继续只给灰色参考"
+    assert 8_000 not in rows["電気"].values(), "没开开关的，上期金额一点都不许漏过来"
 
     # 再跑一次不会重复记
     assert carry_same_as_last(session, actor_id=a.id) == []

@@ -12,6 +12,7 @@
   * 固定费的日期一律是出账日（D30），日常开销保留真实日子
   * 水费两个月一收，只出现在 6 月和 8 月
   * 当前草稿的 燃气 / 水费 空着 → 面板给灰色参考值
+  * 固定费全记在 Zen 头上 —— 一个人先垫一大笔，另外两个人转给他
   * 一笔带调整额（Zen 少担 1,000）、一笔 1:1:0（Zen 出差没参与）
 """
 
@@ -103,13 +104,17 @@ def main() -> None:
         def fixed(month: int, denki: int, gasu: int) -> None:
             """这个月的固定费。日期随便填，出账时会统一盖成出账日（D30）。
 
+            **固定费一律记在 Zen 头上**：这屋里固定费都从同一张卡扣。
+            于是每期都是「一个人先垫一大笔，另外两个人转给他」——
+            转账方案、上期结转这些机制在示例数据里才有东西可演示。
+
             **固定费不带备注**：那一屏只有金额一个输入框，没有填备注的地方，
             示例数据里写了备注就等于演示一个界面上做不到的状态。
             """
-            add(EntryKind.expense, d(month, 1), 120_000, "房租", "", go.id)
-            add(EntryKind.expense, d(month, 25), denki, "电费", "", go.id)
-            add(EntryKind.expense, d(month, 25), gasu, "燃气", "", go.id)
-            add(EntryKind.expense, d(month, 25), 5_500, "网费", "", kan.id)
+            add(EntryKind.expense, d(month, 1), 120_000, "房租", "", zen.id)
+            add(EntryKind.expense, d(month, 25), denki, "电费", "", zen.id)
+            add(EntryKind.expense, d(month, 25), gasu, "燃气", "", zen.id)
+            add(EntryKind.expense, d(month, 25), 5_500, "网费", "", zen.id)
 
         # ---------------------------------------------------------------- 5 月
         fixed(5, denki=7_800, gasu=4_600)
@@ -121,7 +126,7 @@ def main() -> None:
 
         # ---------------------------------------------------------------- 6 月
         fixed(6, denki=8_900, gasu=3_900)
-        add(EntryKind.expense, d(6, 25), 11_800, "水费", "", go.id)
+        add(EntryKind.expense, d(6, 25), 11_800, "水费", "", zen.id)
         add(EntryKind.expense, d(6, 8), 1_780, "日用品", "垃圾袋和保鲜膜", kan.id)
         add(EntryKind.expense, d(6, 15), 6_400, "伙食", "烧烤", go.id, rule=zen_less)
         add(EntryKind.income, d(6, 21), -4_500, None, "电费返现", go.id)
@@ -139,7 +144,7 @@ def main() -> None:
 
         # ---------------------------------------------------------------- 8 月
         fixed(8, denki=10_400, gasu=3_200)
-        add(EntryKind.expense, d(8, 25), 12_600, "水费", "", go.id)
+        add(EntryKind.expense, d(8, 25), 12_600, "水费", "", zen.id)
         add(EntryKind.expense, d(8, 12), 8_900, "伙食", "中元假期烤肉", go.id, rule=zen_less)
         add(EntryKind.expense, d(8, 20), 3_240, "日用品", "洗手液等", zen.id)
         add(EntryKind.income, d(8, 25), -3_000, None, "电费返现", go.id)
@@ -148,9 +153,9 @@ def main() -> None:
         settle_plan(s, august, on=d(9, 1), at=utc(9, 1), how_many=1)
 
         # ------------------------------------------------ 当前草稿：固定费填了一半
-        add(EntryKind.expense, d(9, 1), 120_000, "房租", "", go.id)
-        add(EntryKind.expense, d(9, 18), 8_700, "电费", "", go.id)
-        add(EntryKind.expense, d(9, 19), 5_500, "网费", "", kan.id)
+        add(EntryKind.expense, d(9, 1), 120_000, "房租", "", zen.id)
+        add(EntryKind.expense, d(9, 18), 8_700, "电费", "", zen.id)
+        add(EntryKind.expense, d(9, 19), 5_500, "网费", "", zen.id)
         # 燃气 和 水费 故意不填：面板要显示成灰色参考值，不是预填的真值
         add(EntryKind.expense, d(9, 3), 4_600, "伙食", "披萨（Zen 出差）", kan.id,
             rule=without_zen)
@@ -158,9 +163,9 @@ def main() -> None:
         add(EntryKind.expense, d(9, 14), 5_200, "伙食", "火锅食材", go.id)
         add(EntryKind.income, d(9, 20), -2_400, None, "乐天积分返现", kan.id)
 
-        # 每项固定费谁垫，是**分类的常驻属性** —— 房租从 Go 的卡扣，网费是 Kan 的
-        for name, who in [("房租", go), ("电费", go), ("燃气", go), ("水费", go), ("网费", kan)]:
-            cats[name].default_payer_id = who.id
+        # 每项固定费谁垫，是**分类的常驻属性**。这屋里固定费全从 Zen 那张卡扣
+        for name in ("房租", "电费", "燃气", "水费", "网费"):
+            cats[name].default_payer_id = zen.id
             s.add(cats[name])
 
         # 备忘：固定费那几项各写一条，再加两条清单之外的
