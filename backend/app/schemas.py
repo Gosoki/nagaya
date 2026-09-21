@@ -134,6 +134,10 @@ class StatementOut(SQLModel):
     covers_from: Optional[dt.date]
     covers_to: Optional[dt.date]
     cut_by: Optional[int]
+    #: 列表页要在每一行上直接显示金额和结清状态，不然得为每张单子再拉一次账单接口。
+    #: 金额取**实时**值（出账后改过就显示改后的），跟详情页对得上。
+    total_expense: int = 0
+    settled: bool = False
 
 
 class BalancesOut(SQLModel):

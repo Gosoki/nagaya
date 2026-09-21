@@ -82,7 +82,7 @@ export default {
     cutConfirm: 'この時点までの明細をこの請求書にまとめます。以降の記帳は次回分になります。',
     cutEmpty: '対象の明細がありません',
     cutDone: '作成しました',
-    history: '過去の請求書',
+    tabCurrent: '今期', tabPast: '過去', noPast: 'まだ請求書がありません',
     editedAfterCut: '作成後に {n} 件変更されています（当時 {frozen} → 現在 {live}）',
     coversRange: '{from} 〜 {to}',
     noPeriod: 'まだ明細がありません',

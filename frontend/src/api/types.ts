@@ -57,6 +57,9 @@ export interface Statement {
   covers_from: string | null
   covers_to: string | null
   cut_by: number | null
+  /** 列表页每行直接显示，省得为每张单子再拉一次账单接口 */
+  total_expense: number
+  settled: boolean
 }
 
 export interface Setting {

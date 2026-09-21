@@ -8,6 +8,14 @@
 -->
 <template>
   <q-page class="page">
+    <!-- 本期和以前分成两页：看本期问的是「还要填什么、该出账了没」，
+         翻旧单子问的是「上个月多少、谁转了没」，混一页两边都别扭 -->
+    <BillTabs v-if="statementId === null" />
+    <div v-else class="row items-center back-head">
+      <q-btn dense flat round icon="arrow_back" @click="backToPast" />
+      <div class="col text-weight-medium">{{ t('bill.tabPast') }}</div>
+    </div>
+
     <div v-if="!bill" class="text-center text-grey-6 q-mt-xl">{{ t('bill.noPeriod') }}</div>
 
     <template v-else>
@@ -184,27 +192,6 @@
         </q-card>
       </div>
 
-      <div class="q-px-md q-pb-md">
-        <q-btn
-          v-if="statements.length"
-          flat dense color="grey-7" no-caps icon="history" :label="t('bill.history')"
-        >
-          <q-menu>
-            <q-list style="min-width: 180px">
-              <q-item v-if="viewing" clickable v-close-popup @click="open(null)">
-                <q-item-section>{{ t('bill.draft') }}</q-item-section>
-              </q-item>
-              <q-item v-for="st in statements" :key="st.id" clickable v-close-popup @click="open(st.id)">
-                <q-item-section>
-                  <q-item-label>{{ st.label }}</q-item-label>
-                  <q-item-label caption>{{ st.covers_from }} 〜 {{ st.covers_to }}</q-item-label>
-                </q-item-section>
-              </q-item>
-            </q-list>
-          </q-menu>
-        </q-btn>
-      </div>
-
       <!-- 主操作固定在拇指区，和记一笔那屏一个规矩：这一页很长，
            「出账单」压在最底下的话每次都要先滚到底 -->
       <div class="actions">
@@ -274,12 +261,13 @@
 
 <script setup lang="ts">
 import { useQuasar } from 'quasar'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
 import { ApiError, api } from 'src/api/client'
 import type { Entry, Statement } from 'src/api/types'
+import BillTabs from 'src/components/BillTabs.vue'
 import MonthlyFixed from 'src/components/MonthlyFixed.vue'
 import { formatYen } from 'src/i18n'
 import { useAuth } from 'src/stores/auth'
@@ -334,9 +322,9 @@ const auth = useAuth()
 const ledger = useLedger()
 
 const bill = ref<Bill | null>(null)
-const statements = ref<Statement[]>([])
+/** 路由里带的账单 id。null ＝ 本期那张草稿 */
+const statementId = computed(() => Number(route.params.statementId) || null)
 const draftEntries = ref<Entry[]>([])
-const viewing = ref<number | null>(null)   // null ＝ 当前这张还没出的草稿
 const busy = ref<number | null>(null)
 const showFallback = ref(false)
 const cutResult = ref<Bill | null>(null)
@@ -389,10 +377,9 @@ const coversText = computed(() => {
     .join(' · ')
 })
 
-/** 默认看当前这张还没出的草稿；从「出过的账单」菜单可以翻旧的 */
+/** 看哪一张完全由路由决定：/bill ＝本期草稿，/bill/3 ＝那张出过的 */
 async function load() {
-  statements.value = await api.get<Statement[]>('/api/statements')
-  const id = viewing.value ?? (Number(route.params.statementId) || null)
+  const id = statementId.value
   bill.value = id
     ? await api.get<Bill>(`/api/statements/${id}/bill`)
     : await api.get<Bill>('/api/bill')
@@ -422,7 +409,6 @@ const monthlyTotal = computed(() =>
 
 /** 固定费是一整屏一起看的东西，点哪一行都去那一屏，不进单笔编辑页 */
 function openMonthly() {
-  // 用账单自己报的 id，不用 viewing —— 直接开 /bill/4 这个链接时 viewing 还是空的
   const id = bill.value?.statement_id
   if (id == null) return
   void router.push({ name: 'monthly', params: { statementId: String(id) } })
@@ -446,12 +432,12 @@ const iconOfEntry = (e: Entry) =>
   e.kind === 'income' ? 'savings' : (categoryOfEntry(e)?.icon ?? 'receipt_long')
 const labelOfEntry = (e: Entry) => e.title || categoryOfEntry(e)?.name || t(`kind.${e.kind}`)
 
-async function open(id: number | null) {
-  viewing.value = id
-  await load()
+function backToPast() {
+  void router.push({ name: 'bill-past' })
 }
 
 onMounted(load)
+watch(statementId, load)   // 在两张单子之间跳时组件不会重建，得自己重新拉
 
 /** 贴进 LINE 的纯文本。在前端拼，所以自动跟随界面语言（SPEC §7.5）。 */
 const billText = computed(() => {
@@ -558,8 +544,8 @@ function doCut() {
       // 不该让人再自己翻回去找
       const cut = await api.get<Bill>(`/api/statements/${st.id}/bill`)
       cutResult.value = cut
-      viewing.value = st.id
-      await load()
+      // 跳到这张新单子的地址上，界面才跟 URL 对得上（顶上会变成返回条）
+      await router.push({ name: 'bill', params: { statementId: String(st.id) } })
       // 记一笔那屏的「日期不许选回已出账范围」靠 ledger.prevCutAt，
       // 出完账不刷新的话它还是出账前的旧值，锁就形同虚设
       await ledger.refresh()

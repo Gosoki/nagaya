@@ -45,8 +45,16 @@ def monthly(
 
 @router.get("/statements", response_model=list[StatementOut])
 def list_statements(session: Session = Depends(get_session), _: Member = Depends(current_member)):
-    """出过的账单，新的在前。"""
-    return list(session.exec(select(Statement).order_by(Statement.cut_at.desc())))
+    """出过的账单，新的在前。带上金额和结清状态 —— 列表页每行都要显示。"""
+    rows = list(session.exec(select(Statement).order_by(Statement.cut_at.desc())))
+    return [
+        StatementOut(
+            **st.model_dump(),
+            total_expense=bill_svc.build_total_expense(session, st),
+            settled=bool(bill_svc.settlement_progress(session, st)["settled"]),
+        )
+        for st in rows
+    ]
 
 
 @router.get("/statements/{statement_id}/bill")

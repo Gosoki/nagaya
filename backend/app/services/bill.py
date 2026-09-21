@@ -204,7 +204,7 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
         # 出账之后又被改过的话要说出来，否则下一张的「上期结转」没人解释得清
         "edited_after_cut": _edited_after_cut(session, statement),
         # 这张单子上的转账记完了没有 —— 「转账按钮都点过了就显示结清」
-        **_settlement_progress(session, statement),
+        **settlement_progress(session, statement),
     }
 
 
@@ -439,7 +439,7 @@ def _last_billed_amount(
     return amounts, labels
 
 
-def _settlement_progress(session: Session, statement: Statement | None) -> dict[str, Any]:
+def settlement_progress(session: Session, statement: Statement | None) -> dict[str, Any]:
     """这张账单开出来的转账，记完了几笔。
 
     判据是「按这张单子的方案，该转的钱有没有转够」：

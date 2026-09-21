@@ -36,7 +36,9 @@ const display = computed(() => (props.modelValue ? props.modelValue.toLocaleStri
 const widthCh = computed(() => {
   const text = display.value || '0'
   const commas = (text.match(/,/g) ?? []).length
-  return `${Math.max(1, text.length - commas * 0.55)}ch`
+  // 末尾那 0.3ch 是**留给字形的余量**：正好按 1ch 算的话框子和「0」一样宽，
+  // 一丝不差，遇上亚像素取整就会把字边削掉一条，看着像被遮住了
+  return `${Math.max(1, text.length - commas * 0.55) + 0.3}ch`
 })
 
 function onInput(e: Event) {
@@ -77,7 +79,8 @@ defineExpose({ focus })
   color: inherit;
   font-size: 46px;
   font-weight: 600;
-  line-height: 1.1;
+  /* 1.1 在 46px 下太紧：input 会裁掉超出内容框的字形，高个儿的数字上沿就没了 */
+  line-height: 1.3;
   border: none;
   outline: none;
   background: transparent;

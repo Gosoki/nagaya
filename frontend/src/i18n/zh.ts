@@ -82,7 +82,7 @@ export default {
     cutConfirm: '把这一刻之前记的账全部归到这张账单上。之后再记的会进下一张。',
     cutEmpty: '还没有待出账的账目',
     cutDone: '出账了',
-    history: '出过的账单',
+    tabCurrent: '本期', tabPast: '以前', noPast: '还没出过账单',
     editedAfterCut: '这张出账后被改过 {n} 处：当初 {frozen}，现在 {live}',
     coversRange: '{from} 〜 {to}',
     noPeriod: '还没有账目',
