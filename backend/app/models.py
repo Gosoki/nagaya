@@ -31,6 +31,15 @@ def today_jst() -> dt.date:
     return dt.datetime.now(JST).date()
 
 
+def jst_date(ts: dt.datetime) -> dt.date:
+    """存的是 naive UTC 时间戳，换算成日本时间的那一天。
+
+    出账时间是个时刻，而账单上写的是日期 —— 日本时间凌晨出的账，
+    按 UTC 算会退到前一天。
+    """
+    return ts.replace(tzinfo=dt.timezone.utc).astimezone(JST).date()
+
+
 class EntryKind(str, Enum):
     expense = "expense"          # 支出：payer 垫钱，shares 是各人应担
     income = "income"            # 收入（返现等）：amount 为负，shares 也为负

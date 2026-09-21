@@ -13,7 +13,7 @@ import datetime as dt
 import pytest
 from sqlmodel import Session, select
 
-from app.models import Category, EntryKind, Statement, now_utc
+from app.models import Category, EntryKind, Statement, jst_date, now_utc
 from app.services import settings as settings_svc
 from app.services.bill import BillError, build_bill, cut_statement, entries_of
 from app.services.ledger import balances, create_entry, update_entry
@@ -153,8 +153,13 @@ def test_statements_are_ordered_and_labelled(session: Session, members) -> None:
 
     rows = list(session.exec(select(Statement).order_by(Statement.cut_at)))
     assert [r.id for r in rows] == [first.id, second.id]
+    # 头一张没有「上一次」，只能从第一笔算起
     assert first.covers_from == SEP and first.covers_to == SEP
-    assert second.covers_from == OCT
+    # 第二张起，起始日是**上一次出账那天**，不是这张单子里最早那笔的日期 ——
+    # 「10 月那张从 10/10 开始」是错觉，10 月上旬没人花钱而已，
+    # 它管的是上次出账之后的一切
+    assert second.covers_from == jst_date(first.cut_at)
+    assert second.covers_to == OCT
     assert "出账" in first.label
 
 

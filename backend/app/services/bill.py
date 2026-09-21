@@ -33,6 +33,7 @@ from app.models import (
     Member,
     Statement,
     now_utc,
+    jst_date,
     today_jst,
 )
 from app.services import settings as settings_svc
@@ -179,7 +180,12 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
         "label": statement.label if statement else None,
         "is_draft": statement is None,
         "cut_at": statement.cut_at.isoformat() if statement else None,
-        "covers_from": min(dates).isoformat() if dates else None,
+        # 起始日 ＝ **上一次出账那天**，不是这张单子里最早那笔的日期。
+        # 「7 月那张从 7/2 开始」是错觉 —— 7/1 没人花钱而已，它管的是
+        # 6/30 出账之后的一切。头一张没有上一次，只能从第一笔算起。
+        "covers_from": (
+            jst_date(prev.cut_at).isoformat() if prev else (min(dates).isoformat() if dates else None)
+        ),
         "covers_to": max(dates).isoformat() if dates else None,
         "total_expense": total_expense,
         "total_income": total_income,
@@ -285,10 +291,12 @@ def cut_statement(
             session.add(e)
 
     dates = [e.date for e in entries]
+    # 起始日跟 build_bill 一个口径：上一次出账那天。头一张才从第一笔算起
+    prev = session.exec(select(Statement).order_by(Statement.cut_at.desc())).first()
     statement = Statement(
         label=label or f"{today.month}/{today.day} 出账",
         cut_at=now_utc(),
-        covers_from=min(dates),
+        covers_from=jst_date(prev.cut_at) if prev else min(dates),
         covers_to=max(dates),
         cut_by=actor_id,
     )
