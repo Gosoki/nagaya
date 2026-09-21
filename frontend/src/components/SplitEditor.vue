@@ -292,6 +292,8 @@ defineExpose({
   letter-spacing: 0.04em;
 }
 .name-col { min-width: 0; }
+/* 比例和调整之间留一道明显的空 —— 它们是两种不同的输入，不该挨在一起 */
+.adj-col { padding-left: 14px; }
 .share-col { text-align: right; font-variant-numeric: tabular-nums; font-size: 15px; }
 
 .member-row { min-height: 48px; }
@@ -302,10 +304,13 @@ defineExpose({
 .name { font-size: 15px; }
 /* 数字框本身要够高：44px 说的是**可点区域**，输入框太矮拇指点不准 */
 /* 比例那颗药丸：44px 是可点区域的底线，拇指点得准 */
+.weight-col { display: flex; justify-content: center; }
+/* 药丸只占 48px 宽（44 高仍然够拇指点）。撑满整列的话是个大盒子，
+   右边又紧贴着调整的下划线，两种输入样式挤在一起看着就乱 */
 .weight-pill {
-  width: 100%;
+  width: 48px;
   min-height: 44px;                    /* 拇指的底线 */
-  border: 1px solid rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(0, 0, 0, 0.14);
   border-radius: 8px;
   background: #fff;
   color: #222;
