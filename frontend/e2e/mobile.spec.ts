@@ -80,11 +80,15 @@ test('登录页在 375px 下正常', async ({ page }) => {
 test('记一笔：默认页就是它，且主操作在拇指区', async ({ page }) => {
   await login(page)
   await expect(page).toHaveURL(/\/$/)                       // D16：PWA 打开即记一笔
-  // 日常那屏只留天天会用的三个。家賃/電気/ガス/水道/ネット 一个月才碰一次，
-  // 已经挪到账单页顺手填，不在这里占按钮
-  await expect(page.locator('.cat')).toHaveCount(3)
+  // 日常那屏只放天天会用的。家賃/電気/ガス/水道/ネット 一个月才碰一次，
+  // 已经挪到账单页顺手填，不在这里占按钮。
+  // 不写死个数（加个「外食」就得改测试没意义），钉的是真正的规矩：
+  // 固定费一个都不许出现，而且总数一行放得下 —— 这一屏的价值就在于按钮少。
   await expect(page.getByRole('button', { name: '日用品' })).toBeVisible()
-  await expect(page.getByRole('button', { name: '家賃' })).toHaveCount(0)
+  for (const monthly of ['家賃', '電気', 'ガス', '水道', 'ネット']) {
+    await expect(page.getByRole('button', { name: monthly })).toHaveCount(0)
+  }
+  expect(await page.locator('.cat').count(), '日常分类超过一行了').toBeLessThanOrEqual(4)
 
   // 主操作按钮必须在屏幕下半部
   const save = page.getByRole('button', { name: '保存', exact: true })

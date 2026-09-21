@@ -23,6 +23,7 @@ DEFAULT_CATEGORIES = [
     ("ネット", "wifi", "#26a69a", True),
     ("日用品", "shopping_basket", "#8d6e63", False),
     ("食費", "restaurant", "#66bb6a", False),
+    ("外食", "ramen_dining", "#ab47bc", False),
     ("その他", "more_horiz", "#78909c", False),
 ]
 

@@ -31,7 +31,11 @@
     <AmountInput ref="amountEl" v-model="amount" />
 
     <!-- 分类：大色块网格，一点即选。只有支出分类；收入和转账都没有 -->
-    <div v-if="kind === 'expense'" class="cat-grid">
+    <div
+      v-if="kind === 'expense'"
+      class="cat-grid"
+      :style="{ gridTemplateColumns: `repeat(${Math.min(4, gridCategories.length)}, 1fr)` }"
+    >
       <button
         v-for="c in gridCategories"
         :key="c.id"
@@ -397,6 +401,8 @@ function reset(keepGoing: boolean) {
 
 .cat-grid {
   display: grid;
+  /* 列数在模板里按分类数算，最多 4 列。写死 4 列的话分类不足 4 个时
+     右边会空出一格，整排偏左，看着像上面的金额没居中 */
   grid-template-columns: repeat(4, 1fr);
   gap: 8px;
   padding: 4px 12px 8px;
