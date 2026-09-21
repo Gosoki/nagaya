@@ -44,7 +44,7 @@
               <q-icon name="delete" />
             </template>
 
-            <q-item clickable @click="editEntry(e.id)">
+            <q-item clickable @click="openEntry(e)">
               <q-item-section avatar>
                 <q-avatar size="34px" :style="{ background: colorOf(e) }" text-color="white">
                   <q-icon :name="iconOf(e)" size="18px" />
@@ -100,9 +100,22 @@ onMounted(async () => {
 const statementsOn = (date: string) =>
   statements.value.filter((st) => st.cut_at.slice(0, 10) === date)
 
-/** 点一条就去改它。已出账的也能改，差额进下一张账单的「上期结转」 */
-function editEntry(id: number) {
-  void router.push({ name: 'entry-edit', params: { id: String(id) } })
+/**
+ * 点一条就去改它。已出账的也能改，差额进下一张账单的「上期结转」。
+ *
+ * **固定费走固定费那一屏**，不进单笔编辑页：家賃/水电煤网是一整屏一起看、
+ * 一起改的东西，从账目里单独点开一笔跟从账单点开的是两套界面，没有道理。
+ */
+function openEntry(e: Entry) {
+  if (categoryOf(e)?.monthly) {
+    void router.push(
+      e.statement_id
+        ? { name: 'monthly', params: { statementId: String(e.statement_id) } }
+        : { name: 'monthly' },
+    )
+    return
+  }
+  void router.push({ name: 'entry-edit', params: { id: String(e.id) } })
 }
 
 function openStatement(id: number) {

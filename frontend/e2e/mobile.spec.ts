@@ -583,3 +583,20 @@ test('点一条账目进去改：金额改得动，自定义分摊不会被打�
   expect(Object.values(saved.shares as Record<string, number>).sort((a, b) => a - b))
     .toEqual([1100, 1700, 1700])
 })
+
+test('账目里点固定费去固定费那一屏，点日常开销才进单笔编辑', async ({ page }) => {
+  await login(page)
+
+  // 固定费是一整屏一起看的东西 —— 从账目点开也得是那一屏，
+  // 否则同一个 家賃 从账单点和从账目点会落到两套界面上
+  await page.goto('/entries')
+  await page.locator('.q-item').filter({ hasText: '家賃' }).first().click()
+  await expect(page).toHaveURL(/\/monthly/)
+  await expect(page.getByText('本期固定费')).toBeVisible()
+
+  // 日常开销一笔就是一笔，还是进单笔编辑页
+  await page.goto('/entries')
+  await page.locator('.q-item').filter({ hasText: '鍋の材料' }).first().click()
+  await expect(page).toHaveURL(/\/entry\/\d+/)
+  await expect(page.getByText('改这一笔')).toBeVisible()
+})
