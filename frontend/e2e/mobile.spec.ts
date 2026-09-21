@@ -780,6 +780,30 @@ test('账单两页：未出账 / 已出账，更早的从标题那个名字翻',
   await expectNoHorizontalScroll(page)
 })
 
+test('结清了的账单：绿标就占状态那一格，自己那笔划掉', async ({ page }) => {
+  await login(page)
+  const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
+  const all = await (await page.request.get('/api/statements', { headers })).json()
+  const settled = all.find((s: { settled: boolean }) => s.settled)
+  expect(settled, '种子数据里该有已结清的账单').toBeTruthy()
+
+  await page.goto(`/bill/${settled.id}`)
+  await expect(page.locator('.head .pick')).toContainText(settled.label)
+  // 绿标就在日期那一行的右头 —— 原来它自己占一整行，右头写的是「请于每月 N 号前结清」
+  const status = page.locator('.head .row').nth(1)
+  await expect(status.locator('.q-badge')).toHaveText('已结清')
+  await expect(page.locator('.head'), '结算日提醒撤了').not.toContainText('号前结清')
+  // 钱早就转过了：一个亮着的「你应收」会让人以为现在还欠着
+  await expect(page.locator('.mine')).toHaveCSS('text-decoration-line', 'line-through')
+
+  // 没结清的那张不划，否则这条断言等于没断言
+  const open = all.find((s: { settled: boolean }) => !s.settled)
+  expect(open, '种子数据里该有没结清的账单').toBeTruthy()
+  await page.goto(`/bill/${open.id}`)
+  await expect(page.locator('.head .row').nth(1)).toContainText('未结清')
+  await expect(page.locator('.mine')).toHaveCSS('text-decoration-line', 'none')
+})
+
 test('账目筛选：按分类/付款人筛，并给出筛选后的合计', async ({ page }) => {
   await login(page)
   await page.goto('/entries')

@@ -135,11 +135,12 @@ def test_settings_carry_notes_and_validate(client, auth):
     rows = {s["key"]: s for s in client.get("/api/settings", headers=auth).json()}
     assert rows["remainder_to"]["value"] == "payer"
     assert rows["remainder_to"]["note_zh"] and rows["remainder_to"]["note_ja"]
-    assert rows["settle_due_day"]["value"] is None          # 你们还没定，留空
     assert "period_start_day" not in rows, "账期起算日应当随账期机制一起消失"
+    assert "settle_due_day" not in rows, "结算日提醒撤了，这一项该跟着消失"
 
-    assert client.put("/api/settings/settle_due_day", headers=auth, json={"value": 25}).status_code == 200
-    assert client.put("/api/settings/settle_due_day", headers=auth, json={"value": 40}).status_code == 400
+    # 整数项的取值范围要真的拦得住
+    assert client.put("/api/settings/monthly_gap_days", headers=auth, json={"value": 25}).status_code == 200
+    assert client.put("/api/settings/monthly_gap_days", headers=auth, json={"value": 400}).status_code == 400
     assert client.put("/api/settings/remainder_to", headers=auth, json={"value": "nope"}).status_code == 400
     assert client.put("/api/settings/nonexistent", headers=auth, json={"value": 1}).status_code == 404
 

@@ -13,16 +13,6 @@ from __future__ import annotations
 from typing import Any
 
 SETTINGS_SPEC: dict[str, dict[str, Any]] = {
-    "settle_due_day": {
-        "type": "int_or_null",
-        "default": None,
-        "min": 1,
-        "max": 31,
-        "note_zh": "结算日：每月几号之前结清。**只用于账单上那句话**，不影响任何计算。"
-                   "留空则账单只写「未结清」。",
-        "note_ja": "精算日：毎月何日までに清算するか。**請求書の文言だけ**に使います。"
-                   "空欄なら「未精算」とだけ表示します。",
-    },
     "default_payer_id": {
         "type": "member_id_or_null",
         "default": None,

@@ -55,7 +55,7 @@ export default {
     title: '請求書', open: '請求書を出す',
     owed: '負担額', paid: '立替', prepaid: '前払い', carried: '前期繰越',
     toReceive: '受取', toPay: '支払', settled: '精算済み',
-    total: '合計', income: '収入', dueBy: '毎月 {date} 日までに精算', unsettled: '未精算',
+    total: '合計', income: '収入', unsettled: '未精算',
     plan: '送金プラン（{n} 件）', planEmpty: '全員ぴったり。送金不要です',
     done: '完了', doneHint: '{from} → {to} の送金を記帳します',
     copy: '請求書をコピー', copied: 'コピーしました。LINE に貼り付けてください',

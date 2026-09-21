@@ -61,28 +61,32 @@
           <div class="text-caption text-grey-6 q-mr-xs">{{ t('bill.total') }}</div>
           <div class="text-h6">{{ formatYen(bill.total_expense) }}</div>
         </div>
-        <div v-if="!bill.is_draft && bill.settled" class="row items-center q-gutter-xs q-mt-xs">
-          <q-badge color="positive" :label="t('bill.settledBadge')" />
-        </div>
         <div class="row items-baseline text-caption text-grey-6">
           <div v-if="bill.covers_from">
             {{ t('bill.coversRange', { from: bill.covers_from, to: bill.covers_to }) }}
           </div>
           <q-space />
-          <!-- 草稿账单没必要喊「未结清」：还没出账当然没结清，天天亮着就成了噪音。
-               报笔数更有用；出过的账单才说结算状态 -->
+          <!-- 这一格就是「这张单子现在什么状态」：草稿报笔数，出过的账单
+               结清了给绿标、没结清给橙字。原来绿标另起一行占着一整行 -->
           <div v-if="bill.is_draft">
             <span v-if="bill.prev_label" class="q-mr-sm">
               {{ t('bill.lastCut', { label: bill.prev_label }) }}
             </span>
             {{ t('bill.entryCount', { n: bill.entry_count }) }}
           </div>
-          <div v-else class="text-warning">{{ dueText }}</div>
+          <q-badge v-else-if="bill.settled" color="positive" :label="t('bill.settledBadge')" />
+          <div v-else class="text-warning">{{ t('bill.unsettled') }}</div>
         </div>
 
         <!-- 自己那笔摆在最显眼处。读账单的人要的就是这一个数字，
-             埋在半屏之下的话，他先看到的全是别人的录入框 -->
-        <div v-if="mine" class="mine q-mt-sm" :class="mine.closing < 0 ? 'owe' : 'owed'">
+             埋在半屏之下的话，他先看到的全是别人的录入框。
+             **结清了就划掉**：钱早就转过了，一个亮着的「你应收 ¥84,106」
+             会让人以为现在还欠着 -->
+        <div
+          v-if="mine"
+          class="mine q-mt-sm"
+          :class="[mine.closing < 0 ? 'owe' : 'owed', { done: bill.settled && !bill.is_draft }]"
+        >
           {{ mineText }}
         </div>
       </div>
@@ -383,11 +387,6 @@ const mineText = computed(() => {
   })
 })
 
-const dueText = computed(() => {
-  const day = meta.setting<number | null>('settle_due_day', null)
-  return day ? t('bill.dueBy', { date: `${day}` }) : t('bill.unsettled')
-})
-
 /** 改完数据强制重取这一张。进页面用的是 ensure（缓存先上屏） */
 const load = () => bills.reload(viewKey.value)
 
@@ -455,7 +454,7 @@ const billText = computed(() => {
   const head = b.is_draft ? t('bill.draft') : (b.label ?? '')
   lines.push(`【${head}】 ${t('bill.total')} ${formatYen(b.total_expense)}`)
   if (b.covers_from) lines.push(t('bill.coversRange', { from: b.covers_from, to: b.covers_to }))
-  lines.push(dueText.value)
+  if (!b.is_draft) lines.push(b.settled ? t('bill.settledBadge') : t('bill.unsettled'))
   lines.push('')
   for (const r of b.members) {
     const bits = [`${t('bill.owed')} ${formatYen(r.owed)}`]
@@ -608,6 +607,8 @@ function doCut() {
 .mine { font-size: 17px; font-weight: 600; }
 .mine.owe { color: #c10015; }
 .mine.owed { color: #21ba45; }
+/* 结清了的那张：数字划掉。颜色留着 —— 还看得出当初是应收还是应付 */
+.mine.done { text-decoration: line-through; }
 
 /* 主操作条：压在底部 Tab 之上 */
 .actions :deep(.q-btn) { min-height: 44px; }
