@@ -86,13 +86,13 @@
           {{ kind === 'income' ? t('entry.receiver') : t('entry.payer') }}
         </div>
         <q-space />
-        <MemberPicker v-model="payerId" :members="meta.activeMembers" />
+        <MemberPicker v-model="payerId" :members="meta.activeMembersSelfFirst" />
       </div>
 
       <div v-if="kind === 'settlement'" class="row items-center field">
         <div class="col-auto text-grey-7 label">{{ t('entry.to') }}</div>
         <q-space />
-        <MemberPicker v-model="toMemberId" :members="meta.activeMembers.filter((m) => m.id !== payerId)" />
+        <MemberPicker v-model="toMemberId" :members="meta.activeMembersSelfFirst.filter((m) => m.id !== payerId)" />
       </div>
 
       </div>
@@ -104,7 +104,7 @@
         <SplitEditor
           ref="splitEl"
           :amount="signedAmount"
-          :members="meta.activeMembers"
+          :members="meta.activeMembersSelfFirst"
           :payer-id="payerId"
           :color="kindPalette"
           :seed-rule="ownRule ?? selectedCategoryRule"

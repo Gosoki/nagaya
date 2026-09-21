@@ -9,9 +9,9 @@ import { expect, test } from '@playwright/test'
 const USER = 'go'
 const PASSWORD = 'dev12345'
 
-async function login(page: import('@playwright/test').Page) {
+async function login(page: import('@playwright/test').Page, who: string = USER) {
   await page.goto('/login')
-  await page.getByLabel('用户名').fill(USER)
+  await page.getByLabel('用户名').fill(who)
   await page.getByLabel('密码').fill(PASSWORD)
   await page.getByRole('button', { name: '进入' }).click()
   await expect(page.locator('.q-footer')).toBeVisible()
@@ -655,4 +655,22 @@ test('支出 / 收入 / 转账 三等分，选中的是实心色块且三种颜�
   }
   expect(fills.size, '选中色块应当是三种颜色').toBe(3)
   expect(amountInk.size, '金额也该跟着换三种颜色').toBe(3)
+})
+
+
+test('自己排第一位：谁付的默认选自己，分摊里自己也在最上面', async ({ page }) => {
+  // 换个人登录才测得出来 —— 用种子里的第一个人登录的话，
+  // 「按 display_order 排」和「自己排第一」看起来是一样的，测了等于没测
+  await login(page, 'kan')
+
+  const chips = await page.locator('.pick').allTextContents()
+  expect(chips[0], '谁付的第一个应当是自己').toBe('Kan')
+  await expect(page.locator('.pick.on'), '默认应当选中自己').toHaveText('Kan')
+
+  const rows = await page.locator('.member-row .name').allTextContents()
+  expect(rows[0], '分摊第一行也应当是自己').toBe('Kan')
+
+  // 一排按钮要够大，三个挨着时拇指不容易点错
+  const h = await page.locator('.pick').first().evaluate((el) => el.getBoundingClientRect().height)
+  expect(h, '谁付的按钮太小了').toBeGreaterThanOrEqual(40)
 })

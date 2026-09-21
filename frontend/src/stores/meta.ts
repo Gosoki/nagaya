@@ -3,14 +3,26 @@ import { computed, ref } from 'vue'
 
 import { api } from 'src/api/client'
 import type { Category, Member, Setting } from 'src/api/types'
+import { useAuth } from 'src/stores/auth'
 
 /** 成员、分类、配置 —— 变得少，登录后拉一次就够。 */
 export const useMeta = defineStore('meta', () => {
+  const auth = useAuth()
   const members = ref<Member[]>([])
   const categories = ref<Category[]>([])
   const settings = ref<Setting[]>([])
 
   const activeMembers = computed(() => members.value.filter((m) => m.is_active))
+
+  /**
+   * 自己排第一位。记账的人十有八九记的是自己付的那笔，也最常在分摊里找自己 ——
+   * 让它总在最左边/最上面，眼睛不用每次重新找。
+   */
+  const activeMembersSelfFirst = computed(() => {
+    const me = auth.me?.id
+    const mine = activeMembers.value.filter((m) => m.id === me)
+    return [...mine, ...activeMembers.value.filter((m) => m.id !== me)]
+  })
   const byId = computed(() => Object.fromEntries(members.value.map((m) => [m.id, m])))
 
   /** 日常记账那屏的分类：不含每月一次的固定项，也不含归档的 */
@@ -50,7 +62,7 @@ export const useMeta = defineStore('meta', () => {
 
   return {
     members, categories, settings,
-    activeMembers, byId,
+    activeMembers, activeMembersSelfFirst, byId,
     dailyCategories, monthlyCategories, categoryById,
     setting, load,
   }

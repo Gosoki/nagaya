@@ -60,7 +60,8 @@ def main() -> None:
             s.refresh(m)
         go, kan, zen = members
 
-        settings_svc.set_(s, "default_payer_id", go.id)
+        # 不设 default_payer_id：留空时前端回落到「当前登录的人」，
+        # 也就是「默认自己付」。真要全家从一个人卡上出，再去设置里指定
         settings_svc.set_(s, "settle_due_day", 10)
 
         cats = {c.name: c for c in s.exec(select(Category))}

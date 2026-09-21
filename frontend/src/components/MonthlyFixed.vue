@@ -67,7 +67,7 @@
         <div class="q-px-md q-pb-md">
           <SplitEditor
             :amount="valueOf(row)"
-            :members="meta.activeMembers"
+            :members="meta.activeMembersSelfFirst"
             :payer-id="row.payer_id ?? defaultPayerId"
             :seed-rule="row.rule"
             @change="(rule, valid, diff) => onRule(row, rule, valid, diff)"

@@ -20,10 +20,21 @@ function walk(dir: string): string[] {
   )
 }
 
-const source = walk(SRC)
-  .filter((f) => f.endsWith('.vue') || f.endsWith('.ts'))
-  .map((f) => readFileSync(f, 'utf8'))
-  .join('\n')
+/**
+ * 源码里**真实存在的 class 名**。两个来源：
+ *   1. 模板里的 class="..." 和 :class="..."（后者含 `{ on: xxx }` 这种对象写法）
+ *   2. 样式里的 .foo 选择器
+ * 不能简单地在整份源码里找这个词 —— i18n 里一句 `share: '应担'` 就会让
+ * 早已失效的 `.share` 选择器蒙混过关，那正是这条守卫要抓的东西。
+ */
+const existing = new Set<string>()
+for (const f of walk(SRC).filter((x) => x.endsWith('.vue') || x.endsWith('.ts'))) {
+  const text = readFileSync(f, 'utf8')
+  for (const m of text.matchAll(/:?class="([^"]*)"/g)) {
+    for (const [tok] of m[1]!.matchAll(/[a-zA-Z][\w-]*/g)) existing.add(tok)
+  }
+  for (const m of text.matchAll(/\.([a-zA-Z][\w-]*)\s*[,{:.\s]/g)) existing.add(m[1]!)
+}
 
 describe('E2E 选择器', () => {
   for (const file of walk(E2E).filter((f) => f.endsWith('.spec.ts'))) {
@@ -34,7 +45,7 @@ describe('E2E 选择器', () => {
         for (const [, cls] of m[1]!.matchAll(/\.([a-zA-Z][\w-]*)/g)) {
           // q-* 是 Quasar 自带的，不在我们源码里
           if (cls!.startsWith('q-') || cls!.startsWith('text-') || cls!.startsWith('bg-')) continue
-          if (!new RegExp(`["'\\s]${cls}["'\\s]`).test(source)) missing.add(cls!)
+          if (!existing.has(cls!)) missing.add(cls!)
         }
       }
       expect([...missing], '这些 class 在 src 里不存在，用例只会超时不会报错').toEqual([])

@@ -26,14 +26,14 @@ const short = (name: string) => (name.length <= 4 ? name : name.slice(0, 3))
 
 <style scoped>
 .pick {
-  min-width: 44px;
-  height: 34px;
-  padding: 0 10px;
-  border-radius: 17px;
+  min-width: 54px;
+  height: 42px;                 /* 34 太小了，一排三个挨着，拇指容易点到旁边那个 */
+  padding: 0 14px;
+  border-radius: 21px;
   border: 1px solid rgba(0, 0, 0, 0.16);
   background: #fff;
   color: #555;
-  font-size: 13px;
+  font-size: 15px;
   cursor: pointer;
 }
 .pick.on { color: #fff; font-weight: 600; }
