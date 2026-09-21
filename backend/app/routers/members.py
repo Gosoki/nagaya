@@ -58,14 +58,15 @@ def update_member(
     if member is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "成员不存在")
 
-    # **这几样只能改自己的。** 这屋里三个人是互相信任的，但「信任」不该等于
-    # 「谁都能把别人锁在门外」—— 它们都是**没法自己恢复**的动作：
-    #   password / name  改掉之后那个人再也登不进来（实测：改掉别人的 name，
-    #                    他用自己的用户名登录直接 401，而且他没有任何自救手段）
-    #   joined_on / left_on  一改，那个人立刻进出分摊名单，钱当场算错
-    # 昵称、颜色、语言、排序不在此列：那些改错了当事人自己看得见、也改得回来
-    private = [k for k in ("name", "joined_on", "left_on")
-               if k in body.model_fields_set and getattr(body, k) is not None]
+    # **登录名和密码只能改自己的。** 这屋里三个人是互相信任的，但「信任」不该等于
+    # 「谁都能把别人锁在门外」—— 这两样都是**没法自己恢复**的动作：
+    # 实测把别人的 name 改掉，他用自己的用户名登录直接 401，而且毫无自救手段。
+    #
+    # **joined_on / left_on 故意不在此列。** 它们看着也危险（一改那个人就进出
+    # 分摊名单），但那是**家务动作不是自助动作**：人搬走之后多半不会再打开这个 app，
+    # 只许本人改的话谁也标不掉他，从此每笔账都照样算他一份 —— 比要防的问题更糟。
+    # 昵称、颜色、语言、排序同理：改错了当事人自己看得见、也改得回来。
+    private = ["name"] if "name" in body.model_fields_set and body.name is not None else []
     if body.password is not None:
         private.append("password")
     if private and member.id != me.id:

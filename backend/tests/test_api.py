@@ -194,22 +194,23 @@ def test_renaming_to_a_taken_name_is_409_like_create(client, auth, members) -> N
     assert r.status_code == 409, "重名在 POST 那边是 409，PATCH 不该是 500"
 
 
-def test_identity_fields_are_self_only(client, auth, members) -> None:
+def test_login_name_and_password_are_self_only(client, auth, members) -> None:
     """**没法自己恢复的动作只能自己做。**
 
     密码本来就挡了，理由写得明明白白「改掉别人的密码是一个没法自己恢复的动作」——
-    可改掉别人的**登录名**是同一件事：实测把 go 的 name 改掉之后，
-    他用自己的用户名登录直接 401，而且他没有任何自救手段。
-    joined_on / left_on 更直接：一改，那个人立刻进出分摊名单，钱当场算错。
+    改掉别人的**登录名**是同一件事：实测把 a 的 name 改掉之后，
+    他用自己的用户名登录直接 401，而且毫无自救手段。
     """
     _, other, *_ = members
-    for patch in ({"name": "hacked"}, {"left_on": "2026-01-01"}, {"joined_on": "2020-01-01"},
-                  {"password": "whatever123"}):
+    for patch in ({"name": "hacked"}, {"password": "whatever123"}):
         r = client.patch(f"/api/members/{other.id}", headers=auth, json=patch)
         assert r.status_code == 403, f"{patch} 不该被放行"
-    # 昵称和颜色不在此列：改错了当事人自己看得见、也改得回来
-    assert client.patch(f"/api/members/{other.id}", headers=auth,
-                        json={"display_name": "小二"}).status_code == 200
+    # 这几样**故意**放开：搬出日是家务动作不是自助动作（人搬走了就不开这个 app 了，
+    # 只许本人改的话谁也标不掉他，往后每笔账都照样算他一份）；
+    # 昵称和颜色改错了当事人自己看得见、也改得回来
+    for patch in ({"display_name": "小二"}, {"left_on": "2026-01-01"}, {"left_on": None}):
+        assert client.patch(f"/api/members/{other.id}", headers=auth,
+                            json=patch).status_code == 200, patch
 
 
 def test_a_member_without_a_password_cannot_be_created(client, auth) -> None:
