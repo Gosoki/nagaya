@@ -37,11 +37,6 @@ class EntryKind(str, Enum):
     settlement = "settlement"    # 转账结清：payer 交钱给 to_member，share 全记在 to_member 头上
 
 
-class PeriodStatus(str, Enum):
-    open = "open"
-    closed = "closed"
-
-
 class Lang(str, Enum):
     zh = "zh"
     ja = "ja"
@@ -99,23 +94,30 @@ class Category(SQLModel, table=True):
     archived: bool = Field(default=False, index=True)
 
 
-class Period(SQLModel, table=True):
-    """账期。按费用发生日归期；关账前一直 open，关账后明细锁定。"""
+class Statement(SQLModel, table=True):
+    """一张已经出过的账单。
 
-    __tablename__ = "period"
-    __table_args__ = (UniqueConstraint("start_date", name="uq_period_start"),)
+    **线是人点出来的，不是日历划的**：点「出账单」的那一刻，把当时所有还没出账的
+    支出/收入/转账一次性归到这张单子上，冻结一份快照，之后再记的账自动进下一张。
+
+    这么做去掉了一整套按日历归期的机制 —— 起算日、月份边界、「这笔落进了哪一期」、
+    改起算日导致账期重叠 —— 那些问题全是日历边界自己造出来的。
+
+    还没出账的账目 `entry.statement_id IS NULL`，它们合起来就是「当前这张草稿账单」。
+    """
+
+    __tablename__ = "statement"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    label: str = Field(index=True, unique=True, description="'2026-09'，取结束日所在月")
-    start_date: dt.date = Field(index=True)
-    end_date: dt.date = Field(index=True)
-    status: PeriodStatus = Field(default=PeriodStatus.open, index=True)
-    closed_at: Optional[dt.datetime] = None
-    closed_by: Optional[int] = Field(default=None, foreign_key="member.id")
+    label: str = Field(index=True, description="'9/28 出账'，给人看的")
+    cut_at: dt.datetime = Field(default_factory=now_utc, index=True, description="划线的那一刻")
+    covers_from: Optional[dt.date] = Field(default=None, description="这张单子里最早一笔的日期，展示用")
+    covers_to: Optional[dt.date] = Field(default=None, description="最晚一笔的日期，展示用")
+    cut_by: Optional[int] = Field(default=None, foreign_key="member.id")
     snapshot_json: Optional[dict[str, Any]] = Field(
         default=None,
         sa_column=Column(JSON),
-        description="关账时冻结的余额/成员/明细，保证这张账单以后还能原样重现",
+        description="出账那一刻冻结的账单，保证以后还能原样重现「当初发给室友的那张」",
     )
 
 
@@ -126,7 +128,6 @@ class Bundle(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     title: str
-    period_id: Optional[int] = Field(default=None, foreign_key="period.id", index=True)
     created_at: dt.datetime = Field(default_factory=now_utc)
 
 
@@ -147,9 +148,9 @@ class Entry(SQLModel, table=True):
         default=None, foreign_key="member.id", description="仅转账：转入人"
     )
 
-    # 账期显式存，不靠日期现算。因为「10/15 结的是 9 月的账」这条规则
-    # 光看日期推不出来（SPEC §4.6）。默认按日期落，转账则挂到最早的未关账期。
-    period_id: Optional[int] = Field(default=None, foreign_key="period.id", index=True)
+    #: 归到哪张账单。**None ＝ 还没出账**，和其它 None 一起构成「当前这张草稿账单」。
+    #: 出账时一次性打上，之后不再变 —— 账单是对「那一刻」的陈述。
+    statement_id: Optional[int] = Field(default=None, foreign_key="statement.id", index=True)
 
     # 仅用于账单上标注「含 7–8 月水费」「10月分 家賃」，不参与任何计算（SPEC §4.4）
     period_start: Optional[dt.date] = None

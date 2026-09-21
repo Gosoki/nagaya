@@ -14,28 +14,30 @@
       <div class="head q-pa-md">
         <div class="row items-center">
           <div>
-            <div class="text-h6">{{ bill.period.label }}</div>
-            <div class="text-caption text-grey-7">
-              {{ bill.period.start_date }} 〜 {{ bill.period.end_date }}
+            <div class="text-h6">{{ bill.is_draft ? t('bill.draft') : bill.label }}</div>
+            <div v-if="bill.covers_from" class="text-caption text-grey-7">
+              {{ t('bill.coversRange', { from: bill.covers_from, to: bill.covers_to }) }}
             </div>
           </div>
           <q-space />
           <div class="text-right">
             <div class="text-h6">{{ formatYen(bill.total_expense) }}</div>
-            <div class="text-caption" :class="bill.period.status === 'closed' ? 'text-grey-6' : 'text-warning'">
-              {{ bill.period.status === 'closed' ? t('bill.closed') : dueText }}
-            </div>
+            <div class="text-caption text-warning">{{ dueText }}</div>
           </div>
         </div>
         <div v-if="coversText" class="text-caption text-grey-7 q-mt-xs">{{ coversText }}</div>
+        <!-- 不锁历史，但改动必须可见：否则下一张的「上期结转」没人解释得清 -->
+        <q-banner v-if="bill.edited_after_cut" dense class="bg-orange-1 text-orange-9 q-mt-sm rounded-borders">
+          {{ t('bill.editedAfterCut', {
+            n: bill.edited_after_cut.count,
+            frozen: formatYen(bill.edited_after_cut.frozen_total ?? 0),
+            live: formatYen(bill.edited_after_cut.live_total),
+          }) }}
+        </q-banner>
       </div>
 
       <!-- 本期固定费：出账单时顺手把家賃/水电煤网填了，账单跟着重算 -->
-      <MonthlyFixed
-        :period-id="bill.period.id"
-        :readonly="bill.period.status === 'closed'"
-        @saved="load"
-      />
+      <MonthlyFixed v-if="bill.is_draft" @saved="load" />
 
       <q-list separator>
         <q-item v-for="row in bill.members" :key="row.member_id">
@@ -80,7 +82,7 @@
               color="primary"
               no-caps
               unelevated
-              :disable="bill.period.status === 'closed'"
+              :disable="!bill.is_draft"
               :loading="busy === i"
               :label="t('bill.received')"
               @click="confirmReceived(tr, i)"
@@ -92,11 +94,30 @@
       <div class="q-px-md q-gutter-sm column">
         <q-btn outline color="primary" no-caps icon="content_copy" :label="t('bill.copy')" @click="copyBill" />
         <q-btn
-          v-if="bill.period.status === 'open'"
-          flat color="grey-8" no-caps icon="lock" :label="t('bill.close')"
-          @click="doClose"
+          v-if="bill.is_draft"
+          color="primary" no-caps unelevated icon="task_alt"
+          :label="t('bill.cut')"
+          :disable="!bill.entry_count"
+          @click="doCut"
         />
-        <q-btn v-else flat color="grey-8" no-caps icon="lock_open" :label="t('bill.reopen')" @click="doReopen" />
+        <q-btn
+          v-if="statements.length"
+          flat color="grey-8" no-caps icon="history" :label="t('bill.history')"
+        >
+          <q-menu>
+            <q-list style="min-width: 180px">
+              <q-item v-if="!viewing" clickable v-close-popup @click="open(null)">
+                <q-item-section>{{ t('bill.draft') }}</q-item-section>
+              </q-item>
+              <q-item v-for="st in statements" :key="st.id" clickable v-close-popup @click="open(st.id)">
+                <q-item-section>
+                  <q-item-label>{{ st.label }}</q-item-label>
+                  <q-item-label caption>{{ st.covers_from }} 〜 {{ st.covers_to }}</q-item-label>
+                </q-item-section>
+              </q-item>
+            </q-list>
+          </q-menu>
+        </q-btn>
       </div>
     </template>
 
@@ -119,7 +140,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 
 import { ApiError, api } from 'src/api/client'
-import type { Period } from 'src/api/types'
+import type { Statement } from 'src/api/types'
 import MonthlyFixed from 'src/components/MonthlyFixed.vue'
 import { formatYen } from 'src/i18n'
 import { useLedger } from 'src/stores/ledger'
@@ -136,8 +157,13 @@ interface BillRow {
 }
 interface BillTransfer { from_id: number; to_id: number; amount: number }
 interface Bill {
-  period: { id: number; label: string; start_date: string; end_date: string; status: 'open' | 'closed' }
-  settle_due: string | null
+  statement_id: number | null
+  label: string | null
+  is_draft: boolean
+  cut_at: string | null
+  covers_from: string | null
+  covers_to: string | null
+  edited_after_cut: { count: number; frozen_total: number | null; live_total: number } | null
   total_expense: number
   total_income: number
   entry_count: number
@@ -154,15 +180,18 @@ const meta = useMeta()
 const ledger = useLedger()
 
 const bill = ref<Bill | null>(null)
+const statements = ref<Statement[]>([])
+const viewing = ref<number | null>(null)   // null ＝ 当前这张还没出的草稿
 const busy = ref<number | null>(null)
 const showFallback = ref(false)
 
 const nameOf = (id: number) => meta.byId[id]?.display_name ?? String(id)
 const colorOf = (id: number) => meta.byId[id]?.color ?? '#90a4ae'
 
-const dueText = computed(() =>
-  bill.value?.settle_due ? t('bill.dueBy', { date: bill.value.settle_due }) : t('bill.unsettled'),
-)
+const dueText = computed(() => {
+  const day = meta.setting<number | null>('settle_due_day', null)
+  return day ? t('bill.dueBy', { date: `${day}` }) : t('bill.unsettled')
+})
 
 /** 「含 7–8 月水费」这类标注 */
 const coversText = computed(() => {
@@ -181,15 +210,18 @@ const coversText = computed(() => {
     .join(' · ')
 })
 
+/** 默认看当前这张还没出的草稿；从「出过的账单」菜单可以翻旧的 */
 async function load() {
-  const periods = await api.get<Period[]>('/api/periods')
-  // 默认打开**最早的未关账账期** —— 那才是「你现在欠着的那张账单」，
-  // 和转账挂靠的规则（挂到最早未关账期）是同一条。
-  // 用「最新的一期」会有个坑：误记一笔未来日期的账就能把账单页整个带跑。
-  const oldestOpen = [...periods].reverse().find((p) => p.status === 'open')
-  const id = Number(route.params.periodId) || oldestOpen?.id || periods[0]?.id
-  if (!id) return
-  bill.value = await api.get<Bill>(`/api/periods/${id}/bill`)
+  statements.value = await api.get<Statement[]>('/api/statements')
+  const id = viewing.value ?? (Number(route.params.statementId) || null)
+  bill.value = id
+    ? await api.get<Bill>(`/api/statements/${id}/bill`)
+    : await api.get<Bill>('/api/bill')
+}
+
+async function open(id: number | null) {
+  viewing.value = id
+  await load()
 }
 
 onMounted(load)
@@ -199,8 +231,10 @@ const billText = computed(() => {
   const b = bill.value
   if (!b) return ''
   const lines: string[] = []
-  lines.push(`【${b.period.label} ${t('bill.title')}】 ${t('bill.total')} ${formatYen(b.total_expense)}`)
-  lines.push(b.settle_due ? t('bill.dueBy', { date: b.settle_due }) : t('bill.unsettled'))
+  const head = b.is_draft ? t('bill.draft') : (b.label ?? '')
+  lines.push(`【${head}】 ${t('bill.total')} ${formatYen(b.total_expense)}`)
+  if (b.covers_from) lines.push(t('bill.coversRange', { from: b.covers_from, to: b.covers_to }))
+  lines.push(dueText.value)
   if (coversText.value) lines.push(coversText.value)
   lines.push('')
   for (const r of b.members) {
@@ -264,20 +298,18 @@ function confirmReceived(tr: BillTransfer, index: number) {
   })
 }
 
-async function doClose() {
-  $q.dialog({ title: t('bill.close'), message: t('bill.closeConfirm'), cancel: true }).onOk(async () => {
+/** 出账单：把这一刻之前记的账归到一张单子上。**不锁定任何东西** */
+function doCut() {
+  $q.dialog({ title: t('bill.cut'), message: t('bill.cutConfirm'), cancel: true }).onOk(async () => {
     try {
-      await api.post(`/api/periods/${bill.value!.period.id}/close`)
+      await api.post('/api/statements')
+      viewing.value = null
       await load()
+      $q.notify({ type: 'positive', message: t('bill.cutDone'), timeout: 1500 })
     } catch (e) {
       $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e) })
     }
   })
-}
-
-async function doReopen() {
-  await api.post(`/api/periods/${bill.value!.period.id}/reopen`)
-  await load()
 }
 </script>
 

@@ -207,27 +207,40 @@ test('账单：期初/应担/应付对得上，转账方案能把人清零', asy
   await page.screenshot({ path: 'e2e/shots/09-bill.png' })
 })
 
-test('账单：关账后转账按钮锁住，解锁后恢复', async ({ page }) => {
+test('出账单：划一条线，之后记的账进下一张', async ({ page }) => {
   await login(page)
+  const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
+
   await page.goto('/bill')
-  await expect(page.getByText(/转账方案/)).toBeVisible()
+  await expect(page.getByText('当前账单（未出）')).toBeVisible()
+  const draftTotal = (await (await page.request.get('/api/bill', { headers })).json()).total_expense
+  expect(draftTotal).toBeGreaterThan(0)
 
-  const received = page.getByRole('button', { name: '已收到' }).first()
-  await expect(received).toBeEnabled()
-
-  await page.getByText('关账').click()
+  await page.getByRole('button', { name: '出账单' }).click()
   await page.getByRole('button', { name: 'OK' }).click()
-  // 等对话框收干净再往下走：遮罩还在的时候点什么都点不到，
-  // 报错却长得像「找不到这个元素」，很容易把人带偏
   await expect(page.locator('.q-dialog')).toHaveCount(0)
-  await expect(page.getByText('已关账')).toBeVisible()
-  await expect(received).toBeDisabled()
-  await page.screenshot({ path: 'e2e/shots/10-bill-closed.png' })
 
-  // 收拾干净：解锁回去，别让下一次跑测试撞上锁着的账期
-  await page.getByText('解锁').click()
-  await expect(page.getByText(/未结清|请于/)).toBeVisible()
-  await expect(page.getByRole('button', { name: '已收到' }).first()).toBeEnabled()
+  // 出完账草稿就空了，之后记的账进下一张
+  const after = await (await page.request.get('/api/bill', { headers })).json()
+  expect(after.total_expense, '出账之后草稿应当清空').toBe(0)
+  const statements = await (await page.request.get('/api/statements', { headers })).json()
+  expect(statements.length).toBeGreaterThan(0)
+  const cut = await (await page.request.get(`/api/statements/${statements[0].id}/bill`, { headers })).json()
+  expect(cut.total_expense, '那张单子上的金额应当还是出账时的').toBe(draftTotal)
+
+  // **不锁定**：已出账的账目照样能改，钱不会算错，只是会被标出来
+  const entries = await (await page.request.get(`/api/entries?statement_id=${statements[0].id}`, { headers })).json()
+  const e = entries[0]
+  const patched = await page.request.patch(`/api/entries/${e.id}?version=${e.version}`, {
+    headers, data: { amount_jpy: e.amount_jpy + 1000 },
+  })
+  expect(patched.ok(), '已出账的账目应当仍然可改').toBe(true)
+  const flagged = await (await page.request.get(`/api/statements/${statements[0].id}/bill`, { headers })).json()
+  expect(flagged.edited_after_cut, '出账后被改过，账单必须自己说出来').not.toBeNull()
+
+  await page.request.patch(`/api/entries/${e.id}?version=${patched.json ? (await patched.json()).version : e.version + 1}`, {
+    headers, data: { amount_jpy: e.amount_jpy },
+  })
 })
 
 test('离线草稿：断网能填完，回来点一下补交', async ({ page }) => {
@@ -318,15 +331,10 @@ test('账单页固定费：没录的项只给灰色参考，绝不预填成真�
   await login(page)
   const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
 
-  // 造一个新账期：新的一期里固定费都还没录，正是要验的状态
-  const made = await (await page.request.post('/api/entries', {
-    headers,
-    data: { kind: 'expense', date: '2026-11-05', amount_jpy: 903, payer_id: 1, category_id: 6, title: 'E2E' },
-  })).json()
-  const periods = await (await page.request.get('/api/periods', { headers })).json()
-  const fresh = periods.find((x: { label: string }) => x.label === '2026-11')
+  // 先把当前草稿出掉，这样固定费就都回到「没录」的状态 —— 正是要验的
+  await page.request.post('/api/statements', { headers })
 
-  await page.goto(`/bill/${fresh.id}`)
+  await page.goto('/bill')
   await expect(page.getByText('本期固定费')).toBeVisible()
 
   const boxes = await page.locator('.amount-input').evaluateAll((els) =>
@@ -342,21 +350,14 @@ test('账单页固定费：没录的项只给灰色参考，绝不预填成真�
   await expect(page.getByRole('button', { name: '没有改动' })).toBeDisabled()
   await page.screenshot({ path: 'e2e/shots/13-monthly-hint.png' })
 
-  await page.request.delete(`/api/entries/${made.id}`, { headers })
 })
 
 test('账单页固定费：填一项存下去，账单跟着涨且留在这张账单的期里', async ({ page }) => {
   await login(page)
   const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
 
-  const made = await (await page.request.post('/api/entries', {
-    headers,
-    data: { kind: 'expense', date: '2026-12-05', amount_jpy: 904, payer_id: 1, category_id: 6, title: 'E2E' },
-  })).json()
-  const periods = await (await page.request.get('/api/periods', { headers })).json()
-  const dec = periods.find((x: { label: string }) => x.label === '2026-12')
-
-  await page.goto(`/bill/${dec.id}`)
+  await page.request.post('/api/statements', { headers })   // 清出一张空草稿
+  await page.goto('/bill')
   await expect(page.getByText('本期固定费')).toBeVisible()
   // 填「電気」而不是第一行的「家賃」：家賃的分类规则是固定金额 45000/40000/35000，
   // 总额一改就和每人金额对不上，会被正确拦下 —— 那是另一条用例要验的事
@@ -365,12 +366,11 @@ test('账单页固定费：填一项存下去，账单跟着涨且留在这张�
   await page.getByRole('button', { name: /保存 \d+ 项/ }).click()
   await expect(page.getByRole('button', { name: '没有改动' })).toBeVisible({ timeout: 10_000 })
 
-  // 账单总额涨了 —— 说明这笔确实算进了**这一张**账单，没跑到别的期去。
-  // 归期只看 entry.date，用「今天」当默认日期就会把它甩到别的月，且零报错。
-  const bill = await (await page.request.get(`/api/periods/${dec.id}/bill`, { headers })).json()
-  expect(bill.total_expense).toBe(904 + 9100)
+  // 草稿账单的总额跟着涨 —— 这笔确实进了当前这张，没跑到别处
+  const bill = await (await page.request.get('/api/bill', { headers })).json()
+  expect(bill.total_expense).toBe(9100)
 
-  for (const e of await (await page.request.get(`/api/entries?period_id=${dec.id}`, { headers })).json()) {
+  for (const e of await (await page.request.get('/api/entries?unbilled_only=true', { headers })).json()) {
     await page.request.delete(`/api/entries/${e.id}`, { headers })
   }
 })
@@ -398,14 +398,8 @@ test('归档一个分类，它名下的历史账目仍然显示原来的名字',
 test('账单页固定费：固定金额分类改了总额没改分摊，必须拦住并说出差多少', async ({ page }) => {
   await login(page)
   const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
-  const made = await (await page.request.post('/api/entries', {
-    headers,
-    data: { kind: 'expense', date: '2027-01-05', amount_jpy: 906, payer_id: 1, category_id: 6, title: 'E2E' },
-  })).json()
-  const periods = await (await page.request.get('/api/periods', { headers })).json()
-  const jan = periods.find((x: { label: string }) => x.label === '2027-01')
-
-  await page.goto(`/bill/${jan.id}`)
+  await page.request.post('/api/statements', { headers })
+  await page.goto('/bill')
   await expect(page.getByText('本期固定费')).toBeVisible()
   // 家賃的分类规则是固定金额 45000/40000/35000。总额改成 30000 而不动每人金额，
   // 合计就对不上了 —— 必须当场拦住，而且要说清差多少，不能只说一句「不平」
@@ -415,10 +409,8 @@ test('账单页固定费：固定金额分类改了总额没改分摊，必须�
   const note = page.locator('.q-notification')
   await expect(note).toContainText('家賃')
   await expect(note).toContainText('90,000')      // 30000 − 120000
-  expect((await (await page.request.get(`/api/periods/${jan.id}/bill`, { headers })).json()).total_expense)
-    .toBe(906)                                     // 没存进去
-
-  await page.request.delete(`/api/entries/${made.id}`, { headers })
+  expect((await (await page.request.get('/api/bill', { headers })).json()).total_expense)
+    .toBe(0)                                       // 没存进去
 })
 
 test('固定费不必等到出账单：记一笔那屏就有入口', async ({ page }) => {
@@ -481,9 +473,22 @@ test('固定项可以删掉，而且删错了能撤销', async ({ page }) => {
 test('删掉一项固定费，本期已录的那笔账仍然留在账单上', async ({ page }) => {
   await login(page)
   const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
+
+  // **自己准备前提**：前面的「出账单」用例会把种子数据全出账，这时 ガス 会退回未录状态。
+  // 依赖别的用例留下的状态就是在赌执行顺序，迟早会红在无关的地方。
+  const cats = await (await page.request.get('/api/categories', { headers })).json()
+  const gas = cats.find((c: { name: string }) => c.name === 'ガス')
+  const existing = await (await page.request.get('/api/entries?unbilled_only=true', { headers })).json()
+  for (const e of existing.filter((x: { category_id: number }) => x.category_id === gas.id)) {
+    await page.request.delete(`/api/entries/${e.id}`, { headers })
+  }
+  await page.request.post('/api/entries', {
+    headers,
+    data: { kind: 'expense', date: '2026-09-21', amount_jpy: 4_200, payer_id: 1, category_id: gas.id, title: 'E2Eガス' },
+  })
+
   const before = (await (await page.request.get('/api/balances', { headers })).json()).balances
 
-  // 拿一个已经录了金额的固定项（种子数据里 ガス 是 4,200）
   await page.goto('/monthly')
   const row = page.locator('.q-expansion-item').filter({ hasText: 'ガス' })
   await expect(row.locator('.amount-input')).toHaveValue('4,200')

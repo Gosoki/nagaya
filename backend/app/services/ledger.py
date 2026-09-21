@@ -11,7 +11,6 @@ from typing import Any, Iterable, Sequence
 from sqlalchemy import func
 from sqlmodel import Session, select
 
-from app.core.period import period_bounds, period_label
 from app.core.rules import expand, mkey, participants, pick_rule
 from app.core.split import split
 from app.models import (
@@ -20,8 +19,6 @@ from app.models import (
     EntryKind,
     EntryShare,
     Member,
-    Period,
-    PeriodStatus,
     now_utc,
     today_jst,
 )
@@ -43,51 +40,6 @@ def active_members(session: Session, on: dt.date | None = None) -> list[Member]:
     on = on or today_jst()
     rows = session.exec(select(Member).order_by(Member.display_order, Member.id)).all()
     return [m for m in rows if m.is_active(on)]
-
-
-# ------------------------------------------------------------------ 账期
-
-
-def get_or_create_period(session: Session, on: dt.date) -> Period:
-    """取 on 这天所属的账期，没有就建。"""
-    start_day = int(settings_svc.get(session, "period_start_day"))
-    start, end = period_bounds(on, start_day)
-    row = session.exec(select(Period).where(Period.start_date == start)).first()
-    if row is None:
-        row = Period(label=period_label(end), start_date=start, end_date=end)
-        session.add(row)
-        session.flush()
-    return row
-
-
-def oldest_open_period(session: Session) -> Period | None:
-    return session.exec(
-        select(Period).where(Period.status == PeriodStatus.open).order_by(Period.start_date)
-    ).first()
-
-
-def assign_period(session: Session, kind: EntryKind, on: dt.date) -> Period:
-    """这笔账算哪一期。
-
-    * 支出 / 收入 —— 按**发生日**归期（SPEC §4.6）
-    * 转账 —— 挂到**最早的未关账账期**，因为你还的就是那一期的账。
-      这正是「10/15 记的转账要算进 9 月期」那条规则的落点：光看日期推不出来，
-      所以显式存 entry.period_id，而不是查询时现猜。
-
-    账期已关账的话拒绝写入 —— 账本最忌讳的就是钱悄悄挪到别的月份去。
-    """
-    if kind == EntryKind.settlement:
-        target = oldest_open_period(session) or get_or_create_period(session, on)
-    else:
-        target = get_or_create_period(session, on)
-    if target.status == PeriodStatus.closed:
-        raise LedgerError(
-            "period_closed",
-            f"{target.label} 期已关账，要改先解锁",
-            period_id=target.id,
-            label=target.label,
-        )
-    return target
 
 
 # ------------------------------------------------------------------ 记一笔
@@ -130,7 +82,6 @@ def create_entry(
     分摊只在这一刻算一次。之后改默认比例、加成员、删分类，这条账都不会变。
     """
     _validate_amount(kind, amount)
-    period = assign_period(session, kind, on)
 
     if kind == EntryKind.settlement:
         if to_member_id is None:
@@ -159,7 +110,6 @@ def create_entry(
         category_id=category_id,
         payer_id=payer_id,
         to_member_id=to_member_id,
-        period_id=period.id,
         period_start=period_start,
         period_end=period_end,
         bundle_id=bundle_id,
@@ -264,20 +214,6 @@ def _audit(
 # ------------------------------------------------------------------ 改 / 删
 
 
-def _guard_period(session: Session, entry: Entry) -> None:
-    """已关账的账目不许动。"""
-    if entry.period_id is None:
-        return
-    period = session.get(Period, entry.period_id)
-    if period is not None and period.status == PeriodStatus.closed:
-        raise LedgerError(
-            "period_closed",
-            f"{period.label} 期已关账，要改先解锁",
-            period_id=period.id,
-            label=period.label,
-        )
-
-
 def update_entry(
     session: Session,
     entry: Entry,
@@ -301,7 +237,6 @@ def update_entry(
             expected=entry.version,
             got=version,
         )
-    _guard_period(session, entry)
     before = _snapshot(session, entry)
 
     for key in ("title", "note", "category_id", "period_start", "period_end", "bundle_id"):
@@ -315,9 +250,6 @@ def update_entry(
     to_member_id = fields.get("to_member_id", entry.to_member_id)
     _validate_amount(kind, amount)
 
-    if on != entry.date or kind != entry.kind:
-        period = assign_period(session, kind, on)
-        entry.period_id = period.id
     entry.kind, entry.date, entry.amount_jpy = kind, on, amount
     entry.payer_id, entry.to_member_id = payer_id, to_member_id
 
@@ -355,7 +287,6 @@ def update_entry(
 
 def delete_entry(session: Session, entry: Entry, *, actor_id: int | None) -> None:
     """软删，进回收站。分摊快照留着 —— 但余额不再算它。"""
-    _guard_period(session, entry)
     before = _snapshot(session, entry)
     entry.deleted_at = now_utc()
     session.add(entry)
@@ -365,7 +296,6 @@ def delete_entry(session: Session, entry: Entry, *, actor_id: int | None) -> Non
 
 def restore_entry(session: Session, entry: Entry, *, actor_id: int | None) -> None:
     """从回收站捞回来。"""
-    _guard_period(session, entry)
     entry.deleted_at = None
     session.add(entry)
     _audit(session, actor_id, "restore", "entry", entry.id, None, _snapshot(session, entry))

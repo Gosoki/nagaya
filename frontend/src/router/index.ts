@@ -17,7 +17,7 @@ export const router = createRouter({
         { path: 'monthly', name: 'monthly', component: () => import('src/pages/MonthlyPage.vue') },
         // 账单就是第二个 Tab。它已经包含了每人的应担/已垫付/应收应付和转账方案，
         // 原来的「余额」页是它的子集，留着只会让人问「这两个有什么区别」
-        { path: 'bill/:periodId?', name: 'bill', component: () => import('src/pages/BillPage.vue') },
+        { path: 'bill/:statementId?', name: 'bill', component: () => import('src/pages/BillPage.vue') },
       ],
     },
   ],

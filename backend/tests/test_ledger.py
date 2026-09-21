@@ -8,14 +8,9 @@ import random
 import pytest
 from sqlmodel import Session, select
 
-from app.models import Entry, EntryKind, EntryShare, Member, PeriodStatus
+from app.models import Entry, EntryKind, EntryShare, Member
 from app.services import settings as settings_svc
-from app.services.ledger import (
-    LedgerError,
-    balances,
-    create_entry,
-    get_or_create_period,
-)
+from app.services.ledger import LedgerError, balances, create_entry
 
 SEP = dt.date(2026, 9, 10)
 
@@ -133,31 +128,40 @@ def test_entry_rule_beats_category(session, members) -> None:
     assert shares_of(session, e.id) == {a.id: 2167, b.id: 3667, c.id: 3166}   # SPEC §4.2 的例子
 
 
-def test_settlement_attaches_to_oldest_open_period(session, members) -> None:
-    """SPEC §4.6：10/15 记的转账，只要 9 月期还没关账就算进 9 月期。"""
+def test_settlement_lands_in_the_current_draft(session, members) -> None:
+    """转账和别的账一样，进当前这张还没出的草稿账单。
+
+    不再有「挂到最早的未关账账期」这种规则 —— 线是点出账单时划的，
+    在那之前记的一切都在同一张草稿上。
+    """
     a, b, c = members
     create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
                  amount=120_000, payer_id=a.id)
-    sep_period = get_or_create_period(session, SEP)
-
-    s = create_entry(session, actor_id=b.id, kind=EntryKind.settlement,
-                     on=dt.date(2026, 10, 15), amount=40_000, payer_id=b.id, to_member_id=a.id)
-    assert s.period_id == sep_period.id
-    assert sep_period.label == "2026-09"
+    s_ = create_entry(session, actor_id=b.id, kind=EntryKind.settlement,
+                      on=dt.date(2026, 10, 15), amount=40_000, payer_id=b.id, to_member_id=a.id)
+    assert s_.statement_id is None          # 还没出账
+    assert balances(session)[b.id] == 0     # 但钱已经算清了
 
 
-def test_closed_period_rejects_new_entries(session, members) -> None:
-    """关账后明细锁定 —— 钱不许悄悄挪进已经出过账单的月份。"""
+def test_editing_a_billed_entry_is_allowed_and_self_corrects(session, members) -> None:
+    """已出账的账目仍然能改 —— 不锁定。
+
+    余额全局累计，差额会原样出现在下一张账单的「上期结转」里，钱不会算错。
+    所以不需要「关账」那道门，只需要把改动**显示出来**。
+    """
+    from app.services.bill import cut_statement
+    from app.services.ledger import update_entry
+
     a, b, c = members
-    period = get_or_create_period(session, SEP)
-    period.status = PeriodStatus.closed
-    session.add(period)
-    session.commit()
+    e = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                     amount=9_000, payer_id=a.id)
+    cut_statement(session, actor_id=a.id)
+    assert e.statement_id is not None
 
-    with pytest.raises(LedgerError) as exc:
-        create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
-                     amount=1_000, payer_id=a.id)
-    assert exc.value.code == "period_closed"
+    update_entry(session, e, actor_id=a.id, version=e.version,
+                 fields={"amount_jpy": 12_000})
+    assert sum(balances(session).values()) == 0
+    assert balances(session)[a.id] == 8_000     # 12000 − 4000
 
 
 @pytest.mark.parametrize(

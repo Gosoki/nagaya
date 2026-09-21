@@ -1,12 +1,19 @@
-"""月度账单 —— SPEC F6 / §4.6。
+"""账单 —— 按「点出账单的那一刻」切，不按日历切。
 
-账单只负责**展示**，不参与算钱：余额是全局累计的，账单把它拆成
-「期初结转 + 本期发生 + 本期已收付」三段给人看。
+    还没出账的账目（statement_id IS NULL）合起来就是**当前这张草稿账单**。
+    点「出账单」＝ 把它们一次性归到一张 Statement 上、冻结快照，
+    之后再记的账自动进下一张。
+
+这么做去掉了一整套按日历归期的机制：起算日、月份边界、「这笔落进了哪一期」、
+改起算日导致账期重叠、关账/解锁。那些问题全是日历边界自己造出来的。
+
+**不锁定历史**。余额是全局累计的，事后改一笔已出账的账，差额会原样出现在
+下一张的「上期结转」里，钱不会算错。所以不需要「关账」这道门 ——
+只需要把「这一期在出账后被改过」这件事**显示出来**，让结转解释得清。
+
+账单展示 = 上期结转 + 本期发生 + 本期已收付：
 
     closing = opening + (已垫付 − 应担) + (转出 − 转入)
-
-所以一个人可以同时对两期都有余额（9 月没结完、10 月又开了），
-账单照样对得上 —— 这正是「赊账」不需要额外机制的原因。
 """
 
 from __future__ import annotations
@@ -18,30 +25,44 @@ from sqlmodel import Session, select
 
 from app.core.settle import Transfer, plan_pairwise, plan_simplified
 from app.models import (
+    AuditLog,
     Category,
     Entry,
     EntryKind,
     EntryShare,
     Member,
-    Period,
-    PeriodStatus,
+    Statement,
+    now_utc,
     today_jst,
 )
 from app.services import settings as settings_svc
 
 
-def _entries_of(session: Session, period_id: int) -> list[Entry]:
+# ------------------------------------------------------------------ 取数
+
+
+def unbilled(session: Session) -> list[Entry]:
+    """还没出账的账目 —— 它们合起来就是当前这张草稿账单。"""
     return list(
         session.exec(
             select(Entry)
-            .where(Entry.period_id == period_id, Entry.deleted_at.is_(None))
+            .where(Entry.statement_id.is_(None), Entry.deleted_at.is_(None))
+            .order_by(Entry.date, Entry.id)
+        )
+    )
+
+
+def entries_of(session: Session, statement_id: int) -> list[Entry]:
+    return list(
+        session.exec(
+            select(Entry)
+            .where(Entry.statement_id == statement_id, Entry.deleted_at.is_(None))
             .order_by(Entry.date, Entry.id)
         )
     )
 
 
 def _shares_of(session: Session, entry_ids: list[int]) -> dict[int, dict[int, int]]:
-    """{entry_id: {member_id: 份额}}"""
     if not entry_ids:
         return {}
     rows = session.exec(select(EntryShare).where(EntryShare.entry_id.in_(entry_ids))).all()
@@ -51,66 +72,40 @@ def _shares_of(session: Session, entry_ids: list[int]) -> dict[int, dict[int, in
     return out
 
 
-def _periods_before(session: Session, period: Period) -> list[int]:
-    return [
-        p.id
-        for p in session.exec(select(Period).where(Period.start_date < period.start_date))
-    ]
-
-
-def _net_of(session: Session, period_ids: list[int]) -> dict[int, int]:
-    """给定账期集合里，每个人的净变化（＝付出 − 应担）。"""
-    if not period_ids:
-        return {}
-    entries = list(
-        session.exec(
-            select(Entry).where(
-                Entry.period_id.in_(period_ids), Entry.deleted_at.is_(None)
-            )
-        )
-    )
+def _net(session: Session, entries: list[Entry]) -> dict[int, int]:
+    """这批账目让每个人的余额net变化多少（＝付出 − 应担）。"""
     shares = _shares_of(session, [e.id for e in entries])
     net: dict[int, int] = {}
     for e in entries:
         net[e.payer_id] = net.get(e.payer_id, 0) + e.amount_jpy
-        for m, s in shares.get(e.id, {}).items():
-            net[m] = net.get(m, 0) - s
+        for m, sh in shares.get(e.id, {}).items():
+            net[m] = net.get(m, 0) - sh
     return net
 
 
-def _pair_debts(session: Session, period_ids: list[int]) -> dict[tuple[int, int], int]:
-    """逐对债权：debt[(欠钱的, 垫钱的)] = 金额。用于「按原始债权结算」。"""
-    entries = list(
-        session.exec(
-            select(Entry).where(
-                Entry.period_id.in_(period_ids), Entry.deleted_at.is_(None)
-            )
-        )
-    )
-    shares = _shares_of(session, [e.id for e in entries])
-    debts: dict[tuple[int, int], int] = {}
-    for e in entries:
-        if e.kind == EntryKind.settlement:
-            # 还钱：收钱的人对垫钱的人的欠额增加，正好和原来的债抵消
-            if e.to_member_id is not None:
-                key = (e.to_member_id, e.payer_id)
-                debts[key] = debts.get(key, 0) + e.amount_jpy
-            continue
-        for m, s in shares.get(e.id, {}).items():
-            if m == e.payer_id or s == 0:
-                continue
-            key = (m, e.payer_id)
-            debts[key] = debts.get(key, 0) + s
-    return debts
+def _entries_before(session: Session, statement: Statement | None) -> list[Entry]:
+    """在这张账单之前就已经出过账的全部账目 —— 用来算「上期结转」。"""
+    stmt = select(Entry).where(Entry.deleted_at.is_(None), Entry.statement_id.is_not(None))
+    if statement is not None:
+        earlier = [
+            s.id
+            for s in session.exec(select(Statement).where(Statement.cut_at < statement.cut_at))
+        ]
+        if not earlier:
+            return []
+        stmt = stmt.where(Entry.statement_id.in_(earlier))
+    return list(session.exec(stmt))
 
 
-def build_bill(session: Session, period: Period) -> dict[str, Any]:
-    entries = _entries_of(session, period.id)
+# ------------------------------------------------------------------ 账单
+
+
+def build_bill(session: Session, statement: Statement | None = None) -> dict[str, Any]:
+    """statement 传 None ＝ 当前这张还没出的草稿账单。"""
+    entries = unbilled(session) if statement is None else entries_of(session, statement.id)
     shares = _shares_of(session, [e.id for e in entries])
     members = list(session.exec(select(Member).order_by(Member.display_order, Member.id)))
-
-    before = _periods_before(session, period)
-    opening = _net_of(session, before)
+    opening = _net(session, _entries_before(session, statement))
 
     owed: dict[int, int] = {}
     paid: dict[int, int] = {}
@@ -125,8 +120,8 @@ def build_bill(session: Session, period: Period) -> dict[str, Any]:
                 in_[e.to_member_id] = in_.get(e.to_member_id, 0) + e.amount_jpy
             continue
         paid[e.payer_id] = paid.get(e.payer_id, 0) + e.amount_jpy
-        for m, s in shares.get(e.id, {}).items():
-            owed[m] = owed.get(m, 0) + s
+        for m, sh in shares.get(e.id, {}).items():
+            owed[m] = owed.get(m, 0) + sh
         if e.kind == EntryKind.expense:
             total_expense += e.amount_jpy
         else:
@@ -151,166 +146,153 @@ def build_bill(session: Session, period: Period) -> dict[str, Any]:
         )
 
     simplify = bool(settings_svc.get(session, "simplify_debts"))
-    if simplify:
-        transfers: list[Transfer] = plan_simplified(closing)
-    else:
-        transfers = plan_pairwise(_pair_debts(session, before + [period.id]))
+    transfers: list[Transfer] = (
+        plan_simplified(closing)
+        if simplify
+        else plan_pairwise(_pair_debts(session, _entries_before(session, statement) + entries))
+    )
 
-    # 「含 7–8 月水费」这类标注。
-    # **只收跨期的**：计费期间落在本期之外才算。否则等每一行都能顺手填期间之后，
-    # 这句话会变成「含 家賃（10/01〜10/31）· 含 電気（09/01〜09/30）· …」一长串，
-    # 把「这个月为什么贵了一万二」这个唯一有用的信号自己淹掉。
-    covers = [
-        {
-            "entry_id": e.id,
-            "title": e.title,
-            "category_id": e.category_id,
-            "period_start": e.period_start.isoformat() if e.period_start else None,
-            "period_end": e.period_end.isoformat() if e.period_end else None,
-        }
-        for e in entries
-        if _crosses_period(e, period)
-    ]
-
+    dates = [e.date for e in entries]
     return {
-        "period": {
-            "id": period.id,
-            "label": period.label,
-            "start_date": period.start_date.isoformat(),
-            "end_date": period.end_date.isoformat(),
-            "status": period.status.value,
-        },
-        "settle_due": _settle_due(session, period),
+        "statement_id": statement.id if statement else None,
+        "label": statement.label if statement else None,
+        "is_draft": statement is None,
+        "cut_at": statement.cut_at.isoformat() if statement else None,
+        "covers_from": min(dates).isoformat() if dates else None,
+        "covers_to": max(dates).isoformat() if dates else None,
         "total_expense": total_expense,
         "total_income": total_income,
         "entry_count": len(entries),
         "members": rows,
         "transfers": [t._asdict() for t in transfers],
         "simplified": simplify,
-        "covers": covers,
+        "covers": [
+            {
+                "entry_id": e.id,
+                "title": e.title,
+                "category_id": e.category_id,
+                "period_start": e.period_start.isoformat() if e.period_start else None,
+                "period_end": e.period_end.isoformat() if e.period_end else None,
+            }
+            for e in entries
+            if e.period_start or e.period_end
+        ],
+        # 出账之后又被改过的话要说出来，否则下一张的「上期结转」没人解释得清
+        "edited_after_cut": _edited_after_cut(session, statement),
     }
 
 
-def _settle_due(session: Session, period: Period) -> str | None:
-    """结算日：账期结束后次月的第 N 天。没设就返回 None，账单只写「未结清」。"""
-    day = settings_svc.get(session, "settle_due_day")
-    if not day:
-        return None
-    end = period.end_date
-    year, month = (end.year, end.month + 1) if end.month < 12 else (end.year + 1, 1)
-    import calendar
+def _pair_debts(session: Session, entries: list[Entry]) -> dict[tuple[int, int], int]:
+    """逐对债权，用于「按原始债权结算」：谁垫的钱就还给谁。"""
+    shares = _shares_of(session, [e.id for e in entries])
+    debts: dict[tuple[int, int], int] = {}
+    for e in entries:
+        if e.kind == EntryKind.settlement:
+            if e.to_member_id is not None:
+                key = (e.to_member_id, e.payer_id)
+                debts[key] = debts.get(key, 0) + e.amount_jpy
+            continue
+        for m, sh in shares.get(e.id, {}).items():
+            if m == e.payer_id or sh == 0:
+                continue
+            key = (m, e.payer_id)
+            debts[key] = debts.get(key, 0) + sh
+    return debts
 
-    return dt.date(year, month, min(int(day), calendar.monthrange(year, month)[1])).isoformat()
 
+def _edited_after_cut(session: Session, statement: Statement | None) -> dict[str, Any] | None:
+    """这张账单出完之后有没有被动过。
 
-def close_period(session: Session, period: Period, *, actor_id: int | None) -> Period:
-    """关账：冻结一份账单快照，之后这一期的明细锁定。
-
-    **允许带着未结清的余额关账** —— 那就是赊账，差额自动结转到下一期。
-
-    **`snapshot_json` 只在第一次关账时写，之后永不覆盖。**
-    快照存在的唯一理由就是「证明当初发给室友的那张账单长什么样」。
-    而「关账 → 发现漏录 → 解锁 → 补录 → 再关账」是常规操作，
-    要是每次关账都重写快照，室友照着旧账单转了钱、系统里的账单却已经变了，
-    就再没有任何东西能还原当时那张。重关的新版进 audit_log，原件不动。
+    不锁定历史（余额全局累计，改了也不会算错钱），但**必须让改动可见** ——
+    否则下一张账单上冒出来的「上期结转」没人解释得清。
     """
-    if period.status == PeriodStatus.closed:
-        return period
-    fresh = build_bill(session, period)
-    if period.snapshot_json is None:
-        period.snapshot_json = fresh
-        _log(session, actor_id, "close_period", period)
-    else:
-        _log(session, actor_id, "close_period_again", period,
-             before=period.snapshot_json, after=fresh)
-    period.status = PeriodStatus.closed
-    period.closed_at = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
-    period.closed_by = actor_id
-    session.add(period)
-    session.commit()
-    session.refresh(period)
-    return period
-
-
-def reopen_period(session: Session, period: Period, *, actor_id: int | None) -> Period:
-    """解锁。快照留着 —— 要能看出「当初出的那张账单长什么样」。"""
-    period.status = PeriodStatus.open
-    period.closed_at = None
-    period.closed_by = None
-    session.add(period)
-    _log(session, actor_id, "reopen_period", period)
-    session.commit()
-    session.refresh(period)
-    return period
-
-
-def _log(
-    session: Session,
-    actor_id: int | None,
-    action: str,
-    period: Period,
-    *,
-    before: dict[str, Any] | None = None,
-    after: dict[str, Any] | None = None,
-) -> None:
-    from app.models import AuditLog
-
-    session.add(
-        AuditLog(
-            member_id=actor_id,
-            action=action,
-            target_table="period",
-            target_id=period.id,
-            before_json=before,
-            after_json=after or {"label": period.label, "status": period.status.value},
+    if statement is None:
+        return None
+    logs = session.exec(
+        select(AuditLog).where(
+            AuditLog.target_table == "entry",
+            AuditLog.at > statement.cut_at,
+            AuditLog.action.in_(["update", "delete", "restore"]),
         )
+    ).all()
+    touched = {
+        l.target_id
+        for l in logs
+        if l.target_id is not None
+        and (session.get(Entry, l.target_id) is not None)
+        and session.get(Entry, l.target_id).statement_id == statement.id
+    }
+    if not touched:
+        return None
+    frozen = (statement.snapshot_json or {}).get("total_expense")
+    live = build_total_expense(session, statement)
+    return {"count": len(touched), "frozen_total": frozen, "live_total": live}
+
+
+def build_total_expense(session: Session, statement: Statement) -> int:
+    return sum(
+        e.amount_jpy for e in entries_of(session, statement.id) if e.kind == EntryKind.expense
     )
 
 
-def _crosses_period(entry: Entry, period: Period) -> bool:
-    """这条账目的计费期间是不是真的伸到本账期之外了。
-
-    只有跨出去的才值得在账单上单独标一句（水费两个月一收、家賃前払い）。
-    本期内的常规项标了等于噪音。
-    """
-    for bound in (entry.period_start, entry.period_end):
-        if bound is not None and not (period.start_date <= bound <= period.end_date):
-            return True
-    return False
+# ------------------------------------------------------------------ 出账
 
 
-# ------------------------------------------------- 账单页顶部的「本期固定费」
+def cut_statement(session: Session, *, actor_id: int | None, label: str | None = None) -> Statement:
+    """出账单：把这一刻之前所有没出账的账目归到一张单子上，并冻结快照。"""
+    entries = unbilled(session)
+    if not entries:
+        raise BillError("nothing_to_cut", "现在没有待出账的账目")
 
-
-def _prev_period(session: Session, period: Period) -> Period | None:
-    return session.exec(
-        select(Period)
-        .where(Period.start_date < period.start_date)
-        .order_by(Period.start_date.desc())
-    ).first()
-
-
-def default_date_for(period: Period) -> dt.date:
-    """在账单页顺手录的账，日期默认取哪天。
-
-    **这是整块设计里最容易出错的地方**：`assign_period()` 按发生日归期，
-    所以在 10/10 填 9 月账单时若默认取「今天」，那笔家賃会落进 10 月期 ——
-    9 月账单上凭空少一笔，而且零报错。
-    所以默认日期必须落在**这张账单自己的期间内**：今天在期内就用今天，
-    否则用期末那天。每行仍可单独改，改到期外时前端要当场把算出来的账期显示出来。
-    """
+    dates = [e.date for e in entries]
     today = today_jst()
-    if period.start_date <= today <= period.end_date:
-        return today
-    return period.end_date
+    statement = Statement(
+        label=label or f"{today.month}/{today.day} 出账",
+        cut_at=now_utc(),
+        covers_from=min(dates),
+        covers_to=max(dates),
+        cut_by=actor_id,
+    )
+    session.add(statement)
+    session.flush()
+
+    for e in entries:
+        e.statement_id = statement.id
+        session.add(e)
+    session.flush()
+
+    statement.snapshot_json = build_bill(session, statement)
+    session.add(statement)
+    session.add(
+        AuditLog(
+            member_id=actor_id,
+            action="cut_statement",
+            target_table="statement",
+            target_id=statement.id,
+            after_json={"label": statement.label, "entries": len(entries)},
+        )
+    )
+    session.commit()
+    session.refresh(statement)
+    return statement
 
 
-def monthly_rows(session: Session, period: Period) -> dict[str, Any]:
-    """每月一次的固定项在本期的状态：已录的给真值，没录的给上期金额做灰色参考。
+class BillError(ValueError):
+    def __init__(self, code: str, message: str, **detail):
+        super().__init__(message)
+        self.code = code
+        self.detail = detail
 
-    「上期金额」**只是占位提示，不是值**。账本里预填的数字很危险：
-    长得跟亲手填的一模一样，某个月忘了改就带着上月的数字发出去了，谁都看不出来。
-    所以它单独放在 `hint` 里，前端渲染成灰色 placeholder，用户不动它就等于没录。
+
+# ------------------------------------------------- 当前草稿账单上的「固定费」
+
+
+def monthly_rows(session: Session) -> dict[str, Any]:
+    """每月一次的固定项在**当前草稿账单**里的状态。
+
+    没录的给「上次这项记了多少」当灰色参考 —— 注意它只是 placeholder，不是值。
+    账本里预填的数字很危险：长得跟亲手填的一模一样，某个月忘了改就带着上月的
+    电费把账单发出去了，谁都看不出来。
     """
     categories = list(
         session.exec(
@@ -321,16 +303,10 @@ def monthly_rows(session: Session, period: Period) -> dict[str, Any]:
     )
     mine = {
         e.category_id: e
-        for e in _entries_of(session, period.id)
+        for e in unbilled(session)
         if e.kind != EntryKind.settlement and e.category_id is not None
     }
-
-    # 参考值取「**这个分类上一次记的是多少**」，而不是「上一期是多少」。
-    # 水费两个月一收，上一期本来就没有；中间还可能夹着一个空账期
-    # （账目删光了但期还在）。按分类回溯才是人真正想看的那个数。
-    prev_amounts, prev_labels = _last_amount_before(
-        session, [c.id for c in categories], period.start_date
-    )
+    hints, hint_labels = _last_billed_amount(session, [c.id for c in categories])
 
     rows = []
     for c in categories:
@@ -349,28 +325,23 @@ def monthly_rows(session: Session, period: Period) -> dict[str, Any]:
                 "period_start": entry.period_start.isoformat() if entry and entry.period_start else None,
                 "period_end": entry.period_end.isoformat() if entry and entry.period_end else None,
                 "date": entry.date.isoformat() if entry else None,
-                # 上次记的金额，**只作灰色占位提示**，不是预填的值
-                "hint": prev_amounts.get(c.id),
-                "hint_label": prev_labels.get(c.id),
+                "hint": hints.get(c.id),
+                "hint_label": hint_labels.get(c.id),
             }
         )
 
     return {
-        "period_id": period.id,
-        "label": period.label,
-        "status": period.status.value,
-        "default_date": default_date_for(period).isoformat(),
+        "default_date": today_jst().isoformat(),
         "rows": rows,
     }
 
 
-def _last_amount_before(
-    session: Session, category_ids: list[int], before: dt.date
+def _last_billed_amount(
+    session: Session, category_ids: list[int]
 ) -> tuple[dict[int, int], dict[int, str]]:
-    """每个分类在 before 之前最后一次记的金额，以及那笔落在哪一期。
+    """每个分类**上一次出过账的**金额，以及那笔在哪张单子上。
 
-    按分类回溯而不是只看上一期：水费两个月一收，上一期没有它；
-    中间也可能夹着账目被删光的空账期。
+    按分类回溯而不是只看上一张单子：水费两个月一收，上一张本来就没有它。
     """
     if not category_ids:
         return {}, {}
@@ -378,22 +349,21 @@ def _last_amount_before(
         select(Entry)
         .where(
             Entry.category_id.in_(category_ids),
-            Entry.date < before,
             Entry.deleted_at.is_(None),
+            Entry.statement_id.is_not(None),
             Entry.kind != EntryKind.settlement,
         )
         .order_by(Entry.date.desc(), Entry.id.desc())
     ).all()
     amounts: dict[int, int] = {}
     labels: dict[int, str] = {}
-    period_labels: dict[int, str] = {}
+    cache: dict[int, str] = {}
     for e in rows:
         if e.category_id in amounts:
-            continue                      # 已经拿到更晚的那笔了
+            continue
         amounts[e.category_id] = e.amount_jpy
-        if e.period_id is not None:
-            if e.period_id not in period_labels:
-                p = session.get(Period, e.period_id)
-                period_labels[e.period_id] = p.label if p else ""
-            labels[e.category_id] = period_labels[e.period_id]
+        if e.statement_id not in cache:
+            st = session.get(Statement, e.statement_id)
+            cache[e.statement_id] = st.label if st else ""
+        labels[e.category_id] = cache[e.statement_id]
     return amounts, labels

@@ -5,8 +5,8 @@ from sqlmodel import Session, select
 
 from app.auth import current_member
 from app.db import get_session
-from app.models import Member, Period
-from app.schemas import BalancesOut, PeriodOut
+from app.models import Member, Statement
+from app.schemas import BalancesOut, StatementOut
 from app.services import bill as bill_svc
 from app.services import ledger as ledger_svc
 
@@ -19,59 +19,50 @@ def get_balances(session: Session = Depends(get_session), _: Member = Depends(cu
     return BalancesOut(balances={str(k): v for k, v in ledger_svc.balances(session).items()})
 
 
-@router.get("/periods", response_model=list[PeriodOut])
-def list_periods(session: Session = Depends(get_session), _: Member = Depends(current_member)):
-    return list(session.exec(select(Period).order_by(Period.start_date.desc())))
+@router.get("/bill")
+def current_bill(session: Session = Depends(get_session), _: Member = Depends(current_member)) -> dict:
+    """当前这张**还没出**的草稿账单：上次出账之后记的所有账。"""
+    return bill_svc.build_bill(session, None)
 
 
-def _get_period(session: Session, period_id: int) -> Period:
-    period = session.get(Period, period_id)
-    if period is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "账期不存在")
-    return period
+@router.get("/monthly")
+def monthly(session: Session = Depends(get_session), _: Member = Depends(current_member)) -> dict:
+    """当前草稿账单上的固定费。没录的给上次的金额当灰色参考（不是预填值）。"""
+    return bill_svc.monthly_rows(session)
 
 
-@router.get("/periods/{period_id}/bill")
-def get_bill(
-    period_id: int,
+@router.get("/statements", response_model=list[StatementOut])
+def list_statements(session: Session = Depends(get_session), _: Member = Depends(current_member)):
+    """出过的账单，新的在前。"""
+    return list(session.exec(select(Statement).order_by(Statement.cut_at.desc())))
+
+
+@router.get("/statements/{statement_id}/bill")
+def statement_bill(
+    statement_id: int,
     session: Session = Depends(get_session),
     _: Member = Depends(current_member),
 ) -> dict:
-    """月度账单：期初结转 + 本期发生 + 本期已收付 + 转账方案。"""
-    return bill_svc.build_bill(session, _get_period(session, period_id))
+    """某张出过的账单。**实时重算**，并附上「出账后有没有被改过」。
 
-
-@router.post("/periods/{period_id}/close")
-def close_period(
-    period_id: int,
-    session: Session = Depends(get_session),
-    member: Member = Depends(current_member),
-) -> dict:
-    """关账。允许带着未结清余额关 —— 那就是赊账，差额结转下一期。"""
-    period = bill_svc.close_period(session, _get_period(session, period_id), actor_id=member.id)
-    return {"id": period.id, "label": period.label, "status": period.status.value}
-
-
-@router.post("/periods/{period_id}/reopen")
-def reopen_period(
-    period_id: int,
-    session: Session = Depends(get_session),
-    member: Member = Depends(current_member),
-) -> dict:
-    period = bill_svc.reopen_period(session, _get_period(session, period_id), actor_id=member.id)
-    return {"id": period.id, "label": period.label, "status": period.status.value}
-
-
-@router.get("/periods/{period_id}/monthly")
-def get_monthly(
-    period_id: int,
-    session: Session = Depends(get_session),
-    _: Member = Depends(current_member),
-) -> dict:
-    """账单页顶部那块「本期固定费」的数据。
-
-    没录的项给上期金额当**灰色参考**（hint），不是预填值 —— 见 monthly_rows 的说明。
-    保存仍然走普通的 POST/PATCH /api/entries，不另开批量端点：
-    批量端点会绕开已有的校验、审计和乐观锁，为一个录入界面另修一条路不划算。
+    不返回冻结快照本身：当初那张在 `snapshot_json` 里留着（用于举证），
+    但页面上要看的是现在的真实情况，两者不一致时由 `edited_after_cut` 点出来。
     """
-    return bill_svc.monthly_rows(session, _get_period(session, period_id))
+    st = session.get(Statement, statement_id)
+    if st is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "账单不存在")
+    return bill_svc.build_bill(session, st)
+
+
+@router.post("/statements", response_model=StatementOut, status_code=status.HTTP_201_CREATED)
+def cut_statement(
+    session: Session = Depends(get_session),
+    member: Member = Depends(current_member),
+):
+    """出账单：把这一刻之前所有没出账的账目归到一张单子上，冻结快照。
+
+    **不锁定**任何东西 —— 余额全局累计，事后改了也不会算错钱，
+    只是下一张账单会把「这张出账后被改过」标出来。
+    """
+    st = bill_svc.cut_statement(session, actor_id=member.id)
+    return st

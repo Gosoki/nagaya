@@ -17,13 +17,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 from app.core.rules import RuleError
+from app.services.bill import BillError
 from app.core.split import SplitError
 from app.init_db import init_db
 from app.routers import auth, categories, entries, ledger, members, settings
 from app.services.ledger import LedgerError
 
 #: 这些错误是「用户输入不对」，不是 500。个别要用 409 让前端知道该刷新。
-CONFLICT_CODES = {"period_closed", "version_conflict"}
+CONFLICT_CODES = {"version_conflict"}
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -51,7 +52,7 @@ def _error_response(exc: LedgerError | RuleError | SplitError) -> JSONResponse:
     )
 
 
-for error_type in (LedgerError, RuleError, SplitError):
+for error_type in (LedgerError, RuleError, SplitError, BillError):
     app.add_exception_handler(
         error_type,
         lambda request, exc: _error_response(exc),  # noqa: ARG005

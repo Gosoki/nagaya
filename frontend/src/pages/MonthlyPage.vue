@@ -4,26 +4,10 @@
 -->
 <template>
   <q-page class="q-pb-xl">
-    <div v-if="period">
-      <MonthlyFixed :period-id="period.id" :readonly="period.status === 'closed'" @saved="noop" />
-    </div>
-    <div v-else class="text-center text-grey-6 q-mt-xl">{{ t('bill.noPeriod') }}</div>
+    <MonthlyFixed />
   </q-page>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { useI18n } from 'vue-i18n'
-
-import { currentPeriod } from 'src/api/periods'
-import type { Period } from 'src/api/types'
 import MonthlyFixed from 'src/components/MonthlyFixed.vue'
-
-const { t } = useI18n()
-const period = ref<Period | null>(null)
-const noop = () => {}
-
-onMounted(async () => {
-  period.value = await currentPeriod()
-})
 </script>

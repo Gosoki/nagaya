@@ -7,8 +7,8 @@ from sqlmodel import Session, select
 
 from app.auth import current_member
 from app.db import get_session
-from app.models import Category, Entry, EntryShare, Member, Period
-from app.schemas import EntryIn, EntryOut
+from app.models import Category, Entry, EntryShare, Member, Statement
+from app.schemas import EntryIn, EntryOut, EntryPatch
 from app.services import ledger
 
 router = APIRouter(prefix="/api/entries", tags=["entries"])
@@ -16,10 +16,10 @@ router = APIRouter(prefix="/api/entries", tags=["entries"])
 
 def to_entry_out(session: Session, entry: Entry) -> EntryOut:
     shares = session.exec(select(EntryShare).where(EntryShare.entry_id == entry.id)).all()
-    period = session.get(Period, entry.period_id) if entry.period_id else None
+    st = session.get(Statement, entry.statement_id) if entry.statement_id else None
     return EntryOut(
         **entry.model_dump(),
-        period_label=period.label if period else None,
+        statement_label=st.label if st else None,
         shares={str(s.member_id): s.amount_jpy for s in shares},
     )
 
@@ -33,7 +33,8 @@ def _category_rule(session: Session, category_id: int | None) -> dict | None:
 
 @router.get("", response_model=list[EntryOut])
 def list_entries(
-    period_id: int | None = None,
+    statement_id: int | None = None,
+    unbilled_only: bool = False,
     since: dt.date | None = None,
     until: dt.date | None = None,
     include_deleted: bool = False,
@@ -44,8 +45,10 @@ def list_entries(
     stmt = select(Entry).order_by(Entry.date.desc(), Entry.id.desc()).limit(limit)
     if not include_deleted:
         stmt = stmt.where(Entry.deleted_at.is_(None))
-    if period_id is not None:
-        stmt = stmt.where(Entry.period_id == period_id)
+    if statement_id is not None:
+        stmt = stmt.where(Entry.statement_id == statement_id)
+    if unbilled_only:
+        stmt = stmt.where(Entry.statement_id.is_(None))
     if since is not None:
         stmt = stmt.where(Entry.date >= since)
     if until is not None:
@@ -83,7 +86,7 @@ def create_entry(
 @router.patch("/{entry_id}", response_model=EntryOut)
 def update_entry(
     entry_id: int,
-    body: EntryIn,
+    body: EntryPatch,
     version: int = Query(..., description="乐观锁：传你读到的那个 version"),
     session: Session = Depends(get_session),
     member: Member = Depends(current_member),

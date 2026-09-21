@@ -11,8 +11,7 @@ from sqlmodel import Session
 from app.auth import hash_password
 from app.db import get_session
 from app.main import app
-from app.models import Member, PeriodStatus
-from app.services.ledger import get_or_create_period
+from app.models import Member
 
 SEP = "2026-09-10"
 
@@ -66,7 +65,7 @@ def test_create_entry_returns_shares(client, auth, members):
     body = r.json()
     assert body["shares"] == {str(a.id): 3334, str(b.id): 3333, str(c.id): 3333}
     assert sum(body["shares"].values()) == 10_000
-    assert body["period_label"] == "2026-09"
+    assert body["statement_id"] is None      # 还没出账，在当前草稿里
     assert body["version"] == 1
 
 
@@ -118,17 +117,6 @@ def test_version_conflict(client, auth, members):
     assert stale.json()["code"] == "version_conflict"
 
 
-def test_closed_period_returns_409(client, auth, session, members):
-    a, *_ = members
-    period = get_or_create_period(session, dt.date(2026, 9, 10))
-    period.status = PeriodStatus.closed
-    session.add(period)
-    session.commit()
-    r = client.post("/api/entries", headers=auth,
-                    json={"kind": "expense", "date": SEP, "amount_jpy": 1_000, "payer_id": a.id})
-    assert r.status_code == 409
-    assert r.json()["code"] == "period_closed"
-
 
 def test_soft_delete_and_restore(client, auth, members):
     a, *_ = members
@@ -145,27 +133,40 @@ def test_soft_delete_and_restore(client, auth, members):
 
 def test_settings_carry_notes_and_validate(client, auth):
     rows = {s["key"]: s for s in client.get("/api/settings", headers=auth).json()}
-    assert rows["period_start_day"]["value"] == 1
-    assert rows["period_start_day"]["note_zh"] and rows["period_start_day"]["note_ja"]
+    assert rows["remainder_to"]["value"] == "payer"
+    assert rows["remainder_to"]["note_zh"] and rows["remainder_to"]["note_ja"]
     assert rows["settle_due_day"]["value"] is None          # 你们还没定，留空
+    assert "period_start_day" not in rows, "账期起算日应当随账期机制一起消失"
 
-    assert client.put("/api/settings/period_start_day", headers=auth, json={"value": 25}).status_code == 200
-    assert client.put("/api/settings/period_start_day", headers=auth, json={"value": 40}).status_code == 400
+    assert client.put("/api/settings/settle_due_day", headers=auth, json={"value": 25}).status_code == 200
+    assert client.put("/api/settings/settle_due_day", headers=auth, json={"value": 40}).status_code == 400
     assert client.put("/api/settings/remainder_to", headers=auth, json={"value": "nope"}).status_code == 400
     assert client.put("/api/settings/nonexistent", headers=auth, json={"value": 1}).status_code == 404
 
 
-def test_period_start_day_change_only_affects_new_entries(client, auth, members):
-    """改起算日 → 之后记的账才按新规则归期。"""
-    a, *_ = members
-    before = client.post("/api/entries", headers=auth,
-                         json={"kind": "expense", "date": "2026-09-30", "amount_jpy": 1_000,
-                               "payer_id": a.id}).json()
-    assert before["period_label"] == "2026-09"
 
-    client.put("/api/settings/period_start_day", headers=auth, json={"value": 25})
-    after = client.post("/api/entries", headers=auth,
-                        json={"kind": "expense", "date": "2026-09-30", "amount_jpy": 1_000,
-                              "payer_id": a.id}).json()
-    assert after["period_label"] == "2026-10"       # 9/30 付的 10 月家賃落进 10 月期
-    assert client.get(f"/api/entries", headers=auth).json()[-1]["period_label"] == "2026-09"
+
+def test_patch_does_not_touch_fields_you_did_not_send(client, auth, members):
+    """**改金额不该顺手换掉垫付人。**
+
+    固定费那一屏只显示金额，压根没有付款人选择器。原来 PATCH 复用 EntryIn
+    （payer_id 必填），面板被迫带上「默认垫付人」，于是 Kan 垫的电费被 Go 改一下
+    金额就算到了 Go 头上 —— 两人余额各错一个电费钱，界面上零提示。
+    """
+    a, b, _ = members
+    created = client.post("/api/entries", headers=auth,
+                          json={"kind": "expense", "date": SEP, "amount_jpy": 8_700,
+                                "payer_id": b.id, "title": "電気"}).json()
+    assert created["payer_id"] == b.id
+    before = client.get("/api/balances", headers=auth).json()["balances"]
+
+    # 只改金额，别的一个字段都不传
+    patched = client.patch(f"/api/entries/{created['id']}?version={created['version']}",
+                           headers=auth, json={"amount_jpy": 8_750}).json()
+    assert patched["payer_id"] == b.id, "垫付人被悄悄换掉了"
+    assert patched["title"] == "電気"
+    assert patched["amount_jpy"] == 8_750
+
+    after = client.get("/api/balances", headers=auth).json()["balances"]
+    assert (after[str(b.id)] - before[str(b.id)]) > 0, "改大金额后垫付人的债权应当变多"
+    assert sum(after.values()) == 0

@@ -34,8 +34,8 @@ export interface Entry {
   category_id: number | null
   payer_id: number
   to_member_id: number | null
-  period_id: number | null
-  period_label: string | null
+  statement_id: number | null
+  statement_label: string | null
   period_start: string | null
   period_end: string | null
   bundle_id: number | null
@@ -49,13 +49,14 @@ export interface Entry {
   shares: Record<string, number>
 }
 
-export interface Period {
+/** 一张出过的账单。线是点「出账单」那一刻划的，不是日历划的 */
+export interface Statement {
   id: number
   label: string
-  start_date: string
-  end_date: string
-  status: 'open' | 'closed'
-  closed_at: string | null
+  cut_at: string
+  covers_from: string | null
+  covers_to: string | null
+  cut_by: number | null
 }
 
 export interface Setting {

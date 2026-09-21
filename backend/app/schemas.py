@@ -7,7 +7,7 @@ from typing import Any, Optional
 
 from sqlmodel import SQLModel
 
-from app.models import EntryKind, Lang, PeriodStatus
+from app.models import EntryKind, Lang
 
 
 class LoginIn(SQLModel):
@@ -80,6 +80,29 @@ class EntryIn(SQLModel):
     bundle_id: Optional[int] = None
 
 
+class EntryPatch(SQLModel):
+    """改一笔账。**每个字段都可选** —— 没传的就不动。
+
+    这不是洁癖：原来 PATCH 复用 EntryIn（payer_id 是必填），于是固定费面板改个金额
+    也被迫带上 payer_id，而那一屏根本没显示过付款人。结果是 Kan 垫的电费被 Go 改一下
+    金额就算到了 Go 头上，两人余额各错一个电费钱，零提示。
+    """
+
+    kind: Optional[EntryKind] = None
+    date: Optional[dt.date] = None
+    amount_jpy: Optional[int] = None
+    payer_id: Optional[int] = None
+    title: Optional[str] = None
+    note: Optional[str] = None
+    category_id: Optional[int] = None
+    to_member_id: Optional[int] = None
+    member_ids: Optional[list[int]] = None
+    rule: Optional[dict[str, Any]] = None
+    period_start: Optional[dt.date] = None
+    period_end: Optional[dt.date] = None
+    bundle_id: Optional[int] = None
+
+
 class EntryOut(SQLModel):
     id: int
     kind: EntryKind
@@ -89,8 +112,8 @@ class EntryOut(SQLModel):
     category_id: Optional[int]
     payer_id: int
     to_member_id: Optional[int]
-    period_id: Optional[int]
-    period_label: Optional[str]
+    statement_id: Optional[int]
+    statement_label: Optional[str]
     period_start: Optional[dt.date]
     period_end: Optional[dt.date]
     bundle_id: Optional[int]
@@ -104,13 +127,13 @@ class EntryOut(SQLModel):
     shares: dict[str, int]
 
 
-class PeriodOut(SQLModel):
+class StatementOut(SQLModel):
     id: int
     label: str
-    start_date: dt.date
-    end_date: dt.date
-    status: PeriodStatus
-    closed_at: Optional[dt.datetime]
+    cut_at: dt.datetime
+    covers_from: Optional[dt.date]
+    covers_to: Optional[dt.date]
+    cut_by: Optional[int]
 
 
 class BalancesOut(SQLModel):
