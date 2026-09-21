@@ -91,7 +91,6 @@
            每人分多少一直摆在那儿，比藏在一个要点开的抽屉里踏实。
            折起来的那个抽屉还带个没用的摘要行（「Go / Kan / Zen」），白占一行 -->
       <div v-if="kind !== 'settlement'" class="q-mt-sm split-panel">
-        <div class="text-grey-7 label q-mb-xs">{{ t('entry.split') }}</div>
         <SplitEditor
           ref="splitEl"
           :amount="signedAmount"

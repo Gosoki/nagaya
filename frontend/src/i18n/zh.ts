@@ -14,7 +14,7 @@ export default {
   entry: {
     amount: '金额', category: '分类', payer: '谁付的', receiver: '谁收的',
     to: '转给谁', title: '备注（选填）', note: '说明', date: '日期',
-    split: '分摊', saved: '已记下',
+    saved: '已记下',
     splitEven: '均分', splitEvenAmong: '{names} 均分',
     saveAndNext: '保存并继续记', save: '保存',
     emptyAmount: '先填金额',
