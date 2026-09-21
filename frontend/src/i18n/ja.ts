@@ -98,6 +98,16 @@ export default {
     empty: 'メモはまだありません。固定費は上に並んでいます。',
     removeItem: 'このメモを削除', removeAsk: '「{name}」を削除しますか？', removed: '「{name}」を削除しました',
   },
+  profile: {
+    title: 'プロフィール',
+    color: 'アイコンの色', displayName: '表示名', loginName: 'ログイン名', lang: '言語',
+    displayNameHint: '請求書や分担で表示される名前。アイコンには先頭の一文字',
+    loginNameHint: 'ログイン用の名前。自分にしか見えません',
+    password: 'パスワード', change: '変更',
+    oldPassword: '現在のパスワード', newPassword: '新しいパスワード（6 文字以上）',
+    passwordHint: '現在のパスワードが必要です',
+    passwordChanged: 'パスワードを変更しました',
+  },
   settings: {
     label: {
       default_payer_id: '既定の立替者',

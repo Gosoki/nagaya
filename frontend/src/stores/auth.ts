@@ -27,10 +27,18 @@ export const useAuth = defineStore('auth', () => {
     }
   }
 
+  /** 改自己的资料。密码要连旧的一起发，后端会验 */
+  async function updateMe(patch: Record<string, unknown>): Promise<Member> {
+    const saved = await api.patch<Member>(`/api/members/${me.value!.id}`, patch)
+    me.value = saved
+    if (patch.lang) setLang(saved.lang)   // 语言跟人走，改完当场换
+    return saved
+  }
+
   function logout() {
     setToken(null)
     me.value = null
   }
 
-  return { me, ready, login, restore, logout }
+  return { me, ready, login, restore, updateMe, logout }
 })

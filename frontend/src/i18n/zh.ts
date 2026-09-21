@@ -98,6 +98,16 @@ export default {
     empty: '还没写过备忘。固定费那几项在上面，别的自己加。',
     removeItem: '删掉这一条', removeAsk: '删掉「{name}」？', removed: '已删掉「{name}」',
   },
+  profile: {
+    title: '个人',
+    color: '头像颜色', displayName: '昵称', loginName: '登录名', lang: '语言',
+    displayNameHint: '账单和分摊里显示的名字，头像上取第一个字',
+    loginNameHint: '登录用的名字，只有自己看得到',
+    password: '密码', change: '修改',
+    oldPassword: '当前密码', newPassword: '新密码（至少 6 位）',
+    passwordHint: '要先报出当前密码 —— 手机搁桌上没锁屏，别人顺手就能改掉',
+    passwordChanged: '密码改好了',
+  },
   settings: {
     label: {
       default_payer_id: '默认垫付人',

@@ -189,8 +189,15 @@ def test_password_is_yours_alone(client, auth, members) -> None:
     me, other, *_ = members
     assert client.patch(f"/api/members/{other.id}", headers=auth,
                         json={"password": "hijacked"}).status_code == 403
+    # 改自己的也得先报出旧密码 —— 手机搁桌上没锁屏，别人顺手就能改掉
     assert client.patch(f"/api/members/{me.id}", headers=auth,
-                        json={"password": "my-own-new-one"}).status_code == 200
+                        json={"password": "my-own-new-one"}).status_code == 403
+    assert client.patch(f"/api/members/{me.id}", headers=auth,
+                        json={"password": "my-own-new-one", "old_password": "wrong"}).status_code == 403
+    assert client.patch(f"/api/members/{me.id}", headers=auth,
+                        json={"password": "my-own-new-one", "old_password": "pw123456"}).status_code == 200
+    # 新密码真的生效了
+    assert client.post("/api/auth/login", json={"name": me.name, "password": "my-own-new-one"}).status_code == 200
 
 
 def test_left_on_can_be_cleared(client, auth, members) -> None:

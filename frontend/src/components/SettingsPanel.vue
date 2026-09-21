@@ -7,6 +7,7 @@
 -->
 <template>
   <div>
+    <ProfileCard />
     <div class="bill-section">
       <q-item dense class="section-head">
         <q-item-section>{{ t('nav.settings') }}</q-item-section>
@@ -146,6 +147,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { ApiError, api } from 'src/api/client'
+import ProfileCard from 'src/components/ProfileCard.vue'
 import type { Setting } from 'src/api/types'
 import { useMeta } from 'src/stores/meta'
 

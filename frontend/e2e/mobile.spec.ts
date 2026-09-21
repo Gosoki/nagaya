@@ -24,7 +24,22 @@ async function login(page: import('@playwright/test').Page, who: string = USER) 
  * 残渣留在共享的开发库里，下一轮别的用例会读到它然后红在完全无关的地方
  * （真发生过：离线草稿那条读到了另一条用例留下的 903）。
  */
+/** 「个人设置」那条会临时改掉 kan 的密码。用例一红就跳过收尾，于是后面每条都登不进去 */
+const TEMP_PASSWORD = 'e2e-new-password'
+
+async function restoreKanPassword(page: import('@playwright/test').Page) {
+  const r = await page.request.post('/api/auth/login', { data: { name: 'kan', password: TEMP_PASSWORD } })
+  if (!r.ok()) return          // 没被改过，正常
+  const headers = { Authorization: `Bearer ${(await r.json()).token}` }
+  const me = await (await page.request.get('/api/auth/me', { headers })).json()
+  await page.request.patch(`/api/members/${me.id}`, {
+    headers,
+    data: { password: PASSWORD, old_password: TEMP_PASSWORD },
+  })
+}
+
 test.afterEach(async ({ page }) => {
+  await restoreKanPassword(page).catch(() => {})
   try {
     const r = await page.request.post('/api/auth/login', {
       data: { name: USER, password: PASSWORD },
@@ -938,6 +953,64 @@ test('设置面板：照后端的声明渲染，改完当场落库', async ({ pa
   // 收尾：改回默认，免得影响后面的用例
   await page.request.put('/api/settings/remainder_to', { headers, data: { value: 'payer' } })
   await page.request.put('/api/settings/monthly_gap_days', { headers, data: { value: 20 } })
+})
+
+test('个人设置：头像色 / 昵称 / 语言 / 改密码', async ({ page }) => {
+  // **用 kan 登录**：这条要改密码，拿 go 来做的话一旦中途失败，
+  // 后面每条用例都登不进去了
+  await login(page, 'kan')
+  const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
+  const me = async () => (await (await page.request.get('/api/auth/me', { headers })).json())
+  const before = await me()
+
+  await page.getByRole('tab', { name: '更多' }).click()
+  await page.getByRole('tab', { name: '设置' }).click()
+
+  // 头像色：全站的头像都读它。挑一个**当前没选中**的 —— 写死下标的话，
+  // 碰巧就是现在这个色时点了等于没点，测试会红在一个跟功能无关的地方
+  await page.locator('.swatch:not(.on)').first().click()
+  await expect.poll(async () => (await me()).color).not.toBe(before.color)
+
+  // 昵称
+  const nick = page.locator('.profile-row').filter({ hasText: '昵称' }).locator('.field')
+  await nick.fill('E2E改过的名字')
+  await nick.blur()
+  await expect.poll(async () => (await me()).display_name).toBe('E2E改过的名字')
+
+  // 语言：原来只有登录页上换得了，登录之后就再也找不到
+  await page.getByRole('button', { name: '日本語' }).click()
+  await expect(page.locator('.bill-tabs .q-tab').first()).toHaveText('明細')
+  await page.getByRole('button', { name: '中文' }).click()
+  await expect(page.locator('.bill-tabs .q-tab').first()).toHaveText('流水')
+
+  // 改密码要先报出旧的 —— 手机搁桌上没锁屏，别人顺手就能改掉
+  await page.getByRole('button', { name: '修改' }).click()
+  const pw = page.locator('.profile-row').filter({ hasText: '密码' })
+  await pw.locator('input[type="password"]').first().fill('wrong-one')
+  await pw.locator('input[type="password"]').nth(1).fill(TEMP_PASSWORD)
+  await pw.getByRole('button', { name: '保存' }).click()
+  await expect(page.locator('.q-notification')).toContainText('当前密码不对')
+
+  await pw.locator('input[type="password"]').first().fill(PASSWORD)
+  await pw.getByRole('button', { name: '保存' }).click()
+  // 按内容找，不按位置找：上一条报错还没消失，.last() 抓到的可能是它
+  await expect(page.locator('.q-notification').filter({ hasText: '密码改好了' })).toBeVisible()
+  // 新密码真能登进去
+  const relogin = await page.request.post('/api/auth/login',
+    { data: { name: 'kan', password: TEMP_PASSWORD } })
+  expect(relogin.ok(), '改完的新密码要能登录').toBe(true)
+
+  // 收尾：改回去，别把开发库留在一个登不进去的状态
+  const fresh = { Authorization: `Bearer ${(await relogin.json()).token}` }
+  await page.request.patch(`/api/members/${before.id}`, {
+    headers: fresh,
+    data: {
+      password: PASSWORD, old_password: TEMP_PASSWORD,
+      display_name: before.display_name, color: before.color,
+    },
+  })
+  expect((await (await page.request.get('/api/auth/me', { headers: fresh })).json()).display_name)
+    .toBe(before.display_name)
 })
 
 test('账目筛选：按分类/付款人筛，并给出筛选后的合计', async ({ page }) => {

@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
 
-from app.auth import current_member, hash_password
+from app.auth import current_member, hash_password, verify_password
 from app.db import get_session
 from app.models import Member
 from app.routers.auth import to_member_out
@@ -51,15 +51,19 @@ def update_member(
     if member is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "成员不存在")
 
-    # **密码只能自己改。** 这屋里三个人是互相信任的，但「信任」不该等于
-    # 「谁都能把别人锁在门外」—— 改掉别人的密码是一个没法自己恢复的动作
-    if body.password is not None and member.id != me.id:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "只能改自己的密码")
+    if body.password is not None:
+        # **密码只能自己改。** 这屋里三个人是互相信任的，但「信任」不该等于
+        # 「谁都能把别人锁在门外」—— 改掉别人的密码是一个没法自己恢复的动作
+        if member.id != me.id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "只能改自己的密码")
+        # 已经设过密码的，得先报出旧的。手机搁桌上没锁屏，别人顺手就能改掉
+        if member.password_hash and not verify_password(body.old_password or "", member.password_hash):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "当前密码不对")
 
     # exclude_unset 而不是 exclude_none：PATCH 的语义是「我发了什么就改什么」。
     # 用 exclude_none 的话 left_on 一旦填错就再也清不掉 —— null 会被当成「没发」，
     # 于是那个人永远是「已退出」，回不来
-    fields = body.model_dump(exclude_unset=True, exclude={"password"})
+    fields = body.model_dump(exclude_unset=True, exclude={"password", "old_password"})
     if "name" in fields:
         if not fields["name"]:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "登录名不能为空")

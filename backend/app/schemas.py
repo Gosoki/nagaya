@@ -41,6 +41,8 @@ class MemberIn(SQLModel):
     left_on: Optional[dt.date] = None
     lang: Optional[Lang] = None
     password: Optional[str] = None
+    #: 改自己的密码时要先验一遍旧的。手机放桌上被人顺手改掉，自己就进不来了
+    old_password: Optional[str] = None
 
 
 class CategoryIn(SQLModel):
