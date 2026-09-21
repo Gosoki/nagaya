@@ -51,6 +51,7 @@ class CategoryIn(SQLModel):
     monthly: Optional[bool] = None
     display_order: Optional[int] = None
     archived: Optional[bool] = None
+    note: Optional[str] = None
 
 
 class CategoryOut(SQLModel):
@@ -62,6 +63,21 @@ class CategoryOut(SQLModel):
     monthly: bool
     display_order: int
     archived: bool
+    note: str
+
+
+class MemoIn(SQLModel):
+    title: Optional[str] = None
+    body: Optional[str] = None
+    display_order: Optional[int] = None
+
+
+class MemoOut(SQLModel):
+    id: int
+    title: str
+    body: str
+    display_order: int
+    updated_at: dt.datetime
 
 
 class EntryIn(SQLModel):

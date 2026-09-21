@@ -43,6 +43,15 @@ test.afterEach(async ({ page }) => {
       if (typeof c.name === 'string' && c.name.startsWith('E2E')) {
         await page.request.patch(`/api/categories/${c.id}`, { headers, data: { archived: true } })
       }
+      // 备忘那条用例往分类上写过备注，也要擦掉
+      if (typeof c.note === 'string' && c.note.startsWith('E2E')) {
+        await page.request.patch(`/api/categories/${c.id}`, { headers, data: { note: '' } })
+      }
+    }
+    for (const m of await (await page.request.get('/api/memos', { headers })).json()) {
+      if (typeof m.title === 'string' && m.title.startsWith('E2E')) {
+        await page.request.delete(`/api/memos/${m.id}`, { headers })
+      }
     }
   } catch {
     /* 收尾失败不该把用例本身判红 */
@@ -849,6 +858,49 @@ test('结清了的账单：绿标就占状态那一格，自己那笔划掉', as
   await page.goto(`/bill/${open.id}`)
   await expect(page.locator('.head .row').nth(1)).toContainText('未结清')
   await expect(page.locator('.mine')).toHaveCSS('text-decoration-line', 'none')
+})
+
+test('备忘：固定费那几项常驻，自己也能加；两页共用一个地址', async ({ page }) => {
+  await login(page)
+  await page.getByRole('tab', { name: '账目' }).click()
+  await expect(page.locator('.bill-tabs .q-tab')).toHaveText(['流水', '备忘'])
+  await expect(page).toHaveURL(/\/entries$/)
+
+  await page.getByRole('tab', { name: '备忘' }).click()
+  await expect(page).toHaveURL(/\/entries$/, { timeout: 3000 })
+  // 固定费那几项是现成的清单，不用自己抄一遍
+  await expect(page.getByText('房租', { exact: true })).toBeVisible()
+  await expect(page.locator('.memo-row').first()).toBeVisible()
+
+  // 分类的备注是**常驻**的：写在某一笔账的备注里，下个月就找不着了
+  const rentNote = page.locator('.memo-row').filter({ hasText: '房租' }).locator('.note')
+  await rentNote.fill('E2E房东自动扣')
+  await rentNote.blur()
+  await page.reload()
+  await expect(page.locator('.memo-row').filter({ hasText: '房租' }).locator('.note'))
+    .toHaveValue('E2E房东自动扣')
+
+  // 清单之外的自己加
+  await page.locator('.add-row .new-name').fill('E2E备用钥匙')
+  await page.getByRole('button', { name: '加一条' }).click()
+  // 条目名在输入框里，按文本内容找不到这一行 —— 行上挂了 data-title 当锚点
+  const rowOf = (title: string) => page.locator(`.memo-row[data-title="${title}"]`)
+  const mine = rowOf('E2E备用钥匙')
+  await expect(mine).toBeVisible()
+  await mine.locator('.note').fill('鞋柜第二层')
+  await mine.locator('.note').blur()
+  await page.reload()
+  await expect(rowOf('E2E备用钥匙').locator('.note')).toHaveValue('鞋柜第二层')
+
+  // 删掉
+  await rowOf('E2E备用钥匙').getByRole('button').click()
+  await page.getByRole('button', { name: '确定' }).click()
+  await expect(rowOf('E2E备用钥匙')).toHaveCount(0)
+
+  // 切回流水，地址照样不动
+  await page.getByRole('tab', { name: '流水' }).click()
+  await expect(page.locator('.filter-bar')).toBeVisible()
+  await expect(page).toHaveURL(/\/entries$/)
 })
 
 test('账目筛选：按分类/付款人筛，并给出筛选后的合计', async ({ page }) => {

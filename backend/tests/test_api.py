@@ -226,3 +226,35 @@ def test_a_broken_default_rule_is_rejected_on_the_spot(client, auth, members) ->
     ok = client.post("/api/entries", headers=auth,
                      json={"kind": "expense", "date": "2026-09-10", "amount_jpy": 900, "payer_id": 1})
     assert ok.status_code == 201
+
+
+def test_memos_crud(client, auth) -> None:
+    """自己加的备忘：能加、能改、能删。"""
+    assert client.get("/api/memos", headers=auth).json() == []
+    assert client.post("/api/memos", headers=auth, json={"title": "  "}).status_code == 400
+
+    a = client.post("/api/memos", headers=auth,
+                    json={"title": " 垃圾袋 ", "body": "买大号的，超市 B1"}).json()
+    assert a["title"] == "垃圾袋", "名字两边的空格要削掉"
+    b = client.post("/api/memos", headers=auth, json={"title": "钥匙"}).json()
+    assert b["display_order"] > a["display_order"], "新的排在最后，不插队"
+
+    upd = client.patch(f"/api/memos/{a['id']}", headers=auth, json={"body": "改成买中号"}).json()
+    assert upd["body"] == "改成买中号" and upd["title"] == "垃圾袋"
+    assert client.patch(f"/api/memos/{a['id']}", headers=auth, json={"title": ""}).status_code == 400
+
+    assert client.delete(f"/api/memos/{b['id']}", headers=auth).status_code == 204
+    assert [m["id"] for m in client.get("/api/memos", headers=auth).json()] == [a["id"]]
+    assert client.delete(f"/api/memos/{b['id']}", headers=auth).status_code == 404
+
+
+def test_category_note_is_a_standing_memo(client, auth) -> None:
+    """固定费那几项的备忘写在分类上 —— 「水费隔月收」每期都成立，
+    写进某一笔账的备注里，下个月就找不着了。"""
+    cat = client.post("/api/categories", headers=auth,
+                      json={"name": "水费", "monthly": True}).json()
+    assert cat["note"] == ""
+    updated = client.patch(f"/api/categories/{cat['id']}", headers=auth,
+                           json={"note": "隔月收：6 / 8 / 10 月"}).json()
+    assert updated["note"] == "隔月收：6 / 8 / 10 月"
+    assert updated["name"] == "水费", "只发了 note，别的字段不许动"

@@ -90,6 +90,14 @@ export default {
     coversRange: '{from} 〜 {to}',
     noPeriod: 'まだ明細がありません',
   },
+  entries: { tabLedger: '明細', tabMemo: 'メモ' },
+  memo: {
+    fixed: '固定費', others: 'その他',
+    addItem: '追加', namePlaceholder: '名前（例：予備の鍵）',
+    notePlaceholder: '請求時期、引き落とし口座、契約期限…',
+    empty: 'メモはまだありません。固定費は上に並んでいます。',
+    removeItem: 'このメモを削除', removeAsk: '「{name}」を削除しますか？', removed: '「{name}」を削除しました',
+  },
   filter: {
     partial: '（直近 500 件のみ）',
     kind: '種別', category: 'カテゴリ', payer: '支払者',

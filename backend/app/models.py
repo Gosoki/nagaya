@@ -101,6 +101,32 @@ class Category(SQLModel, table=True):
     )
     display_order: int = Field(default=0, index=True)
     archived: bool = Field(default=False, index=True)
+    note: str = Field(
+        default="",
+        description=(
+            "这一项的常驻备忘：什么时候收、从谁的卡扣、合同哪天到期。"
+            "**跟着分类走，不跟着某一笔账走** —— 「水费隔月收」这种事每期都成立，"
+            "写在某一笔的备注里，下个月就找不着了。"
+        ),
+    )
+
+
+class Memo(SQLModel, table=True):
+    """自己加的备忘条目。
+
+    固定费那几项的备忘写在 Category.note 上（它们本来就是一份现成的清单）；
+    这张表装的是清单之外的东西 —— 备用钥匙放哪、垃圾袋买哪种、房东电话。
+    """
+
+    __tablename__ = "memo"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str = Field(description="条目名")
+    body: str = Field(default="", description="正文")
+    display_order: int = Field(default=0, index=True)
+    created_at: dt.datetime = Field(default_factory=now_utc)
+    updated_at: dt.datetime = Field(default_factory=now_utc)
+    created_by: Optional[int] = Field(default=None, foreign_key="member.id")
 
 
 class Statement(SQLModel, table=True):

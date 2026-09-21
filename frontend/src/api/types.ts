@@ -13,6 +13,15 @@ export interface Member {
   is_active: boolean
 }
 
+/** 自己加的备忘条目。固定费那几项的备忘写在 Category.note 上 */
+export interface Memo {
+  id: number
+  title: string
+  body: string
+  display_order: number
+  updated_at: string
+}
+
 export interface Category {
   id: number
   name: string
@@ -23,6 +32,8 @@ export interface Category {
   monthly: boolean
   display_order: number
   archived: boolean
+  /** 这一项的常驻备忘：什么时候收、从谁的卡扣、合同哪天到期 */
+  note: string
 }
 
 export interface Entry {

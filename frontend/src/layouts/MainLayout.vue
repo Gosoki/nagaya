@@ -4,9 +4,10 @@
   <q-layout view="hHh lpR fFf">
     <!-- 顶栏固定在布局上，不放进页面里：账单三页之间切换时它不该跟着卸载重建，
          切页只换中间那块内容，上下两条都不动 -->
-    <q-header v-if="drafts.count || onBillTabs" class="bg-white text-dark">
+    <q-header v-if="drafts.count || onBillTabs || route.name === 'entries'" class="bg-white text-dark">
       <DraftBanner v-if="drafts.count" />
       <BillTabs v-if="onBillTabs" />
+      <EntriesTabs v-if="route.name === 'entries'" />
     </q-header>
 
     <q-page-container>
@@ -51,6 +52,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import BillTabs from 'src/components/BillTabs.vue'
+import EntriesTabs from 'src/components/EntriesTabs.vue'
 import DraftBanner from 'src/components/DraftBanner.vue'
 import { useAuth } from 'src/stores/auth'
 import { useBills } from 'src/stores/bills'

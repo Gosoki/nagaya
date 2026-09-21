@@ -90,6 +90,14 @@ export default {
     coversRange: '{from} 〜 {to}',
     noPeriod: '还没有账目',
   },
+  entries: { tabLedger: '流水', tabMemo: '备忘' },
+  memo: {
+    fixed: '固定费', others: '其他',
+    addItem: '加一条', namePlaceholder: '名字，比如 备用钥匙',
+    notePlaceholder: '什么时候收、从谁的卡扣、到期日…',
+    empty: '还没写过备忘。固定费那几项在上面，别的自己加。',
+    removeItem: '删掉这一条', removeAsk: '删掉「{name}」？', removed: '已删掉「{name}」',
+  },
   filter: {
     partial: '（只算了最近 500 笔）',
     kind: '类型', category: '分类', payer: '谁付的',

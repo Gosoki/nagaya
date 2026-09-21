@@ -20,7 +20,7 @@ from app.core.rules import RuleError
 from app.services.bill import BillError
 from app.core.split import SplitError
 from app.init_db import init_db
-from app.routers import auth, categories, entries, ledger, members, settings
+from app.routers import auth, categories, entries, ledger, members, memos, settings
 from app.services.ledger import LedgerError
 
 #: 这些错误是「用户输入不对」，不是 500。个别要用 409 让前端知道该刷新。
@@ -58,7 +58,7 @@ for error_type in (LedgerError, RuleError, SplitError, BillError):
         lambda request, exc: _error_response(exc),  # noqa: ARG005
     )
 
-for module in (auth, members, categories, entries, ledger, settings):
+for module in (auth, members, categories, entries, ledger, memos, settings):
     app.include_router(module.router)
 
 

@@ -4,6 +4,8 @@
      要删就点进那一笔，编辑页上有删除按钮（带确认）。 -->
 <template>
   <q-page class="q-pb-xl">
+    <MemoPanel v-if="memos.tab === 'memo'" />
+    <template v-else>
     <!-- 筛选条吸顶：列表很长，翻到一半想换个筛法不该先滚回去 -->
     <div class="filter-bar row items-center no-wrap q-gutter-xs q-px-md q-py-sm">
       <button v-for="f in filters" :key="f.key" class="chip" :class="{ on: f.value !== null }">
@@ -92,6 +94,7 @@
         </q-list>
       </template>
     </q-pull-to-refresh>
+    </template>
   </q-page>
 </template>
 
@@ -104,13 +107,16 @@ import { api } from 'src/api/client'
 import type { Entry, EntryKind, Statement } from 'src/api/types'
 import { jstDateOf } from 'src/date'
 import { formatYen } from 'src/i18n'
+import MemoPanel from 'src/components/MemoPanel.vue'
 import { useLedger } from 'src/stores/ledger'
+import { useMemos } from 'src/stores/memos'
 import { KIND_COLOR } from 'src/theme'
 import { useMeta } from 'src/stores/meta'
 
 const { t } = useI18n()
 const meta = useMeta()
 const ledger = useLedger()
+const memos = useMemos()
 
 const statements = ref<Statement[]>([])
 const router = useRouter()

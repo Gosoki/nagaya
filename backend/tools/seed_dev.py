@@ -24,7 +24,7 @@ from sqlmodel import Session, select
 from app.auth import hash_password
 from app.db import engine
 from app.init_db import init_db
-from app.models import Category, Entry, EntryKind, Member
+from app.models import Category, Entry, EntryKind, Member, Memo
 from app.services import settings as settings_svc
 from app.services.bill import cut_statement
 from app.services.ledger import create_entry
@@ -157,6 +157,23 @@ def main() -> None:
         add(EntryKind.expense, d(9, 10), 1_980, "日用品", "卫生纸", kan.id)
         add(EntryKind.expense, d(9, 14), 5_200, "伙食", "火锅食材", go.id)
         add(EntryKind.income, d(9, 20), -2_400, None, "乐天积分返现", kan.id)
+
+        # 备忘：固定费那几项各写一条，再加两条清单之外的
+        notes = {
+            "房租": "每月 1 号房东自动从 Go 的卡扣，别再手动转一次",
+            "水费": "隔月收：6 / 8 / 10 月。单月那期是空的，不是忘了填",
+            "网费": "合同 2027-03 到期，到期前一个月可以谈续约价",
+        }
+        for name, note in notes.items():
+            cat = cats[name]
+            cat.note = note
+            s.add(cat)
+        for i, (title, body) in enumerate([
+            ("备用钥匙", "玄关鞋柜第二层，铁盒里"),
+            ("垃圾袋", "买大号的，超市 B1 那家最便宜；周二周五早上收"),
+        ]):
+            s.add(Memo(title=title, body=body, display_order=i, created_by=go.id))
+        s.commit()
 
         total = len(s.exec(select(Entry)).all())
         print(f"建好 {len(PEOPLE)} 个成员（密码 {PASSWORD}）、4 张出过的账单、{total} 笔账")
