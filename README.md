@@ -57,7 +57,7 @@ npm run build && cd ../backend && ./run.sh
 ```bash
 cd backend  && .venv/bin/python -m pytest      # 算法 / 账本 / API
 cd frontend && npm test                        # 前端分摊引擎 vs 后端 fixture
-cd frontend && npx playwright test             # 375px 手机视口 E2E
+./run-e2e.sh                                   # 375px 手机视口 E2E（会先把开发库重置到基线）
 ```
 
 测试数量：后端 103 · 前端 27 · 手机 E2E 13。E2E 会真的往库里写，所以它自己负责收拾。

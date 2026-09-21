@@ -19,6 +19,8 @@ export interface Category {
   icon: string
   color: string
   default_rule_json: Record<string, unknown> | null
+  /** 每月一次的固定项：不在日常记账网格里，出账单时顺手填 */
+  monthly: boolean
   display_order: number
   archived: boolean
 }
@@ -80,4 +82,5 @@ export interface EntryPayload {
   rule?: Record<string, unknown> | null
   period_start?: string | null
   period_end?: string | null
+  bundle_id?: number | null
 }

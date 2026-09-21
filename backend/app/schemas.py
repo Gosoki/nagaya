@@ -48,6 +48,7 @@ class CategoryIn(SQLModel):
     icon: Optional[str] = None
     color: Optional[str] = None
     default_rule_json: Optional[dict[str, Any]] = None
+    monthly: Optional[bool] = None
     display_order: Optional[int] = None
     archived: Optional[bool] = None
 
@@ -58,6 +59,7 @@ class CategoryOut(SQLModel):
     icon: str
     color: str
     default_rule_json: Optional[dict[str, Any]]
+    monthly: bool
     display_order: int
     archived: bool
 

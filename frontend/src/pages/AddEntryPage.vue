@@ -23,7 +23,7 @@
     <!-- 分类：大色块网格，一点即选。转账没有分类 -->
     <div v-if="kind !== 'settlement'" class="cat-grid">
       <button
-        v-for="c in meta.categories"
+        v-for="c in meta.dailyCategories"
         :key="c.id"
         class="cat"
         :class="{ on: categoryId === c.id }"
@@ -33,6 +33,22 @@
         <q-icon :name="c.icon" size="22px" :color="categoryId === c.id ? 'white' : undefined" />
         <span>{{ c.name }}</span>
       </button>
+    </div>
+
+    <!-- 固定费入口：家賃/水电煤网随时可填，不用等到出账单那一步 -->
+    <div v-if="kind !== 'settlement'" class="q-px-md q-pb-xs">
+      <q-btn
+        class="full-width monthly-entry"
+        flat
+        no-caps
+        align="left"
+        icon="event_repeat"
+        :label="t('monthly.title')"
+        :to="{ name: 'monthly' }"
+      >
+        <q-space />
+        <q-icon name="chevron_right" size="18px" />
+      </q-btn>
     </div>
 
     <div class="q-px-md">
@@ -79,6 +95,7 @@
           :amount="signedAmount"
           :members="meta.activeMembers"
           :payer-id="payerId"
+          :seed-rule="selectedCategoryRule"
           @change="onSplitChange"
         />
       </q-expansion-item>
@@ -167,7 +184,19 @@ const canSave = computed(
     amount.value > 0 &&
     payerId.value !== null &&
     splitValid.value &&
+    // 支出/收入必须选分类。不选的话后端拿不到分类默认规则，会悄悄掉回「全员均分」——
+    // 一笔本该 1:1:0 的账就变成 1:1:1，而界面上没有任何提示。
+    (kind.value === 'settlement' || categoryId.value !== null) &&
     (kind.value !== 'settlement' || (toMemberId.value !== null && toMemberId.value !== payerId.value)),
+)
+
+/** 选中分类的默认分摊规则，交给编辑器当初始值 —— 否则预览和实际存下去的不是一回事 */
+const selectedCategoryRule = computed(
+  () =>
+    (meta.categories.find((c) => c.id === categoryId.value)?.default_rule_json as
+      | Record<string, unknown>
+      | null
+      | undefined) ?? null,
 )
 
 const splitSummary = computed(() => {
@@ -278,6 +307,14 @@ function reset(keepGoing: boolean) {
   transition: background 0.12s, color 0.12s;
 }
 .cat.on { color: #fff; }
+
+/* 固定费入口：做成一条低调的行，视觉上和上面的分类色块分开，避免误触 */
+.monthly-entry {
+  border: 1px dashed rgba(0, 0, 0, 0.18);
+  border-radius: 10px;
+  color: #666;
+  font-size: 13px;
+}
 
 .actions {
   position: fixed;

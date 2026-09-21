@@ -72,7 +72,9 @@ const grouped = computed(() => {
   return [...map.entries()].map(([date, items]) => ({ date, items }))
 })
 
-const categoryOf = (e: Entry) => meta.categories.find((c) => c.id === e.category_id)
+// 用含归档的反查表：归档过的分类，它名下的历史账目也要能显示原来的名字和图标
+const categoryOf = (e: Entry) =>
+  e.category_id === null ? undefined : meta.categoryById[e.category_id]
 const colorOf = (e: Entry) =>
   e.kind === 'settlement' ? '#78909c' : (categoryOf(e)?.color ?? '#90a4ae')
 const iconOf = (e: Entry) =>

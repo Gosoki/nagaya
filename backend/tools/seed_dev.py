@@ -18,7 +18,7 @@ from app.models import Category, EntryKind, Member
 from app.services import settings as settings_svc
 from app.services.ledger import create_entry
 
-PEOPLE = [("go", "GO", "#3d4785"), ("ken", "KEN", "#26a69a"), ("mei", "MEI", "#ef6c00")]
+PEOPLE = [("go", "Go", "#3d4785"), ("kan", "Kan", "#26a69a"), ("zen", "Zen", "#ef6c00")]
 PASSWORD = "dev12345"
 
 
@@ -41,7 +41,7 @@ def main() -> None:
         for m in members:
             s.refresh(m)
 
-        go, ken, mei = members
+        go, kan, zen = members
         settings_svc.set_(s, "default_payer_id", go.id)
 
         cats = {c.name: c for c in s.exec(select(Category))}
@@ -49,7 +49,7 @@ def main() -> None:
         # 家賃走固定金额（D12：房间大小不同，不是比例）
         rent.default_rule_json = {
             "mode": "exact",
-            "exact": {str(go.id): 45_000, str(ken.id): 40_000, str(mei.id): 35_000},
+            "exact": {str(go.id): 45_000, str(kan.id): 40_000, str(zen.id): 35_000},
         }
         s.add(rent)
         s.commit()
@@ -60,8 +60,8 @@ def main() -> None:
             (EntryKind.expense, today, 8_700, "電気", "", go.id),
             (EntryKind.expense, today, 4_200, "ガス", "", go.id),
             (EntryKind.expense, today, 12_000, "水道", "7〜8月分", go.id),
-            (EntryKind.expense, today, 5_500, "ネット", "", ken.id),
-            (EntryKind.expense, today, 1_380, "日用品", "トイレットペーパー", mei.id),
+            (EntryKind.expense, today, 5_500, "ネット", "", kan.id),
+            (EntryKind.expense, today, 1_380, "日用品", "トイレットペーパー", zen.id),
             (EntryKind.income, today, -3_000, "その他", "電気代キャッシュバック", go.id),
         ]
         for kind, on, amount, cat_name, title, payer in rows:

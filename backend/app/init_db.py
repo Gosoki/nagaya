@@ -14,15 +14,16 @@ from app.services.settings import seed_settings
 
 #: 默认分类。名字按日本账单上印的写 —— 抄数字的时候眼睛好对。
 #: 这些是**用户数据**，不做双语，面板里随时可以改名/增删（SPEC §7.5）。
+#: 第四列 monthly＝每月一次的固定项，不在日常记账那屏占按钮，出账单时顺手填。
 DEFAULT_CATEGORIES = [
-    ("家賃", "home", "#5c6bc0"),
-    ("電気", "bolt", "#ffa726"),
-    ("ガス", "local_fire_department", "#ef5350"),
-    ("水道", "water_drop", "#29b6f6"),
-    ("ネット", "wifi", "#26a69a"),
-    ("日用品", "shopping_basket", "#8d6e63"),
-    ("食費", "restaurant", "#66bb6a"),
-    ("その他", "more_horiz", "#78909c"),
+    ("家賃", "home", "#5c6bc0", True),
+    ("電気", "bolt", "#ffa726", True),
+    ("ガス", "local_fire_department", "#ef5350", True),
+    ("水道", "water_drop", "#29b6f6", True),
+    ("ネット", "wifi", "#26a69a", True),
+    ("日用品", "shopping_basket", "#8d6e63", False),
+    ("食費", "restaurant", "#66bb6a", False),
+    ("その他", "more_horiz", "#78909c", False),
 ]
 
 
@@ -31,8 +32,13 @@ def init_db() -> None:
     with Session(engine) as session:
         seed_settings(session)
         if not session.exec(select(Category)).first():
-            for order, (name, icon, color) in enumerate(DEFAULT_CATEGORIES):
-                session.add(Category(name=name, icon=icon, color=color, display_order=order))
+            for order, (name, icon, color, monthly) in enumerate(DEFAULT_CATEGORIES):
+                session.add(
+                    Category(
+                        name=name, icon=icon, color=color,
+                        monthly=monthly, display_order=order,
+                    )
+                )
             session.commit()
 
 

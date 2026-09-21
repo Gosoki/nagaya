@@ -108,6 +108,15 @@ const props = defineProps<{
   amount: number
   members: Member[]
   payerId: number | null
+  /**
+   * 初始规则（分类默认值或这笔账已有的规则）。
+   * 不给的话就是全员等权。
+   *
+   * 没有它会出一个很阴的 bug：选了「家賃」（默认是固定金额 45000/40000/35000）
+   * 展开分摊，看到的却是 1:1:1 —— 预览本身就是错的；更糟的是手一碰
+   * touched 就置位，保存时把显式的 1:1:1 传上去，把分类的固定金额规则顶掉了。
+   */
+  seedRule?: Record<string, unknown> | null
 }>()
 const emit = defineEmits<{
   /**
@@ -127,12 +136,41 @@ const exact = ref<Record<string, number>>({})
 const touched = ref(false)
 
 function resetWeights() {
-  weights.value = Object.fromEntries(props.members.map((m) => [String(m.id), 1]))
-  adjustments.value = {}
-  exact.value = Object.fromEntries(props.members.map((m) => [String(m.id), 0]))
+  const seed = props.seedRule ?? null
+  const seedMode = (seed?.mode as string) ?? 'ratio'
+  const keys = props.members.map((m) => String(m.id))
+
+  if (seed && seedMode === 'exact') {
+    const seeded = (seed.exact ?? {}) as Record<string, number>
+    mode.value = 'exact'
+    exact.value = Object.fromEntries(keys.map((k) => [k, Number(seeded[k] ?? 0)]))
+    weights.value = Object.fromEntries(keys.map((k) => [k, 1]))
+    adjustments.value = {}
+    return
+  }
+
+  mode.value = 'ratio'
+  const seededW = (seed?.weights ?? null) as Record<string, number> | null
+  const equal = Number(seed?.equal_weight ?? 1)
+  weights.value = Object.fromEntries(
+    keys.map((k) => [k, seededW ? Number(seededW[k] ?? 0) : equal]),
+  )
+  const seededAdj = (seed?.adjustments ?? {}) as Record<string, number>
+  adjustments.value = Object.fromEntries(
+    Object.entries(seededAdj).filter(([k, v]) => keys.includes(k) && Number(v) !== 0),
+  )
+  exact.value = Object.fromEntries(keys.map((k) => [k, 0]))
 }
 resetWeights()
 watch(() => props.members, resetWeights)
+// 换了分类 → 换一套默认规则重来。touched 一并清掉，否则会把上一个分类的规则带过去
+watch(
+  () => props.seedRule,
+  () => {
+    touched.value = false
+    resetWeights()
+  },
+)
 
 const rule = computed<Record<string, unknown>>(() =>
   mode.value === 'exact'

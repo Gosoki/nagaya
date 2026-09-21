@@ -14,7 +14,9 @@ export const router = createRouter({
         { path: '', name: 'add', component: () => import('src/pages/AddEntryPage.vue') },
         { path: 'balance', name: 'balance', component: () => import('src/pages/BalancePage.vue') },
         { path: 'entries', name: 'entries', component: () => import('src/pages/EntriesPage.vue') },
-        // 账单从余额页进，不占底部 Tab —— 三个已经够了，第四个会挤手指
+        // 固定费独立一屏：账单来了随时填，不用等到出账单
+        { path: 'monthly', name: 'monthly', component: () => import('src/pages/MonthlyPage.vue') },
+        // 账单从余额页 / 固定费页进，不占底部 Tab —— 三个已经够了，第四个会挤手指
         { path: 'bill/:periodId?', name: 'bill', component: () => import('src/pages/BillPage.vue') },
       ],
     },

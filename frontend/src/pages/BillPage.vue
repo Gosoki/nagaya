@@ -30,6 +30,13 @@
         <div v-if="coversText" class="text-caption text-grey-7 q-mt-xs">{{ coversText }}</div>
       </div>
 
+      <!-- 本期固定费：出账单时顺手把家賃/水电煤网填了，账单跟着重算 -->
+      <MonthlyFixed
+        :period-id="bill.period.id"
+        :readonly="bill.period.status === 'closed'"
+        @saved="load"
+      />
+
       <q-list separator>
         <q-item v-for="row in bill.members" :key="row.member_id">
           <q-item-section avatar>
@@ -113,6 +120,7 @@ import { useRoute } from 'vue-router'
 
 import { ApiError, api } from 'src/api/client'
 import type { Period } from 'src/api/types'
+import MonthlyFixed from 'src/components/MonthlyFixed.vue'
 import { formatYen } from 'src/i18n'
 import { useLedger } from 'src/stores/ledger'
 import { useMeta } from 'src/stores/meta'
@@ -161,7 +169,8 @@ const coversText = computed(() => {
   if (!bill.value?.covers.length) return ''
   return bill.value.covers
     .map((c) => {
-      const label = c.title || meta.categories.find((x) => x.id === c.category_id)?.name || ''
+      const label =
+        c.title || (c.category_id === null ? '' : (meta.categoryById[c.category_id]?.name ?? ''))
       // 日期压成 07/01〜08/31：标题多半已经写了「7〜8月分」，再跟一串完整日期太啰嗦
       const span = [c.period_start, c.period_end]
         .filter(Boolean)
@@ -174,7 +183,11 @@ const coversText = computed(() => {
 
 async function load() {
   const periods = await api.get<Period[]>('/api/periods')
-  const id = Number(route.params.periodId) || periods[0]?.id
+  // 默认打开**最早的未关账账期** —— 那才是「你现在欠着的那张账单」，
+  // 和转账挂靠的规则（挂到最早未关账期）是同一条。
+  // 用「最新的一期」会有个坑：误记一笔未来日期的账就能把账单页整个带跑。
+  const oldestOpen = [...periods].reverse().find((p) => p.status === 'open')
+  const id = Number(route.params.periodId) || oldestOpen?.id || periods[0]?.id
   if (!id) return
   bill.value = await api.get<Bill>(`/api/periods/${id}/bill`)
 }

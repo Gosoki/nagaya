@@ -60,3 +60,18 @@ def reopen_period(
 ) -> dict:
     period = bill_svc.reopen_period(session, _get_period(session, period_id), actor_id=member.id)
     return {"id": period.id, "label": period.label, "status": period.status.value}
+
+
+@router.get("/periods/{period_id}/monthly")
+def get_monthly(
+    period_id: int,
+    session: Session = Depends(get_session),
+    _: Member = Depends(current_member),
+) -> dict:
+    """账单页顶部那块「本期固定费」的数据。
+
+    没录的项给上期金额当**灰色参考**（hint），不是预填值 —— 见 monthly_rows 的说明。
+    保存仍然走普通的 POST/PATCH /api/entries，不另开批量端点：
+    批量端点会绕开已有的校验、审计和乐观锁，为一个录入界面另修一条路不划算。
+    """
+    return bill_svc.monthly_rows(session, _get_period(session, period_id))

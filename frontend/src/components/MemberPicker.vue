@@ -9,7 +9,7 @@
       :style="modelValue === m.id ? { background: m.color, borderColor: m.color } : {}"
       @click="emit('update:modelValue', m.id)"
     >
-      {{ m.display_name.slice(0, 2) }}
+      {{ short(m.display_name) }}
     </button>
   </div>
 </template>
@@ -19,6 +19,9 @@ import type { Member } from 'src/api/types'
 
 defineProps<{ modelValue: number | null; members: Member[] }>()
 const emit = defineEmits<{ 'update:modelValue': [number] }>()
+
+/** 名字短就整个显示。硬截两个字会把 Kan / Zen 变成「Ka」「Ze」，难看又难认 */
+const short = (name: string) => (name.length <= 4 ? name : name.slice(0, 3))
 </script>
 
 <style scoped>

@@ -85,6 +85,16 @@ class Category(SQLModel, table=True):
         sa_column=Column(JSON),
         description="该分类的默认分摊规则（SPEC §4.7 第 2 层）。留空则用全局默认",
     )
+    monthly: bool = Field(
+        default=False,
+        index=True,
+        description=(
+            "每月一次的固定项（家賃/電気/ガス/水道/ネット）。"
+            "这类不在日常「记一笔」的分类网格里占位置，改到出账单那一页顺手填。"
+            "**这是个用户可改的字段，不是代码里的名字列表** —— 以后加「NHK受信料」"
+            "也能自己勾上。"
+        ),
+    )
     display_order: int = Field(default=0, index=True)
     archived: bool = Field(default=False, index=True)
 

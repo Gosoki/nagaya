@@ -18,6 +18,38 @@ async function login(page: import('@playwright/test').Page) {
 }
 
 /**
+ * 每条用例跑完无条件清掉自己造的数据。
+ *
+ * 放在 afterEach 而不是测试体末尾：**断言一失败就跳过了收尾**，
+ * 残渣留在共享的开发库里，下一轮别的用例会读到它然后红在完全无关的地方
+ * （真发生过：离线草稿那条读到了另一条用例留下的 903）。
+ */
+test.afterEach(async ({ page }) => {
+  try {
+    const r = await page.request.post('/api/auth/login', {
+      data: { name: USER, password: PASSWORD },
+    })
+    if (!r.ok()) return
+    const headers = { Authorization: `Bearer ${(await r.json()).token}` }
+    const rows = await (await page.request.get('/api/entries?limit=200', { headers })).json()
+    for (const e of rows) {
+      if (typeof e.title === 'string' && e.title.startsWith('E2E')) {
+        await page.request.delete(`/api/entries/${e.id}`, { headers })
+      }
+    }
+    // 测试造出来的自定义固定项也要收拾（分类没有删除接口，归档掉即可）
+    const cats = await (await page.request.get('/api/categories', { headers })).json()
+    for (const c of cats) {
+      if (typeof c.name === 'string' && c.name.startsWith('E2E')) {
+        await page.request.patch(`/api/categories/${c.id}`, { headers, data: { archived: true } })
+      }
+    }
+  } catch {
+    /* 收尾失败不该把用例本身判红 */
+  }
+})
+
+/**
  * 删掉刚才那笔，别把开发库越跑越脏。
  * E2E 是会真的往库里写东西的，不收拾的话跑十遍就多十笔假账。
  */
@@ -48,7 +80,11 @@ test('登录页在 375px 下正常', async ({ page }) => {
 test('记一笔：默认页就是它，且主操作在拇指区', async ({ page }) => {
   await login(page)
   await expect(page).toHaveURL(/\/$/)                       // D16：PWA 打开即记一笔
-  await expect(page.getByRole('button', { name: '家賃' })).toBeVisible()
+  // 日常那屏只留天天会用的三个。家賃/電気/ガス/水道/ネット 一个月才碰一次，
+  // 已经挪到账单页顺手填，不在这里占按钮
+  await expect(page.locator('.cat')).toHaveCount(3)
+  await expect(page.getByRole('button', { name: '日用品' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '家賃' })).toHaveCount(0)
 
   // 主操作按钮必须在屏幕下半部
   const save = page.getByRole('button', { name: '保存', exact: true })
@@ -106,6 +142,8 @@ test('分摊编辑器：实时算钱、合计对得上', async ({ page }) => {
 test('固定金额模式：合计对不上就红字报差额且存不了', async ({ page }) => {
   await login(page)
   await page.locator('input.amount').fill('120000')
+  // 分类现在是必选的：不选的话后端拿不到分类默认规则，会悄悄掉回全员均分
+  await page.getByRole('button', { name: '日用品' }).click()
   await page.locator('.split-panel [role="button"]').first().click()
   await page.getByRole('button', { name: '固定金额' }).click()
 
@@ -275,4 +313,144 @@ test('完整闭环：出账单 → 点「已收到」→ 那个人归零', async
   await page.screenshot({ path: 'e2e/shots/12-bill-settled.png' })
 
   await deleteLatestEntry(page)      // 把这笔转账撤掉，别把开发库越跑越脏
+})
+
+test('账单页固定费：没录的项只给灰色参考，绝不预填成真值', async ({ page }) => {
+  await login(page)
+  const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
+
+  // 造一个新账期：新的一期里固定费都还没录，正是要验的状态
+  const made = await (await page.request.post('/api/entries', {
+    headers,
+    data: { kind: 'expense', date: '2026-11-05', amount_jpy: 903, payer_id: 1, category_id: 6, title: 'E2E' },
+  })).json()
+  const periods = await (await page.request.get('/api/periods', { headers })).json()
+  const fresh = periods.find((x: { label: string }) => x.label === '2026-11')
+
+  await page.goto(`/bill/${fresh.id}`)
+  await expect(page.getByText('本期固定费')).toBeVisible()
+
+  const boxes = await page.locator('.amount-input').evaluateAll((els) =>
+    (els as HTMLInputElement[]).map((e) => ({ value: e.value, placeholder: e.placeholder })),
+  )
+  expect(boxes.length, '固定费行没渲染出来').toBeGreaterThan(0)
+  // **最要命的一条**：上期金额只能待在 placeholder 里。
+  // 一旦它变成 value，某个月忘了改就会带着上月的电费把账单发出去，而且谁都看不出来。
+  for (const b of boxes) {
+    expect(b.value, '上期金额被预填成真值了').toBe('')
+  }
+  expect(boxes.some((b) => b.placeholder !== ''), '一个参考值都没有，说明 hint 没接上').toBe(true)
+  await expect(page.getByRole('button', { name: '没有改动' })).toBeDisabled()
+  await page.screenshot({ path: 'e2e/shots/13-monthly-hint.png' })
+
+  await page.request.delete(`/api/entries/${made.id}`, { headers })
+})
+
+test('账单页固定费：填一项存下去，账单跟着涨且留在这张账单的期里', async ({ page }) => {
+  await login(page)
+  const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
+
+  const made = await (await page.request.post('/api/entries', {
+    headers,
+    data: { kind: 'expense', date: '2026-12-05', amount_jpy: 904, payer_id: 1, category_id: 6, title: 'E2E' },
+  })).json()
+  const periods = await (await page.request.get('/api/periods', { headers })).json()
+  const dec = periods.find((x: { label: string }) => x.label === '2026-12')
+
+  await page.goto(`/bill/${dec.id}`)
+  await expect(page.getByText('本期固定费')).toBeVisible()
+  // 填「電気」而不是第一行的「家賃」：家賃的分类规则是固定金额 45000/40000/35000，
+  // 总额一改就和每人金额对不上，会被正确拦下 —— 那是另一条用例要验的事
+  const denki = page.locator('.q-expansion-item').filter({ hasText: '電気' }).locator('.amount-input')
+  await denki.fill('9100')
+  await page.getByRole('button', { name: /保存 \d+ 项/ }).click()
+  await expect(page.getByRole('button', { name: '没有改动' })).toBeVisible({ timeout: 10_000 })
+
+  // 账单总额涨了 —— 说明这笔确实算进了**这一张**账单，没跑到别的期去。
+  // 归期只看 entry.date，用「今天」当默认日期就会把它甩到别的月，且零报错。
+  const bill = await (await page.request.get(`/api/periods/${dec.id}/bill`, { headers })).json()
+  expect(bill.total_expense).toBe(904 + 9100)
+
+  for (const e of await (await page.request.get(`/api/entries?period_id=${dec.id}`, { headers })).json()) {
+    await page.request.delete(`/api/entries/${e.id}`, { headers })
+  }
+})
+
+test('归档一个分类，它名下的历史账目仍然显示原来的名字', async ({ page }) => {
+  await login(page)
+  const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
+
+  const cats = await (await page.request.get('/api/categories', { headers })).json()
+  const target = cats.find((c: { name: string }) => c.name === '食費')
+  const made = await (await page.request.post('/api/entries', {
+    headers,
+    data: { kind: 'expense', date: '2026-09-15', amount_jpy: 905, payer_id: 1, category_id: target.id, title: '' },
+  })).json()
+
+  await page.request.patch(`/api/categories/${target.id}`, { headers, data: { archived: true } })
+  await page.goto('/entries')
+  // 归档之后前端若只拿未归档列表反查名字，这条会掉成默认标题和默认图标
+  await expect(page.getByText('食費').first()).toBeVisible()
+
+  await page.request.patch(`/api/categories/${target.id}`, { headers, data: { archived: false } })
+  await page.request.delete(`/api/entries/${made.id}`, { headers })
+})
+
+test('账单页固定费：固定金额分类改了总额没改分摊，必须拦住并说出差多少', async ({ page }) => {
+  await login(page)
+  const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
+  const made = await (await page.request.post('/api/entries', {
+    headers,
+    data: { kind: 'expense', date: '2027-01-05', amount_jpy: 906, payer_id: 1, category_id: 6, title: 'E2E' },
+  })).json()
+  const periods = await (await page.request.get('/api/periods', { headers })).json()
+  const jan = periods.find((x: { label: string }) => x.label === '2027-01')
+
+  await page.goto(`/bill/${jan.id}`)
+  await expect(page.getByText('本期固定费')).toBeVisible()
+  // 家賃的分类规则是固定金额 45000/40000/35000。总额改成 30000 而不动每人金额，
+  // 合计就对不上了 —— 必须当场拦住，而且要说清差多少，不能只说一句「不平」
+  const yachin = page.locator('.q-expansion-item').filter({ hasText: '家賃' }).locator('.amount-input')
+  await yachin.fill('30000')
+  await page.getByRole('button', { name: /保存 \d+ 项/ }).click()
+  const note = page.locator('.q-notification')
+  await expect(note).toContainText('家賃')
+  await expect(note).toContainText('90,000')      // 30000 − 120000
+  expect((await (await page.request.get(`/api/periods/${jan.id}/bill`, { headers })).json()).total_expense)
+    .toBe(906)                                     // 没存进去
+
+  await page.request.delete(`/api/entries/${made.id}`, { headers })
+})
+
+test('固定费不必等到出账单：记一笔那屏就有入口', async ({ page }) => {
+  await login(page)
+  await page.getByText('本期固定费').click()
+  await expect(page).toHaveURL(/\/monthly$/)
+  await expect(page.getByText('本期固定费')).toBeVisible()
+  await expect(page.locator('.amount-input').first()).toBeVisible()
+  // 这一屏自己就能通到账单，不用绕回余额页
+  await expect(page.getByText('出账单')).toBeVisible()
+  await expectNoHorizontalScroll(page)
+  await page.screenshot({ path: 'e2e/shots/14-monthly-standalone.png' })
+})
+
+test('自己加一项固定费，它就留在这张表里', async ({ page }) => {
+  await login(page)
+  await page.goto('/monthly')
+  await expect(page.locator('.amount-input').first()).toBeVisible()
+  const before = await page.locator('.amount-input').count()
+
+  await page.locator('.new-name').fill('E2E受信料')
+  await page.getByRole('button', { name: '加一项固定费' }).click()
+  await expect(page.locator('.q-notification')).toContainText('下个月')
+  await expect(page.locator('.amount-input')).toHaveCount(before + 1)
+  await expect(page.getByText('E2E受信料')).toBeVisible()
+
+  // 它是**固定项**，不是一次性的：刷新之后还在
+  await page.reload()
+  await expect(page.getByText('E2E受信料')).toBeVisible()
+  // 而且不该跑到日常记账那屏去占按钮
+  await page.goto('/')
+  await expect(page.locator('.cat')).toHaveCount(3)
+  await page.screenshot({ path: 'e2e/shots/15-custom-monthly.png' })
 })
