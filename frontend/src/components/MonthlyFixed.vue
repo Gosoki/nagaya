@@ -27,6 +27,9 @@
           {{ busy ? t('monthly.saving') : dirtyCount ? t('monthly.unsaved', { n: dirtyCount }) : t('monthly.autoSaved') }}
         </div>
       </q-item-section>
+      <q-item-section side class="amount text-grey-9">{{ formatYen(total) }}</q-item-section>
+      <!-- 占位：已出账那页这里是个 chevron。留出同样宽度，两页的合计才对齐 -->
+      <q-item-section side><q-icon name="chevron_right" size="18px" class="invisible" /></q-item-section>
     </q-item>
 
     <q-list separator>
@@ -44,10 +47,14 @@
               <q-icon :name="row.icon" size="16px" />
             </q-avatar>
           </q-item-section>
+          <!-- 状态字（参考 8/31 出账 / 有 2 笔 / 会删掉）写在名字**旁边**，不另起一行：
+               另起一行的话有状态的行比没状态的高一截，一列高高低低 -->
           <q-item-section>
-            <q-item-label>{{ row.name }}</q-item-label>
-            <q-item-label v-if="stateText(row)" caption :class="stateClass(row)">
-              {{ stateText(row) }}
+            <q-item-label class="row items-baseline no-wrap">
+              <span>{{ row.name }}</span>
+              <span v-if="stateText(row)" class="state ellipsis" :class="stateClass(row)">
+                {{ stateText(row) }}
+              </span>
             </q-item-label>
           </q-item-section>
           <q-item-section side>
@@ -84,14 +91,6 @@
           />
         </div>
       </q-expansion-item>
-
-      <!-- 合计收在列表最后一行，和已出账那页同一个位置、同一套尺寸 -->
-      <q-item dense class="fee-total">
-        <q-item-section class="text-grey-7">{{ t('bill.total') }}</q-item-section>
-        <q-item-section side class="amount text-weight-medium text-grey-9">
-          {{ formatYen(total) }}
-        </q-item-section>
-      </q-item>
     </q-list>
 
     <!--
@@ -421,10 +420,8 @@ defineExpose({ reload: load })
 </script>
 
 <style scoped>
-/* 合计这一行也吃固定费那套尺寸：行高、金额字号、金额右距都跟上面每一行一样。
-   它在 q-expansion-item 之外，所以得自己写一遍右距（那些行是被展开箭头顶出来的） */
-.fee-total { min-height: var(--nagaya-fee-row-h); padding-right: var(--nagaya-fee-amount-gap); }
-.fee-total .amount { font-size: var(--nagaya-fee-amount-fs); font-variant-numeric: tabular-nums; }
+/* 标题条上的合计：跟下面每一行的金额同字号、同一条竖线 */
+.section-head .amount { font-size: var(--nagaya-fee-amount-fs); font-variant-numeric: tabular-nums; }
 /* 金额列对齐：右边距 ＝ 行内边距 16 + 展开箭头 24 + 这一格的左内边距。
    要凑到 --nagaya-fee-amount-gap，这里就该留下减掉那 40px 的部分 */
 .wrap :deep(.q-expansion-item .q-item__section--side:last-child) {
@@ -453,7 +450,12 @@ defineExpose({ reload: load })
 .amount-input::placeholder { color: #c8c8c8; }
 .amount-input.dirty { border-bottom-color: var(--q-primary); font-weight: 600; }
 .amount-input.to-delete { color: #c10015; text-decoration: line-through; }
-.add-row { border-top: 1px solid rgba(0, 0, 0, 0.06); }
+/* 块尾那一行。已出账那页是同高的空占位，高度写在同一个变量里 */
+.state { font-size: 12px; margin-left: 6px; }
+.add-row {
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  min-height: var(--nagaya-fee-foot-h);
+}
 .new-name {
   border: none;
   outline: none;

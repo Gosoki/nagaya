@@ -65,7 +65,8 @@
         </q-list>
 
         <q-list separator>
-          <q-item v-for="e in group.items" :key="e.id" clickable @click="openEntry(e)">
+          <!-- .entry-row 是 E2E 的锚点：数账目行时不能把「出了一次账单」那种行算进来 -->
+          <q-item v-for="e in group.items" :key="e.id" class="entry-row" clickable @click="openEntry(e)">
               <q-item-section avatar>
                 <q-avatar size="30px" :style="{ background: colorOf(e) }" text-color="white">
                   <q-icon :name="iconOf(e)" size="16px" />

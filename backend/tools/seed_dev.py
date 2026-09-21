@@ -8,7 +8,7 @@
   * 5〜8 月各出过一张账单，9 月是当前草稿
   * 5/6/7 月三张钱都转完了 → 「已结清」；8 月那张只转了一笔 → 一个勾一个空
   * 固定费的日期一律是出账日（D30），日常开销保留真实日子
-  * 水费两个月一收，只出现在 6 月和 8 月（备注里写着是哪两个月的）
+  * 水费两个月一收，只出现在 6 月和 8 月
   * 当前草稿的 燃气 / 水费 空着 → 面板给灰色参考值
   * 一笔带调整额（Zen 少担 1,000）、一笔 1:1:0（Zen 出差没参与）
 """
@@ -99,10 +99,14 @@ def main() -> None:
                 title=title, **kw
             )
 
-        def fixed(month: int, denki: int, gasu: int, *, denki_note: str = "") -> None:
-            """这个月的固定费。日期随便填，出账时会统一盖成出账日（D30）。"""
+        def fixed(month: int, denki: int, gasu: int) -> None:
+            """这个月的固定费。日期随便填，出账时会统一盖成出账日（D30）。
+
+            **固定费不带备注**：那一屏只有金额一个输入框，没有填备注的地方，
+            示例数据里写了备注就等于演示一个界面上做不到的状态。
+            """
             add(EntryKind.expense, d(month, 1), 120_000, "房租", "", go.id)
-            add(EntryKind.expense, d(month, 25), denki, "电费", denki_note, go.id)
+            add(EntryKind.expense, d(month, 25), denki, "电费", "", go.id)
             add(EntryKind.expense, d(month, 25), gasu, "燃气", "", go.id)
             add(EntryKind.expense, d(month, 25), 5_500, "网费", "", kan.id)
 
@@ -116,7 +120,7 @@ def main() -> None:
 
         # ---------------------------------------------------------------- 6 月
         fixed(6, denki=8_900, gasu=3_900)
-        add(EntryKind.expense, d(6, 25), 11_800, "水费", "4〜5月", go.id)
+        add(EntryKind.expense, d(6, 25), 11_800, "水费", "", go.id)
         add(EntryKind.expense, d(6, 8), 1_780, "日用品", "垃圾袋和保鲜膜", kan.id)
         add(EntryKind.expense, d(6, 15), 6_400, "伙食", "烧烤", go.id, rule=zen_less)
         add(EntryKind.income, d(6, 21), -4_500, None, "电费返现", go.id)
@@ -132,8 +136,8 @@ def main() -> None:
         settle_plan(s, july, on=d(8, 3), at=utc(8, 3), how_many=None)
 
         # ---------------------------------------------------------------- 8 月
-        fixed(8, denki=10_400, gasu=3_200, denki_note="空调电费")
-        add(EntryKind.expense, d(8, 25), 12_600, "水费", "6〜7月", go.id)
+        fixed(8, denki=10_400, gasu=3_200)
+        add(EntryKind.expense, d(8, 25), 12_600, "水费", "", go.id)
         add(EntryKind.expense, d(8, 12), 8_900, "伙食", "中元假期烤肉", go.id, rule=zen_less)
         add(EntryKind.expense, d(8, 20), 3_240, "日用品", "洗手液等", zen.id)
         add(EntryKind.income, d(8, 25), -3_000, None, "电费返现", go.id)

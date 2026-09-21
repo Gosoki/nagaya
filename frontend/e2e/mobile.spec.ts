@@ -779,27 +779,28 @@ test('账目筛选：按分类/付款人筛，并给出筛选后的合计', asyn
   await login(page)
   await page.goto('/entries')
   await expect(page.locator('.filter-bar')).toBeVisible()
-  // 等两拨数据都回来再数：账目和「出了一次账单」那几行是两个请求，
-  // 只等前者的话初始数会少几行，最后清除筛选时对不上
-  await expect(page.locator('.q-page .q-item').first()).toBeVisible()
-  await expect(page.locator('.statement-row').first()).toBeVisible()
-  // 必须限定在 .q-page 内：筛选菜单是 portal 到 body 上的，
-  // 开过一次就留在 DOM 里，用全局 .q-item 数会把菜单项也算进来
-  const rows = () => page.locator('.q-page .q-item').count()
-  const all = await rows()
+  // 只数账目行。原来数的是 .q-page 里所有 .q-item，混着「出了一次账单」那种行 ——
+  // 而那种行筛选时会整体消失，于是「筛完更少」有一部分是它们没了造成的，
+  // 筛选真坏了也照样绿
+  const rows = page.locator('.entry-row')
+  const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
+  const all = (await (await page.request.get('/api/entries?limit=500', { headers })).json()).length
   expect(all, '种子数据里该有一堆账目').toBeGreaterThan(10)
+  // 跟后端对一次数，而且用会重试的 toHaveCount：两拨数据是两个请求，
+  // 光等「第一行出现」就开始数，会数到一半就往下走（真发生过，数到 5）
+  await expect(rows).toHaveCount(all)
 
   // 按分类筛
   await page.locator('.chip').nth(1).click()
   await page.locator('.q-menu .q-item').filter({ hasText: '伙食' }).first().click()
   await expect(page.locator('.filter-bar')).toContainText('合计')
-  const byCat = await rows()
+  const byCat = await rows.count()
   expect(byCat, '筛完应当比全部少').toBeLessThan(all)
 
   // 再叠一个付款人：交集，只会更少
   await page.locator('.chip').nth(2).click()
   await page.locator('.q-menu .q-item').filter({ hasText: 'Kan' }).first().click()
-  expect(await rows(), '两个条件是交集').toBeLessThanOrEqual(byCat)
+  expect(await rows.count(), '两个条件是交集').toBeLessThanOrEqual(byCat)
 
   // 筛选状态下不该混进「出了一次账单」那种行 —— 它不是账目
   await expect(page.locator('.statement-row')).toHaveCount(0)
@@ -807,7 +808,7 @@ test('账目筛选：按分类/付款人筛，并给出筛选后的合计', asyn
   // 清除
   await page.locator('.filter-bar .q-btn').click()
   await expect(page.locator('.filter-bar')).not.toContainText('合计')
-  expect(await rows()).toBe(all)
+  await expect(rows).toHaveCount(all)
 })
 
 test('点头像把人排除出这笔，再点恢复（原来是几就还回几）', async ({ page }) => {

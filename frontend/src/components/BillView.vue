@@ -74,6 +74,7 @@
       <div v-else class="bill-section">
         <q-item clickable dense class="section-head" @click="openMonthly">
           <q-item-section>{{ t('monthly.title') }}</q-item-section>
+          <q-item-section side class="amount text-grey-9">{{ formatYen(monthlyTotal) }}</q-item-section>
           <q-item-section side><q-icon name="chevron_right" color="grey-5" size="18px" /></q-item-section>
         </q-item>
         <!-- 行的尺寸照着未出账那页的可编辑面板来：一样的行高、一样的金额字号、
@@ -85,22 +86,17 @@
                 <q-icon :name="iconOfEntry(e)" size="16px" />
               </q-avatar>
             </q-item-section>
+            <!-- 只写分类名，不写备注：固定费这一屏（可编辑面板那边）根本没有
+                 填备注的入口，这里却显示一条，等于凭空冒出个改不了的字段 -->
             <q-item-section>
               <q-item-label>{{ categoryOfEntry(e)?.name ?? labelOfEntry(e) }}</q-item-label>
-              <q-item-label v-if="e.title" caption>{{ e.title }}</q-item-label>
             </q-item-section>
             <q-item-section side class="amount text-grey-9">{{ formatYen(e.amount_jpy) }}</q-item-section>
           </q-item>
-
-          <!-- 未出账那页这个位置是「加一项固定费」。已出的账单加不了东西，
-               这一格就用来收尾：一行合计，两页的块于是一样高、一样收口 -->
-          <q-item dense class="fee-total">
-            <q-item-section class="text-grey-7">{{ t('bill.total') }}</q-item-section>
-            <q-item-section side class="amount text-weight-medium text-grey-9">
-              {{ formatYen(monthlyTotal) }}
-            </q-item-section>
-          </q-item>
         </q-list>
+        <!-- 未出账那页这个位置是「加一项固定费」。已出的账单加不了东西，
+             拿一行同高的空占位顶上 —— 两页的这一块于是一样高、一样收口 -->
+        <div v-if="monthlyEntries.length" class="fee-foot" aria-hidden="true"></div>
         <div v-else class="text-caption text-grey-6 q-px-md q-pb-md">{{ t('monthly.noneBilled') }}</div>
       </div>
 
@@ -539,11 +535,16 @@ function doCut() {
   min-height: var(--nagaya-fee-row-h);
   padding-right: var(--nagaya-fee-amount-gap);
 }
-.monthly-list .amount {
+.monthly-list .amount,
+.section-head .amount {
   font-size: var(--nagaya-fee-amount-fs);
   font-variant-numeric: tabular-nums;
 }
-.monthly-list .fee-total .q-item__section--main { font-size: 14px; }
+/* 块尾那一行的占位：高度和边框都照着未出账那页的「加一项固定费」来 */
+.fee-foot {
+  min-height: var(--nagaya-fee-foot-h);
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
 /* 自己那笔：这一屏最该一眼看到的东西 */
 .mine { font-size: 17px; font-weight: 600; }
 .mine.owe { color: #c10015; }
