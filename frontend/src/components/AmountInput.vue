@@ -1,7 +1,7 @@
 <!-- 金额输入：大字号、居中、唤起系统数字键盘。
      日元没有小数，所以 inputmode="numeric" 就够 —— 不需要自绘小键盘。 -->
 <template>
-  <div class="amount-wrap" @click="focus">
+  <div class="amount-wrap" :style="{ color: props.color }" @click="focus">
     <span class="sym">{{ symbol }}</span>
     <input
       ref="el"
@@ -22,7 +22,7 @@
 import { computed, nextTick, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-const props = defineProps<{ modelValue: number }>()
+const props = defineProps<{ modelValue: number; color?: string }>()
 const emit = defineEmits<{ 'update:modelValue': [number] }>()
 
 const { locale } = useI18n()
@@ -71,9 +71,10 @@ defineExpose({ focus })
 }
 .sym {
   font-size: 26px;
-  color: #9e9e9e;
+  opacity: 0.5;                 /* 跟着金额一个色，只是淡一档 */
 }
 .amount {
+  color: inherit;
   font-size: 46px;
   font-weight: 600;
   line-height: 1.1;

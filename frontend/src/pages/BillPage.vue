@@ -284,6 +284,7 @@ import MonthlyFixed from 'src/components/MonthlyFixed.vue'
 import { formatYen } from 'src/i18n'
 import { useAuth } from 'src/stores/auth'
 import { useLedger } from 'src/stores/ledger'
+import { KIND_COLOR } from 'src/theme'
 import { useMeta } from 'src/stores/meta'
 
 interface BillRow {
@@ -440,7 +441,7 @@ const categoryOfEntry = (e: Entry) =>
   e.category_id === null ? undefined : meta.categoryById[e.category_id]
 // 收入没有分类，得有自己的图标色，否则跟「分类丢了」长得一模一样
 const colorOfEntry = (e: Entry) =>
-  e.kind === 'income' ? '#43a047' : (categoryOfEntry(e)?.color ?? '#90a4ae')
+  e.kind === 'expense' ? (categoryOfEntry(e)?.color ?? '#90a4ae') : KIND_COLOR[e.kind]
 const iconOfEntry = (e: Entry) =>
   e.kind === 'income' ? 'savings' : (categoryOfEntry(e)?.icon ?? 'receipt_long')
 const labelOfEntry = (e: Entry) => e.title || categoryOfEntry(e)?.name || t(`kind.${e.kind}`)

@@ -15,6 +15,7 @@ export default {
     amount: '金額', category: 'カテゴリ', payer: '支払者', receiver: '受取者',
     to: '送金先', title: 'メモ（任意）', note: '備考', date: '日付',
     split: '分担', saved: '記帳しました',
+    splitEven: '均等', splitEvenAmong: '{names} で均等',
     saveAndNext: '保存して続けて記帳', save: '保存',
     emptyAmount: '金額を入力してください',
     coversPeriod: '請求対象期間', coversHint: '水道代など数か月分をまとめて払う場合に記入します',

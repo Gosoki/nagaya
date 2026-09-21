@@ -14,7 +14,7 @@
       spread
       no-caps
       unelevated
-      toggle-color="primary"
+      :toggle-color="props.color ?? 'primary'"
       class="q-mb-md mode-toggle"
       :options="[
         { label: t('split.ratio'), value: 'ratio' },
@@ -122,6 +122,8 @@ const props = defineProps<{
    * touched 就置位，保存时把显式的 1:1:1 传上去，把分类的固定金额规则顶掉了。
    */
   seedRule?: Record<string, unknown> | null
+  /** 段选中态的颜色，跟着账目类型走（支出蓝 / 收入绿 / 转账黄）。固定费面板不传，就是蓝 */
+  color?: string
 }>()
 const emit = defineEmits<{
   /**
@@ -290,7 +292,13 @@ defineExpose({
 
 /* 375px 下的列宽预算：左右各 16 padding → 343 可用。
    比例改成数字框之后不用再塞两个 40px 的按钮，省出来的宽度给调整列。 */
-.head-row { padding-bottom: 2px; }
+.head-row {
+  padding-bottom: 4px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);   /* 把表头和它管的那几列绑在一起 */
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
 .name-col { min-width: 0; }
 .weight-col { width: 62px; padding-right: 12px; }
 .adj-col { width: 92px; }

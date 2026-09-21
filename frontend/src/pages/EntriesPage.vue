@@ -53,7 +53,7 @@
 
               <q-item-section>
                 <q-item-label>{{ labelOf(e) }}</q-item-label>
-                <q-item-label caption>
+                <q-item-label caption class="ellipsis">
                   {{ meta.byId[e.payer_id]?.display_name }}
                   <span v-if="e.kind === 'settlement'"> → {{ meta.byId[e.to_member_id ?? 0]?.display_name }}</span>
                   <span v-else> · {{ sharesText(e) }}</span>
@@ -82,6 +82,7 @@ import { api } from 'src/api/client'
 import type { Entry, Statement } from 'src/api/types'
 import { formatYen } from 'src/i18n'
 import { useLedger } from 'src/stores/ledger'
+import { KIND_COLOR } from 'src/theme'
 import { useMeta } from 'src/stores/meta'
 
 const { t } = useI18n()
@@ -143,19 +144,30 @@ const grouped = computed(() => {
 const categoryOf = (e: Entry) =>
   e.category_id === null ? undefined : meta.categoryById[e.category_id]
 const colorOf = (e: Entry) =>
-  e.kind === 'settlement' ? '#78909c' : e.kind === 'income' ? '#43a047' : (categoryOf(e)?.color ?? '#90a4ae')
+  e.kind === 'expense' ? (categoryOf(e)?.color ?? '#90a4ae') : KIND_COLOR[e.kind]
 const iconOf = (e: Entry) =>
   e.kind === 'settlement' ? 'swap_horiz' : e.kind === 'income' ? 'savings' : (categoryOf(e)?.icon ?? 'receipt_long')
 
 const labelOf = (e: Entry) =>
   e.title || categoryOf(e)?.name || t(`kind.${e.kind}`)
 
-/** 分摊摘要：只显示实际分到钱的人，权重 0 的不占地方 */
+/**
+ * 分摊摘要。**绝大多数账就是均分**，把「Go ¥1,833 / Kan ¥1,834 / Zen ¥1,833」
+ * 原样列出来，每一行都被撑成两行，还把真正该被看见的那几笔特殊分摊淹掉了。
+ * 所以均分只说一句「均分」，分得不一样才把数字摆出来。
+ */
 function sharesText(e: Entry): string {
-  return Object.entries(e.shares)
-    .filter(([, v]) => v !== 0)
-    .map(([id, v]) => `${meta.byId[Number(id)]?.display_name ?? id} ${formatYen(v)}`)
-    .join(' / ')
+  const rows = Object.entries(e.shares).filter(([, v]) => v !== 0)
+  if (!rows.length) return ''
+  const names = rows.map(([id]) => meta.byId[Number(id)]?.display_name ?? id)
+  const values = rows.map(([, v]) => v)
+  // 除不尽时余数落在某个人头上，差 1 円 —— 那仍然是均分
+  if (Math.max(...values) - Math.min(...values) <= 1) {
+    return rows.length === meta.activeMembers.length
+      ? t('entry.splitEven')
+      : t('entry.splitEvenAmong', { names: names.join(' / ') })
+  }
+  return rows.map((r, i) => `${names[i]} ${formatYen(r[1])}`).join(' / ')
 }
 
 async function onRefresh(done: () => void) {

@@ -19,7 +19,7 @@
     <q-btn-toggle
       v-model="kind"
       spread no-caps unelevated
-      toggle-color="primary"
+      :toggle-color="kindPalette"
       class="kind-toggle"
       :options="[
         { label: t('kind.expense'), value: 'expense' },
@@ -28,7 +28,7 @@
       ]"
     />
 
-    <AmountInput ref="amountEl" v-model="amount" />
+    <AmountInput ref="amountEl" v-model="amount" :color="kindInk" />
 
     <!-- 分类：大色块网格，一点即选。只有支出分类；收入和转账都没有 -->
     <div
@@ -97,6 +97,7 @@
           :amount="signedAmount"
           :members="meta.activeMembers"
           :payer-id="payerId"
+          :color="kindPalette"
           :seed-rule="ownRule ?? selectedCategoryRule"
           @change="onSplitChange"
         />
@@ -111,7 +112,7 @@
       <div class="row">
       <q-btn
         class="col"
-        color="primary"
+        :color="kindPalette"
         size="lg"
         no-caps
         unelevated
@@ -123,7 +124,7 @@
       <q-btn
         v-if="editingId === null"
         class="col-auto q-ml-sm"
-        color="primary"
+        :color="kindPalette"
         size="lg"
         no-caps
         outline
@@ -160,6 +161,7 @@ import AmountInput from 'src/components/AmountInput.vue'
 import MemberPicker from 'src/components/MemberPicker.vue'
 import SplitEditor from 'src/components/SplitEditor.vue'
 import { useAuth } from 'src/stores/auth'
+import { KIND_COLOR, KIND_PALETTE } from 'src/theme'
 import { useDrafts } from 'src/stores/drafts'
 import { useLedger } from 'src/stores/ledger'
 import { useMeta } from 'src/stores/meta'
@@ -199,6 +201,11 @@ const splitEl = ref<InstanceType<typeof SplitEditor> | null>(null)
 const gridCategories = computed(() =>
   editingId.value === null ? meta.dailyCategories : meta.categories.filter((c) => !c.archived),
 )
+
+/** 支出蓝 / 收入绿 / 转账黄 —— 金额、主按钮、段选中态都跟着它走，
+    一眼就知道自己在记哪种账，不用回头看顶上选中的是哪个 */
+const kindPalette = computed(() => KIND_PALETTE[kind.value])
+const kindInk = computed(() => KIND_COLOR[kind.value])
 
 /** 收入在库里存负数（SPEC §5）；界面上只让人填正数，符号这里加 */
 const signedAmount = computed(() => (kind.value === 'income' ? -amount.value : amount.value))
