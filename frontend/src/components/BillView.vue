@@ -20,9 +20,43 @@
     <template v-if="bill">
       <div class="head bill-section q-pa-md">
         <div class="row items-baseline">
-          <div class="text-subtitle1 text-weight-medium">
-            {{ bill.is_draft ? t('bill.draft') : bill.label }}
-          </div>
+          <!-- 出过的单子：名字就是翻页入口。原来「以前」单独占一个页签，
+               而「挑某个月」才是常态、「逐张翻」很少 —— 并进来之后
+               这一屏永远是一张账单，形状不再变来变去 -->
+          <button v-if="!bill.is_draft" class="pick text-subtitle1 text-weight-medium">
+            {{ bill.label }}
+            <q-icon name="expand_more" size="20px" class="text-grey-6" />
+            <q-menu anchor="bottom left" self="top left" max-height="60vh">
+              <q-list separator style="min-width: 260px">
+                <q-item
+                  v-for="st in bills.statements ?? []"
+                  :key="st.id"
+                  v-close-popup
+                  clickable
+                  :class="{ 'bg-blue-1': st.id === bill.statement_id }"
+                  @click="pickStatement(st.id)"
+                >
+                  <q-item-section>
+                    <q-item-label>{{ st.label }}</q-item-label>
+                    <q-item-label caption>
+                      {{ t('bill.coversRange', { from: st.covers_from, to: st.covers_to }) }}
+                    </q-item-label>
+                  </q-item-section>
+                  <q-item-section side>
+                    <div class="text-weight-medium text-grey-9">{{ formatYen(st.total_expense) }}</div>
+                    <q-badge
+                      v-if="st.settled"
+                      color="positive"
+                      class="q-mt-xs"
+                      :label="t('bill.settledBadge')"
+                    />
+                    <div v-else class="text-caption text-grey-6 q-mt-xs">{{ t('bill.unsettled') }}</div>
+                  </q-item-section>
+                </q-item>
+              </q-list>
+            </q-menu>
+          </button>
+          <div v-else class="text-subtitle1 text-weight-medium">{{ t('bill.draft') }}</div>
           <q-space />
           <div class="text-caption text-grey-6 q-mr-xs">{{ t('bill.total') }}</div>
           <div class="text-h6">{{ formatYen(bill.total_expense) }}</div>
@@ -357,6 +391,11 @@ const dueText = computed(() => {
 /** 改完数据强制重取这一张。进页面用的是 ensure（缓存先上屏） */
 const load = () => bills.reload(viewKey.value)
 
+/** 翻到另一张出过的单子。挑中最近那张就存 null，这样以后再出新账它跟着走 */
+function pickStatement(id: number) {
+  bills.detail = id === bills.statements?.[0]?.id ? null : id
+}
+
 /** 这张账单上的固定费。已出的账单用它代替那个可编辑面板 */
 const monthlyEntries = computed(() =>
   draftEntries.value
@@ -529,6 +568,19 @@ function doCut() {
 </script>
 
 <style scoped>
+/* 标题当按钮用，但看着还得是标题。
+   **只中和浏览器给 button 的默认字体族**，别写 `font: inherit` ——
+   那个简写会把 text-subtitle1 的 16px 一并盖成容器的 14px，标题小一号 */
+.pick {
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  background: none;
+  padding: 0;
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+}
 /* 本期固定费：和未出账那页的面板对齐到同一套尺寸 —— 行高 40、金额 16px、
    右边留 50px（那页那儿是展开箭头，这页没有，用内边距占出来） */
 .monthly-list .q-item {

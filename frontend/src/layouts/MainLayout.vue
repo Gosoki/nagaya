@@ -76,14 +76,14 @@ const navSection = computed(() => {
 
 /** 点已经亮着的那一格：回到这一分区的首页（站在首页上就什么都不做） */
 function go(name: string) {
-  // 账单那一节没有「首页路由」可回 —— 它三页共用一个地址。
-  // 点底栏的账单＝回到页签那层，而不是停在上次翻开的某张旧账单上
+  // 账单那一节没有「首页路由」可回 —— 它两页共用一个地址。
+  // 点底栏的账单＝回到最近那张，而不是停在上次翻开的某张旧账单上
   if (name === 'bill') bills.detail = null
   if (route.name !== name) void router.push({ name })
 }
 
-/** 账单那三页才显示页签。翻某一张旧账单时页面自己换成返回条，这里不显示 */
-const onBillTabs = computed(() => route.name === 'bill' && bills.detail === null)
+/** 账单那两页才显示页签 */
+const onBillTabs = computed(() => route.name === 'bill')
 
 onMounted(async () => {
   if (!auth.me) await auth.restore()

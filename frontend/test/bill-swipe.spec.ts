@@ -18,7 +18,7 @@ Object.assign(globalThis, { localStorage: store(), sessionStorage: store() })
 
 const { useBillSwipe } = await import('../src/composables/billSwipe')
 const { useBills } = await import('../src/stores/bills')
-type BillTab = 'draft' | 'current' | 'past'
+type BillTab = 'draft' | 'current'
 
 beforeEach(() => setActivePinia(createPinia()))
 
@@ -30,23 +30,21 @@ function swipeFrom(from: BillTab, direction: 'left' | 'right', detail: number | 
   return bills.tab
 }
 
-describe('账单三页左右滑', () => {
+describe('账单两页左右滑', () => {
   it('往左划＝往后翻一页', () => {
     expect(swipeFrom('draft', 'left')).toBe('current')
-    expect(swipeFrom('current', 'left')).toBe('past')
   })
 
   it('往右划＝往前翻一页', () => {
-    expect(swipeFrom('past', 'right')).toBe('current')
     expect(swipeFrom('current', 'right')).toBe('draft')
   })
 
   it('首尾相接，一直划得下去', () => {
-    expect(swipeFrom('past', 'left')).toBe('draft')
-    expect(swipeFrom('draft', 'right')).toBe('past')
+    expect(swipeFrom('current', 'left')).toBe('draft')
+    expect(swipeFrom('draft', 'right')).toBe('current')
   })
 
-  it('正在翻某一张旧账单时，划了不翻页 —— 那会把人从正看的单子上甩走', () => {
-    expect(swipeFrom('past', 'left', 3)).toBe('past')
+  it('正翻着某一张旧账单，照样能划回未出账 —— 旧账单不是一页，是「已出账」里的一张', () => {
+    expect(swipeFrom('current', 'right', 3)).toBe('draft')
   })
 })

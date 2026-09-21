@@ -29,14 +29,15 @@ export interface BillView {
 /** 路由说的是哪一张：草稿 / 最近出的那一张 / 指名道姓的某一张 */
 export type BillKey = 'draft' | 'current' | `st:${number}`
 
-/** 三个页签。**它们是同一个地址上的状态**，点页签不改 URL、不走路由 */
-export type BillTab = 'draft' | 'current' | 'past'
+/** 两个页签。**它们是同一个地址上的状态**，点页签不改 URL、不走路由。
+    出过的单子不再单独占一页 —— 全在「已出账」里，点标题那个名字翻 */
+export type BillTab = 'draft' | 'current'
 const TAB_STORE_KEY = 'nagaya.billTab'
 
 function savedTab(): BillTab {
   try {
     const v = sessionStorage.getItem(TAB_STORE_KEY)
-    if (v === 'draft' || v === 'current' || v === 'past') return v
+    if (v === 'draft' || v === 'current') return v
   } catch {
     /* 隐私模式下读不了就用默认值 */
   }
@@ -59,8 +60,9 @@ export const useBills = defineStore('bills', () => {
   })
 
   /**
-   * 从「以前」点进来的那一张。这也是状态不是路由 —— 点一条旧账单同样不改地址。
-   * 不进 sessionStorage：刷新之后回到列表就好，没必要连「翻到第几张」都记着
+   * 「已出账」当前翻到哪一张；**null ＝ 最近出的那一张**。
+   * 这也是状态不是路由 —— 翻旧账单同样不改地址。
+   * 不进 sessionStorage：下次打开回到最近那张就好
    */
   const detail = ref<number | null>(null)
 

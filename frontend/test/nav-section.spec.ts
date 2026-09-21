@@ -1,10 +1,11 @@
 /**
  * 底栏「账单」那一格代表一整个分区，不是 /bill 那一页。
  *
- * 原来用 q-route-tab，高亮跟着 vue-router 的 matched 链走；而 /bill/current
- * 和 /bill/past 是跟 /bill **平级**的路由（不是子路由），站在那两页上底栏
- * 三格一个都不亮。改成自己算分区之后，风险变成「新加了一条账单路由却忘了
- * 登记」—— 症状一模一样，所以这里盯着它。
+ * 原来账单三页各有各的路由，页签用 q-route-tab，高亮跟着 vue-router 的
+ * matched 链走；而 /bill/current 和 /bill/past 是跟 /bill **平级**的路由
+ * （不是子路由），站在那两页上底栏三格一个都不亮。
+ * 现在页签只是状态、全站共用 /bill 一个地址，风险变成「新加了一条账单路由
+ * 却忘了登记」—— 症状一模一样，所以这里盯着它。
  */
 import { readFileSync } from 'node:fs'
 import { fileURLToPath, URL } from 'node:url'

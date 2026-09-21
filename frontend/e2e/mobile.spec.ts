@@ -743,36 +743,41 @@ test('没选分类：写了备注就记成兜底分类，两样都没有才弹�
   expect(bEntry.category_id).toBe(a.category_id)
 })
 
-test('账单三页：未出账 / 已出账 / 以前，各管一段', async ({ page }) => {
+test('账单两页：未出账 / 已出账，更早的从标题那个名字翻', async ({ page }) => {
   await login(page)
   await page.getByRole('tab', { name: '账单' }).click()
-  await expect(page.locator('.bill-tabs .q-tab')).toHaveText(['未出账', '已出账', '以前'])
+  await expect(page.locator('.bill-tabs .q-tab')).toHaveText(['未出账', '已出账'])
 
   // ① 未出账：还没归到任何账单上的流水
   await expect(page).toHaveURL(/\/bill$/)
-  // 三页共用一个地址：下面每切一页都再确认一次地址没动 —— 页签一旦做回路由，
+  // 两页共用一个地址：下面每切一次都再确认一次地址没动 —— 页签一旦做回路由，
   // 组件就会跟着重建，白屏和「旧数字停半秒」都会回来
   await expect(page.locator('.head')).toContainText('当前账单')
   await expect(page.getByRole('button', { name: '出账单' })).toBeVisible()
 
-  // ② 已出账：最近出的那一张，点了出账但可能还没转清
+  // ② 已出账：默认是最近出的那一张
   await page.getByRole('tab', { name: '已出账' }).click()
   await expect(page).toHaveURL(/\/bill$/)
-  // 先用会自动重试的断言等内容换过来：load() 是异步的，
-  // 直接 innerText 读到的还是上一页的标题
   await expect(page.getByRole('button', { name: '出账单' }), '已出的账单上不该再有出账按钮').toHaveCount(0)
-  const openLabel = (await page.locator('.head .text-subtitle1').innerText()).trim()
-  expect(openLabel, '已出账该显示一张已经出过的账单').toContain('出账')
+  const newest = (await page.locator('.head .pick').innerText()).trim()
+  expect(newest, '已出账该显示一张已经出过的账单').toContain('出账')
 
-  // ③ 以前：**不含**已出账那一张，两处都列会让人以为是两张
-  await page.getByRole('tab', { name: '以前' }).click()
-  await expect(page).toHaveURL(/\/bill$/)
-  const past = await page.locator('.q-item').allTextContents()
-  expect(past.some((t) => t.includes(openLabel)), '已出账那张不该在「以前」里重复出现').toBe(false)
-  // 不写死张数：跑过一轮 E2E 之后库里会多出几张，写死了红在一个跟这屏无关的地方
+  // ③ 更早的：点标题那个名字，列出**全部**出过的单子（含当前这张），挑一张旧的
   const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
   const all = await (await page.request.get('/api/statements', { headers })).json()
-  expect(past.length, '「以前」应当正好少列一张（那张在「已出账」）').toBe(all.length - 1)
+  expect(all.length, '种子数据里该有好几张出过的账单').toBeGreaterThan(1)
+  await page.locator('.head .pick').click()
+  const items = page.locator('.q-menu .q-item')
+  await expect(items, '出过的单子全都要列出来，包括正在看的这张').toHaveCount(all.length)
+  await items.nth(1).click()
+  await expect(page.locator('.q-menu')).toHaveCount(0)
+
+  // 翻到的是上一张，而且地址照样不动
+  await expect(page.locator('.head .pick')).toContainText(all[1].label)
+  await expect(page).toHaveURL(/\/bill$/)
+  // 页签没跑掉：翻旧账单仍然在「已出账」这一页里
+  await expect(page.locator('.bill-tabs .q-tab').nth(1)).toHaveClass(/q-tab--active/)
+  await expectNoHorizontalScroll(page)
 })
 
 test('账目筛选：按分类/付款人筛，并给出筛选后的合计', async ({ page }) => {
