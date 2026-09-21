@@ -61,11 +61,18 @@
       <MonthlyFixed v-if="bill.is_draft" @saved="load" />
 
       <!-- 已出的账单没有那个面板（它只管当前草稿），可固定费往往是这张单子上最大的
-           一笔钱。不摆出来的话，点进一张旧账单只看得见日用品，家賃 12 万凭空消失。 -->
+           一笔钱。不摆出来的话，点进一张旧账单只看得见日用品，家賃 12 万凭空消失。
+
+           整段只有一个入口，通向固定费那一屏 —— 不给每行挂一个箭头去单笔编辑页：
+           固定费是一整屏一起看的东西，拆成一笔笔既多按钮又不好改。 -->
       <div v-else class="others">
-        <div class="text-subtitle2 q-px-md q-pt-md q-pb-xs">{{ t('monthly.title') }}</div>
+        <q-item clickable dense class="q-pt-md q-pb-xs" @click="openMonthly">
+          <q-item-section class="text-subtitle2">{{ t('monthly.title') }}</q-item-section>
+          <q-item-section side class="text-grey-9">{{ formatYen(monthlyTotal) }}</q-item-section>
+          <q-item-section side><q-icon name="chevron_right" color="grey-5" size="18px" /></q-item-section>
+        </q-item>
         <q-list v-if="monthlyEntries.length" separator>
-          <q-item v-for="e in monthlyEntries" :key="e.id" dense clickable @click="editEntry(e.id)">
+          <q-item v-for="e in monthlyEntries" :key="e.id" dense>
             <q-item-section avatar>
               <q-avatar size="26px" :style="{ background: colorOfEntry(e) }" text-color="white">
                 <q-icon :name="iconOfEntry(e)" size="14px" />
@@ -76,7 +83,6 @@
               <q-item-label v-if="e.title" caption>{{ e.title }}</q-item-label>
             </q-item-section>
             <q-item-section side class="text-grey-9">{{ formatYen(e.amount_jpy) }}</q-item-section>
-            <q-item-section side><q-icon name="chevron_right" color="grey-5" size="18px" /></q-item-section>
           </q-item>
         </q-list>
         <div v-else class="text-caption text-grey-6 q-px-md q-pb-md">{{ t('monthly.noneBilled') }}</div>
@@ -409,6 +415,18 @@ const monthlyEntries = computed(() =>
         (meta.categoryById[b.category_id!]?.display_order ?? 0),
     ),
 )
+
+const monthlyTotal = computed(() =>
+  monthlyEntries.value.reduce((sum, e) => sum + e.amount_jpy, 0),
+)
+
+/** 固定费是一整屏一起看的东西，点哪一行都去那一屏，不进单笔编辑页 */
+function openMonthly() {
+  // 用账单自己报的 id，不用 viewing —— 直接开 /bill/4 这个链接时 viewing 还是空的
+  const id = bill.value?.statement_id
+  if (id == null) return
+  void router.push({ name: 'monthly', params: { statementId: String(id) } })
+}
 
 /** 这张账单上非固定费的明细（日用品/食費/收入之类）。转账不算，它们在下面的方案里 */
 const others = computed(() =>

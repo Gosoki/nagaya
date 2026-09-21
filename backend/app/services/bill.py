@@ -346,8 +346,8 @@ class BillError(ValueError):
 # ------------------------------------------------- 当前草稿账单上的「固定费」
 
 
-def monthly_rows(session: Session) -> dict[str, Any]:
-    """每月一次的固定项在**当前草稿账单**里的状态。
+def monthly_rows(session: Session, statement: Statement | None = None) -> dict[str, Any]:
+    """每月一次的固定项在某张账单里的状态。statement 传 None ＝ 当前草稿。
 
     没录的给「上次这项记了多少」当灰色参考 —— 注意它只是 placeholder，不是值。
     账本里预填的数字很危险：长得跟亲手填的一模一样，某个月忘了改就带着上月的
@@ -365,7 +365,7 @@ def monthly_rows(session: Session) -> dict[str, Any]:
     # 用户看到「家賃 170,000」，完全不知道还有一笔 120,000 也在总额里。
     mine: dict[int, Entry] = {}
     dup: dict[int, int] = {}
-    for e in unbilled(session):
+    for e in (unbilled(session) if statement is None else entries_of(session, statement.id)):
         if e.kind == EntryKind.settlement or e.category_id is None:
             continue
         mine[e.category_id] = e
@@ -375,6 +375,10 @@ def monthly_rows(session: Session) -> dict[str, Any]:
     rows = []
     for c in categories:
         entry = mine.get(c.id)
+        # 翻一张已经出过的账单时只列它真有的那几项。空行会诱人往里填，
+        # 而填出来的是**新账目**，落进当前草稿，根本不会进这张单子。
+        if statement is not None and entry is None:
+            continue
         rows.append(
             {
                 "category_id": c.id,

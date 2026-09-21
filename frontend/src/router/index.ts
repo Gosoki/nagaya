@@ -17,7 +17,7 @@ export const router = createRouter({
         // 已出账的也能改：钱是全局累计的，差额自己进下一张的「上期结转」
         { path: 'entry/:id', name: 'entry-edit', component: () => import('src/pages/AddEntryPage.vue') },
         // 固定费独立一屏：账单来了随时填，不用等到出账单
-        { path: 'monthly', name: 'monthly', component: () => import('src/pages/MonthlyPage.vue') },
+        { path: 'monthly/:statementId?', name: 'monthly', component: () => import('src/pages/MonthlyPage.vue') },
         // 账单就是第二个 Tab。它已经包含了每人的应担/已垫付/应收应付和转账方案，
         // 原来的「余额」页是它的子集，留着只会让人问「这两个有什么区别」
         { path: 'bill/:statementId?', name: 'bill', component: () => import('src/pages/BillPage.vue') },

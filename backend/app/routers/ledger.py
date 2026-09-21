@@ -26,9 +26,21 @@ def current_bill(session: Session = Depends(get_session), _: Member = Depends(cu
 
 
 @router.get("/monthly")
-def monthly(session: Session = Depends(get_session), _: Member = Depends(current_member)) -> dict:
-    """当前草稿账单上的固定费。没录的给上次的金额当灰色参考（不是预填值）。"""
-    return bill_svc.monthly_rows(session)
+def monthly(
+    statement_id: int | None = None,
+    session: Session = Depends(get_session),
+    _: Member = Depends(current_member),
+) -> dict:
+    """固定费。不传 statement_id ＝ 当前草稿，没录的给上次金额当灰色参考（不是预填值）。
+
+    传了就是翻一张出过的账单：只列那张单子上真有的几项。
+    """
+    st = None
+    if statement_id is not None:
+        st = session.get(Statement, statement_id)
+        if st is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "账单不存在")
+    return bill_svc.monthly_rows(session, st)
 
 
 @router.get("/statements", response_model=list[StatementOut])

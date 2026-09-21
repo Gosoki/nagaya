@@ -127,3 +127,30 @@ def test_duplicate_entries_in_one_category_are_reported(session, members) -> Non
     rows = rows_by_name(session)
     assert rows["家賃"]["entry_count"] == 2, "重复没被报出来"
     assert rows["家賃"]["amount"] == 170_000          # 面板只显示得下最后一笔
+
+
+def test_monthly_rows_of_a_past_statement_only_lists_what_is_on_it(session, members) -> None:
+    """翻一张出过的账单，只列它真有的那几项。
+
+    空行会诱人往里填，而填出来的是**新账目**，落进当前草稿，根本不会进这张单子。
+    """
+    from app.services.bill import cut_statement, monthly_rows
+
+    a, *_ = members
+    rent = Category(name="家賃", monthly=True, display_order=0)
+    water = Category(name="水道", monthly=True, display_order=1)
+    session.add(rent)
+    session.add(water)
+    session.commit()
+    session.refresh(rent)
+    session.refresh(water)
+
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=dt.date(2026, 9, 10),
+                 amount=120_000, payer_id=a.id, category_id=rent.id)
+    st = cut_statement(session, actor_id=a.id)
+
+    names = [r["name"] for r in monthly_rows(session, st)["rows"]]
+    assert names == ["家賃"]                       # 水道 这期没有，就不该出现
+
+    # 当前草稿仍然两项都列（没录的那项给灰色参考值）
+    assert [r["name"] for r in monthly_rows(session)["rows"]] == ["家賃", "水道"]

@@ -9,7 +9,6 @@
   * 5/6/7 月三张钱都转完了 → 「已结清」；8 月那张只转了一笔 → 一个勾一个空
   * 固定费的日期一律是出账日（D30），日常开销保留真实日子
   * 水道两个月一收，只出现在 6 月和 8 月，带计费期间 → 账单上标「含 4〜5月分」
-  * NHK受信料 是 7 月才加进来的固定项，5/6 月那两张上没有
   * 当前草稿的 ガス / 水道 空着 → 面板给灰色参考值
   * 一笔带调整额（Zen 少担 1,000）、一笔 1:1:0（Zen 出差没参与）
 """
@@ -64,11 +63,6 @@ def main() -> None:
         settings_svc.set_(s, "default_payer_id", go.id)
         settings_svc.set_(s, "settle_due_day", 10)
 
-        # 自己加的固定项：7 月才开始交，所以 5/6 月那两张账单上没有它
-        nhk = Category(name="NHK受信料", icon="tv", color="#7e57c2", monthly=True, display_order=5)
-        s.add(nhk)
-        s.commit()
-
         cats = {c.name: c for c in s.exec(select(Category))}
         # 家賃走固定金额（D12：房间大小不同，不是比例）
         rent = cats["家賃"]
@@ -99,15 +93,12 @@ def main() -> None:
                 title=title, **kw
             )
 
-        def fixed(month: int, denki: int, gasu: int, *, nhk_yen: int | None = None,
-                  denki_note: str = "") -> None:
+        def fixed(month: int, denki: int, gasu: int, *, denki_note: str = "") -> None:
             """这个月的固定费。日期随便填，出账时会统一盖成出账日（D30）。"""
             add(EntryKind.expense, d(month, 1), 120_000, "家賃", "", go.id)
             add(EntryKind.expense, d(month, 25), denki, "電気", denki_note, go.id)
             add(EntryKind.expense, d(month, 25), gasu, "ガス", "", go.id)
             add(EntryKind.expense, d(month, 25), 5_500, "ネット", "", kan.id)
-            if nhk_yen:
-                add(EntryKind.expense, d(month, 25), nhk_yen, "NHK受信料", "", go.id)
 
         # ---------------------------------------------------------------- 5 月
         fixed(5, denki=7_800, gasu=4_600)
@@ -128,7 +119,7 @@ def main() -> None:
         settle_plan(s, june, on=d(7, 2), at=utc(7, 2), how_many=None)
 
         # ---------------------------------------------------------------- 7 月
-        fixed(7, denki=9_200, gasu=3_800, nhk_yen=2_220)
+        fixed(7, denki=9_200, gasu=3_800)
         add(EntryKind.expense, d(7, 6), 1_380, "日用品", "トイレットペーパー", zen.id)
         add(EntryKind.expense, d(7, 18), 6_400, "食費", "焼肉", kan.id)
         add(EntryKind.expense, d(7, 25), 4_200, "食費", "そうめん大会", go.id)
@@ -136,7 +127,7 @@ def main() -> None:
         settle_plan(s, july, on=d(8, 3), at=utc(8, 3), how_many=None)
 
         # ---------------------------------------------------------------- 8 月
-        fixed(8, denki=10_400, gasu=3_200, nhk_yen=2_220, denki_note="エアコン代")
+        fixed(8, denki=10_400, gasu=3_200, denki_note="エアコン代")
         add(EntryKind.expense, d(8, 25), 12_600, "水道", "6〜7月分", go.id,
             period_start=d(6, 1), period_end=d(7, 31))
         add(EntryKind.expense, d(8, 12), 8_900, "食費", "お盆の焼肉", go.id, rule=zen_less)
@@ -149,7 +140,6 @@ def main() -> None:
         # ------------------------------------------------ 当前草稿：固定费填了一半
         add(EntryKind.expense, d(9, 1), 120_000, "家賃", "", go.id)
         add(EntryKind.expense, d(9, 18), 8_700, "電気", "", go.id)
-        add(EntryKind.expense, d(9, 18), 2_220, "NHK受信料", "", go.id)
         add(EntryKind.expense, d(9, 19), 5_500, "ネット", "", kan.id)
         # ガス 和 水道 故意不填：面板要显示成灰色参考值，不是预填的真值
         add(EntryKind.expense, d(9, 3), 4_600, "食費", "ピザ（Zen 出張中）", kan.id,

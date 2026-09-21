@@ -92,8 +92,10 @@
             />
           </div>
 
-          <!-- 删除入口放在展开区里，不放行头：行头有金额输入框，误触成本太高 -->
+          <!-- 删除入口放在展开区里，不放行头：行头有金额输入框，误触成本太高。
+               翻旧账单时不给删：那是归档整个分类，不是这一屏该干的事 -->
           <q-btn
+            v-if="!historic"
             dense flat no-caps size="sm" color="negative" icon="delete_outline"
             class="q-mt-sm"
             :label="t('monthly.removeItem')"
@@ -107,7 +109,7 @@
       自己加一项。打字就是全部操作 —— 不用进什么「分类管理」。
       加完之后它就是一项固定费：下个月自己出现在这张表里，还带着这次的金额当参考。
     -->
-    <div class="row items-center q-px-md q-py-sm add-row">
+    <div v-if="!historic" class="row items-center q-px-md q-py-sm add-row">
       <q-icon name="add" size="18px" class="text-grey-6 q-mr-sm" />
       <input
         v-model="newName"
@@ -170,7 +172,11 @@ interface Row extends ApiRow {
   payer_id: number | null
 }
 
+/** 传了就是在翻一张出过的账单：只读那张单子上真有的几项，不能加也不能删 —— */
+/*  加出来的是新账目，会落进当前草稿，不会进这张单子。 */
+const props = defineProps<{ statementId?: number | null }>()
 const emit = defineEmits<{ saved: [] }>()
+const historic = computed(() => props.statementId != null)
 
 const { t } = useI18n()
 const $q = useQuasar()
@@ -197,7 +203,9 @@ const valueOf = (row: Row) => Number(row.text.replace(/\D/g, '')) || 0
  */
 async function load() {
   const keep = new Map(rows.value.filter((r) => r.dirty).map((r) => [r.category_id, r]))
-  const d = await api.get<MonthlyData>('/api/monthly')
+  const d = await api.get<MonthlyData>(
+    historic.value ? `/api/monthly?statement_id=${props.statementId}` : '/api/monthly',
+  )
   data.value = d
   rows.value = d.rows.map((r) => {
     const held = keep.get(r.category_id)
