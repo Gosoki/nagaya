@@ -16,7 +16,8 @@ export const useLedger = defineStore('ledger', () => {
     loading.value = true
     try {
       const [e, b, bill] = await Promise.all([
-        api.get<Entry[]>('/api/entries?limit=100'),
+        // 筛选在前端做，拉少了就筛不全
+        api.get<Entry[]>('/api/entries?limit=500'),
         api.get<{ balances: Record<string, number> }>('/api/balances'),
         api.get<{ prev_cut_at: string | null; prev_label: string | null }>('/api/bill'),
       ])

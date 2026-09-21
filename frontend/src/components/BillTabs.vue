@@ -25,6 +25,8 @@ const { t } = useI18n()
 
 <style scoped>
 .bill-tabs {
+  max-width: var(--nagaya-max-w);     /* 跟页面一样收窄居中，宽屏上别摊开 */
+  margin: 0 auto;
   border-bottom: 1px solid rgba(0, 0, 0, 0.08);
 }
 /* 跟记一笔那屏的顶栏一样高，也跟底部 Tab 那一栏呼应 */

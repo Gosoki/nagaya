@@ -1,16 +1,47 @@
-<!-- 账目列表：按日期分组。点一条去改，左滑删除（软删，进回收站）。 -->
+<!-- 账目列表：按日期分组。点一条进去改。
+     **没有左滑删除**：整屏都是可拨的行，拨一下就删掉一笔钱太容易误触；
+     而且横向手势在账单那几页是用来翻页的，两处含义不一致更糟。
+     要删就点进那一笔，编辑页上有删除按钮（带确认）。 -->
 <template>
   <q-page class="q-pb-xl">
+    <!-- 筛选条吸顶：列表很长，翻到一半想换个筛法不该先滚回去 -->
+    <div class="filter-bar row items-center no-wrap q-gutter-xs q-px-md q-py-sm">
+      <button v-for="f in filters" :key="f.key" class="chip" :class="{ on: f.value !== null }">
+        {{ f.label }}
+        <q-icon name="arrow_drop_down" size="18px" />
+        <q-menu auto-close>
+          <q-list style="min-width: 140px">
+            <q-item clickable @click="f.set(null)">
+              <q-item-section>{{ t('filter.all') }}</q-item-section>
+            </q-item>
+            <q-item v-for="o in f.options" :key="String(o.value)" clickable @click="f.set(o.value)">
+              <q-item-section>{{ o.label }}</q-item-section>
+            </q-item>
+          </q-list>
+        </q-menu>
+      </button>
+      <q-space />
+      <!-- 筛完不给合计等于只筛了一半：「伙食这三个月花了多少」才是要问的 -->
+      <div v-if="anyFilter" class="text-caption text-grey-7 no-wrap">
+        {{ t('filter.sum') }} {{ formatYen(filteredTotal) }}
+      </div>
+      <q-btn
+        v-if="anyFilter"
+        dense flat round size="sm" icon="close" color="grey-7"
+        @click="clearFilters"
+      />
+    </div>
+
     <q-pull-to-refresh @refresh="onRefresh">
-      <div v-if="!ledger.entries.length" class="text-center text-grey-6 q-mt-xl">
-        {{ t('balance.empty') }}
+      <div v-if="!visible.length" class="text-center text-grey-6 q-mt-xl">
+        {{ anyFilter ? t('filter.empty') : t('balance.empty') }}
       </div>
 
       <template v-for="group in grouped" :key="group.date">
         <div class="date-head">{{ group.date }}</div>
 
         <!-- 那天出过的账单：在流水里留个印子，点进去看每人该付多少 -->
-        <q-list v-if="statementsOn(group.date).length" separator>
+        <q-list v-if="!anyFilter && statementsOn(group.date).length" separator>
           <q-item
             v-for="st in statementsOn(group.date)"
             :key="'st' + st.id"
@@ -34,17 +65,7 @@
         </q-list>
 
         <q-list separator>
-          <q-slide-item
-            v-for="e in group.items"
-            :key="e.id"
-            right-color="negative"
-            @right="() => remove(e)"
-          >
-            <template #right>
-              <q-icon name="delete" />
-            </template>
-
-            <q-item clickable @click="openEntry(e)">
+          <q-item v-for="e in group.items" :key="e.id" clickable @click="openEntry(e)">
               <q-item-section avatar>
                 <q-avatar size="30px" :style="{ background: colorOf(e) }" text-color="white">
                   <q-icon :name="iconOf(e)" size="16px" />
@@ -63,8 +84,7 @@
               <q-item-section side class="text-weight-medium" :class="e.amount_jpy < 0 ? 'text-positive' : 'text-grey-9'">
                 {{ formatYen(e.amount_jpy) }}
               </q-item-section>
-            </q-item>
-          </q-slide-item>
+          </q-item>
         </q-list>
       </template>
     </q-pull-to-refresh>
@@ -72,21 +92,18 @@
 </template>
 
 <script setup lang="ts">
-import { useQuasar } from 'quasar'
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 
-import { ApiError } from 'src/api/client'
 import { api } from 'src/api/client'
-import type { Entry, Statement } from 'src/api/types'
+import type { Entry, EntryKind, Statement } from 'src/api/types'
 import { formatYen } from 'src/i18n'
 import { useLedger } from 'src/stores/ledger'
 import { KIND_COLOR } from 'src/theme'
 import { useMeta } from 'src/stores/meta'
 
 const { t } = useI18n()
-const $q = useQuasar()
 const meta = useMeta()
 const ledger = useLedger()
 
@@ -123,15 +140,81 @@ function openStatement(id: number) {
   void router.push({ name: 'bill', params: { statementId: String(id) } })
 }
 
+/**
+ * 筛选。三个条件都是「不选＝不限」，交集生效。
+ *
+ * 在前端过滤：数据本来就整批拉下来了（store 里 500 条），切筛选是瞬时的，
+ * 不用每换一次都往返一趟服务器。
+ */
+const fKind = ref<EntryKind | null>(null)
+const fCategory = ref<number | null>(null)
+const fPayer = ref<number | null>(null)
+
+const anyFilter = computed(
+  () => fKind.value !== null || fCategory.value !== null || fPayer.value !== null,
+)
+
+function clearFilters() {
+  fKind.value = null
+  fCategory.value = null
+  fPayer.value = null
+}
+
+const visible = computed(() =>
+  ledger.entries.filter(
+    (e) =>
+      (fKind.value === null || e.kind === fKind.value) &&
+      (fCategory.value === null || e.category_id === fCategory.value) &&
+      (fPayer.value === null || e.payer_id === fPayer.value),
+  ),
+)
+
+/** 转账不算进合计：它是钱在两个人之间挪，不是花出去的 */
+const filteredTotal = computed(() =>
+  visible.value.reduce((sum, e) => sum + (e.kind === 'settlement' ? 0 : e.amount_jpy), 0),
+)
+
+const filters = computed(() => [
+  {
+    key: 'kind',
+    value: fKind.value,
+    label: fKind.value === null ? t('filter.kind') : t(`kind.${fKind.value}`),
+    options: (['expense', 'income', 'settlement'] as const).map((k) => ({
+      value: k,
+      label: t(`kind.${k}`),
+    })),
+    set: (v: unknown) => (fKind.value = v as EntryKind | null),
+  },
+  {
+    key: 'category',
+    value: fCategory.value,
+    label:
+      fCategory.value === null
+        ? t('filter.category')
+        : (meta.categoryById[fCategory.value]?.name ?? t('filter.category')),
+    options: meta.categories
+      .filter((c) => !c.archived)
+      .map((c) => ({ value: c.id, label: c.name })),
+    set: (v: unknown) => (fCategory.value = v as number | null),
+  },
+  {
+    key: 'payer',
+    value: fPayer.value,
+    label: fPayer.value === null ? t('filter.payer') : (meta.byId[fPayer.value]?.display_name ?? ''),
+    options: meta.activeMembersSelfFirst.map((m) => ({ value: m.id, label: m.display_name })),
+    set: (v: unknown) => (fPayer.value = v as number | null),
+  },
+])
+
 const grouped = computed(() => {
   const map = new Map<string, Entry[]>()
-  for (const e of ledger.entries) {
+  for (const e of visible.value) {
     const list = map.get(e.date) ?? []
     list.push(e)
     map.set(e.date, list)
   }
-  // 出过账单的日子即使当天没有账目也要出现在时间线上
-  for (const st of statements.value) {
+  // 出过账单的日子即使当天没有账目也要出现在时间线上（筛选时不补，那几行已经藏了）
+  for (const st of anyFilter.value ? [] : statements.value) {
     const d = st.cut_at.slice(0, 10)
     if (!map.has(d)) map.set(d, [])
   }
@@ -175,16 +258,32 @@ async function onRefresh(done: () => void) {
   done()
 }
 
-async function remove(e: Entry) {
-  try {
-    await ledger.remove(e)
-  } catch (err) {
-    $q.notify({ type: 'negative', message: err instanceof ApiError ? err.text : String(err) })
-  }
-}
 </script>
 
 <style scoped>
+/* 筛选条吸顶。列表很长，翻到一半想换个筛法不该先滚回顶上 */
+.filter-bar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #fff;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 4px 0 10px;
+  border: none;
+  border-radius: 16px;
+  background: #f2f2f5;
+  color: #555;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.chip.on { background: var(--q-primary); color: #fff; }
+
 .statement-row { background: #f5f7ff; }
 .date-head {
   padding: 10px 16px 4px;

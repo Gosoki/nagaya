@@ -16,7 +16,7 @@ export default {
     to: '转给谁', title: '备注（选填）', note: '说明', date: '日期',
     saved: '已记下',
     splitEven: '均分', splitEvenAmong: '{names} 均分',
-    saveAndNext: '保存并继续记', save: '保存',
+    record: '记入账', save: '保存',
     emptyAmount: '先填金额',
     dateLocked: '{date} 之前已经出过账，选不了。要补记就写在备注里',
     editTitle: '改这一笔',
@@ -85,6 +85,10 @@ export default {
     editedAfterCut: '这张出账后被改过 {n} 处：当初 {frozen}，现在 {live}',
     coversRange: '{from} 〜 {to}',
     noPeriod: '还没有账目',
+  },
+  filter: {
+    kind: '类型', category: '分类', payer: '谁付的',
+    all: '不限', sum: '合计', empty: '没有符合的账目',
   },
   draft: {
     pending: '有 {n} 笔没提交', submit: '补交', discard: '丢弃',

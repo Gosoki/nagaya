@@ -102,7 +102,7 @@ test('记一笔：默认页就是它，且主操作在拇指区', async ({ page 
   expect(await page.locator('.cat').count(), '日常分类超过一行了').toBeLessThanOrEqual(4)
 
   // 主操作按钮必须在屏幕下半部
-  const save = page.getByRole('button', { name: '保存', exact: true })
+  const save = page.getByRole('button', { name: '记入账' })
   const box = await save.boundingBox()
   const vh = page.viewportSize()!.height
   expect(box!.y, '「保存」按钮跑到屏幕上半部去了').toBeGreaterThan(vh / 2)
@@ -117,7 +117,7 @@ test('金额 → 分类 → 保存，三步录完一笔', async ({ page }) => {
   await page.getByRole('button', { name: '日用品' }).click()
   await page.screenshot({ path: 'e2e/shots/03-add-filled.png', fullPage: true })
 
-  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await page.getByRole('button', { name: '记入账' }).click()
   await expect(page.locator('.q-notification')).toContainText('已记下')
 
   await deleteLatestEntry(page)
@@ -168,12 +168,12 @@ test('权重全填 0：把缺口报出来，而且存不了', async ({ page }) =
 
   await expect(page.locator('.diff-line')).toBeVisible()
   await expect(page.locator('.diff-line')).toContainText('12,000')
-  await expect(page.getByRole('button', { name: '保存', exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: '记入账' })).toBeDisabled()
   await page.screenshot({ path: 'e2e/shots/08-all-zero.png' })
 
   await setWeight(page, 0, 1)             // 只要有一个人担，就自动配平
   await expect(page.locator('.diff-line')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: '保存', exact: true })).toBeEnabled()
+  await expect(page.getByRole('button', { name: '记入账' })).toBeEnabled()
 })
 
 test('账单 Tab 与账目列表', async ({ page }) => {
@@ -188,7 +188,7 @@ test('账单 Tab 与账目列表', async ({ page }) => {
   await page.screenshot({ path: 'e2e/shots/05-balance.png', fullPage: true })
 
   await page.getByRole('tab', { name: '账目' }).click()
-  await expect(page.locator('.q-item').first()).toBeVisible()
+  await expect(page.locator('.q-page .q-item').first()).toBeVisible()
   await expectNoHorizontalScroll(page)
   await page.screenshot({ path: 'e2e/shots/06-entries.png', fullPage: true })
 })
@@ -204,7 +204,7 @@ test('账单：期初/应担/应付对得上，转账方案能把人清零', asy
   await login(page)
   // 账单现在就是第二个 Tab，不用再从余额页绕一道
   await page.getByRole('tab', { name: '账单' }).click()
-  await expect(page.locator('.q-item').first()).toBeVisible()
+  await expect(page.locator('.q-page .q-item').first()).toBeVisible()
 
   // 每人的「应收/应付」加起来必须是 0 —— 账单上直接看得见的那条恒等式
   const signed = await page.locator('.q-item').evaluateAll((items) =>
@@ -272,7 +272,7 @@ test('离线草稿：断网能填完，回来点一下补交', async ({ page }) 
   )
   await page.locator('input.amount').fill('777')
   await page.getByRole('button', { name: '日用品' }).click()
-  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await page.getByRole('button', { name: '记入账' }).click()
 
   await expect(page.locator('.q-notification')).toContainText('先存在本地')
   await expect(page.getByText('有 1 笔没提交')).toBeVisible()
@@ -304,7 +304,7 @@ test('服务器明确拒绝的不该存成草稿', async ({ page }) => {
   )
   await page.locator('input.amount').fill('555')
   await page.getByRole('button', { name: '日用品' }).click()
-  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await page.getByRole('button', { name: '记入账' }).click()
 
   await expect(page.locator('.q-notification')).toContainText('金额方向不对')
   await expect(page.getByText(/笔没提交/)).toHaveCount(0)
@@ -571,7 +571,7 @@ test('点一条账目进去改：金额改得动，自定义分摊不会被打�
   await page.getByRole('button', { name: '日用品' }).click()
   await page.getByPlaceholder('备注（选填）').fill('E2E改这笔')
   await page.locator('.adj-col .num-input').first().fill('-600')
-  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await page.getByRole('button', { name: '记入账' }).click()
   await expect(page.locator('.q-notification')).toContainText('已记下')
 
   // 从账目列表点进去
@@ -704,7 +704,7 @@ test('没选分类：写了备注就记成兜底分类，两样都没有才弹�
   // ① 有备注、没点分类 → 直接存，落到兜底分类上（设置里指定，默认 其他）
   await page.locator('input.amount').fill('1234')
   await page.getByPlaceholder('备注（选填）').fill('E2E没选分类')
-  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await page.getByRole('button', { name: '记入账' }).click()
   await expect(page.locator('.q-notification')).toContainText('已记下')
   let rows = await (await page.request.get('/api/entries?limit=5', { headers })).json()
   const a = rows.find((e: { title: string }) => e.title === 'E2E没选分类')
@@ -714,7 +714,7 @@ test('没选分类：写了备注就记成兜底分类，两样都没有才弹�
   // ② 备注和分类都没有 → 不许直接进库，弹框问清楚这笔是什么
   await page.goto('/')
   await page.locator('input.amount').fill('999')
-  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await page.getByRole('button', { name: '记入账' }).click()
   await expect(page.locator('.q-dialog')).toContainText('这笔是什么')
   // 顺带验一下 Quasar 自带的按钮也是中文的（默认是英文 CANCEL / OK）
   await expect(page.locator('.q-dialog')).toContainText('取消')
@@ -757,4 +757,68 @@ test('账单三页：未出账 / 已出账 / 以前，各管一段', async ({ pa
   const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
   const all = await (await page.request.get('/api/statements', { headers })).json()
   expect(past.length, '「以前」应当正好少列一张（那张在「已出账」）').toBe(all.length - 1)
+})
+
+test('账目筛选：按分类/付款人筛，并给出筛选后的合计', async ({ page }) => {
+  await login(page)
+  await page.goto('/entries')
+  await expect(page.locator('.filter-bar')).toBeVisible()
+  // 等两拨数据都回来再数：账目和「出了一次账单」那几行是两个请求，
+  // 只等前者的话初始数会少几行，最后清除筛选时对不上
+  await expect(page.locator('.q-page .q-item').first()).toBeVisible()
+  await expect(page.locator('.statement-row').first()).toBeVisible()
+  // 必须限定在 .q-page 内：筛选菜单是 portal 到 body 上的，
+  // 开过一次就留在 DOM 里，用全局 .q-item 数会把菜单项也算进来
+  const rows = () => page.locator('.q-page .q-item').count()
+  const all = await rows()
+  expect(all, '种子数据里该有一堆账目').toBeGreaterThan(10)
+
+  // 按分类筛
+  await page.locator('.chip').nth(1).click()
+  await page.locator('.q-menu .q-item').filter({ hasText: '伙食' }).first().click()
+  await expect(page.locator('.filter-bar')).toContainText('合计')
+  const byCat = await rows()
+  expect(byCat, '筛完应当比全部少').toBeLessThan(all)
+
+  // 再叠一个付款人：交集，只会更少
+  await page.locator('.chip').nth(2).click()
+  await page.locator('.q-menu .q-item').filter({ hasText: 'Kan' }).first().click()
+  expect(await rows(), '两个条件是交集').toBeLessThanOrEqual(byCat)
+
+  // 筛选状态下不该混进「出了一次账单」那种行 —— 它不是账目
+  await expect(page.locator('.statement-row')).toHaveCount(0)
+
+  // 清除
+  await page.locator('.filter-bar .q-btn').click()
+  await expect(page.locator('.filter-bar')).not.toContainText('合计')
+  expect(await rows()).toBe(all)
+})
+
+test('点头像把人排除出这笔，再点恢复（原来是几就还回几）', async ({ page }) => {
+  await login(page)
+  await page.locator('input.amount').fill('9000')
+  await page.getByRole('button', { name: '日用品' }).click()
+
+  const weights = () =>
+    page.locator('.weight-pill').allTextContents().then((t) => t.map((x) => x.trim()).join('/'))
+  const shares = () =>
+    page.locator('.member-row .share-col').allTextContents()
+      .then((t) => t.map((x) => Number(x.replace(/[^\d]/g, ''))))
+
+  expect(await weights()).toBe('1/1/1')
+  await page.locator('.name-col').nth(2).click()
+  expect(await weights(), '点一下头像＝这个人不参与').toBe('1/1/0')
+  expect((await shares()).sort((a, b) => a - b)).toEqual([0, 4500, 4500])
+
+  await page.locator('.name-col').nth(2).click()
+  expect(await weights(), '再点一下恢复').toBe('1/1/1')
+
+  // 原来不是 1 的人，恢复时要还回原来那个数，不能一律变成 1
+  await page.locator('.weight-pill').first().click()
+  await page.locator('.weight-pick .pick').filter({ hasText: '2' }).first().click()
+  expect(await weights()).toBe('2/1/1')
+  await page.locator('.name-col').first().click()
+  expect(await weights()).toBe('0/1/1')
+  await page.locator('.name-col').first().click()
+  expect(await weights(), '恢复该还回 2，不是 1').toBe('2/1/1')
 })

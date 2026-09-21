@@ -2,9 +2,7 @@
      两处都列会让人以为是两张。每行直接给金额和结清状态，翻旧账最常问的
      就是「那个月多少钱、转清了没」，不该点进去才看得到。 -->
 <template>
-  <q-page class="q-pb-xl">
-    <BillTabs />
-
+  <q-page v-touch-swipe.capture.mouse.mouseCapture.horizontal="onSwipe" class="q-pb-xl">
     <div v-if="!statements.length" class="text-center text-grey-6 q-mt-xl">
       {{ t('bill.noPast') }}
     </div>
@@ -45,11 +43,12 @@ import { useRouter } from 'vue-router'
 
 import { api } from 'src/api/client'
 import type { Statement } from 'src/api/types'
-import BillTabs from 'src/components/BillTabs.vue'
+import { justSwiped, useBillSwipe } from 'src/composables/billSwipe'
 import { formatYen } from 'src/i18n'
 
 const { t } = useI18n()
 const router = useRouter()
+const onSwipe = useBillSwipe()
 const statements = ref<Statement[]>([])
 
 onMounted(async () => {
@@ -58,6 +57,7 @@ onMounted(async () => {
 })
 
 function open(id: number) {
+  if (justSwiped()) return       // 刚划完那一下不是点击，见 billSwipe.ts
   void router.push({ name: 'bill', params: { statementId: String(id) } })
 }
 </script>

@@ -7,11 +7,10 @@
   一键复制的文本是直接贴进 LINE 群的，所以格式按等宽对齐排，手机上看着是一张表。
 -->
 <template>
-  <q-page class="page">
-    <!-- 三个页签是一笔账的三段人生：未出账 → 已出账 → 以前。
-         从「以前」点进某一张时换成返回条，那时哪个页签都不该亮着 -->
-    <BillTabs v-if="!pinned" />
-    <div v-else class="page-head">
+  <q-page v-touch-swipe.capture.mouse.mouseCapture.horizontal="onSwipe" class="page">
+    <!-- 页签在布局的固定 header 上（切页时不重建）。
+         从「以前」点进某一张时那里不显示页签，这里换成返回条 -->
+    <div v-if="pinned" class="page-head">
       <q-btn dense flat round icon="arrow_back" @click="backToPast" />
       <div class="col text-weight-medium">{{ t('bill.tabPast') }}</div>
     </div>
@@ -268,7 +267,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { ApiError, api } from 'src/api/client'
 import type { Entry, Statement } from 'src/api/types'
-import BillTabs from 'src/components/BillTabs.vue'
+import { useBillSwipe } from 'src/composables/billSwipe'
 import MonthlyFixed from 'src/components/MonthlyFixed.vue'
 import { formatYen } from 'src/i18n'
 import { useAuth } from 'src/stores/auth'
@@ -312,6 +311,7 @@ const { t } = useI18n()
 const $q = useQuasar()
 const route = useRoute()
 const router = useRouter()
+const onSwipe = useBillSwipe()
 
 /** 点一条明细就去改它。已出账的照样能改：差额自己进下一张的「上期结转」 */
 function editEntry(id: number) {

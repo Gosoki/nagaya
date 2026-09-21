@@ -30,12 +30,14 @@
       class="member-row"
       :class="{ out: weightOf(m.id) === 0 }"
     >
-      <div class="name-col row items-center no-wrap">
+      <!-- 点头像/名字＝这个人这笔不参与（比例设 0），再点一下恢复。
+           「谁没在」是改分摊时最常做的事，不该还要先点开比例再选一次 -->
+      <button class="name-col row items-center no-wrap" @click="toggleOut(m.id)">
         <q-avatar size="30px" :style="{ background: m.color }" text-color="white" class="q-mr-sm">
           {{ m.display_name.slice(0, 1) }}
         </q-avatar>
         <div class="name ellipsis">{{ m.display_name }}</div>
-      </div>
+      </button>
 
       <!-- 比例不用输入框：真机 iOS 上 type=number 没有上下箭头，
            改个 0/1 得弹出数字键盘挡半屏。点一下直接选，全程不碰键盘 -->
@@ -236,6 +238,20 @@ function setWeight(id: number, n: number) {
   weights.value = { ...weights.value, [String(id)]: n }
 }
 
+/** 设成 0 之前那个人是几，恢复时原样还回去（不是一律变回 1） */
+const lastNonZero = ref<Record<string, number>>({})
+
+function toggleOut(id: number) {
+  const key = String(id)
+  const now = weightOf(id)
+  if (now === 0) {
+    setWeight(id, lastNonZero.value[key] ?? 1)
+  } else {
+    lastNonZero.value = { ...lastNonZero.value, [key]: now }
+    setWeight(id, 0)
+  }
+}
+
 function normalize(raw: string): { text: string; value: number } {
   const neg = raw.trim().startsWith('-')
   const d = raw.replace(/\D/g, '')
@@ -291,7 +307,15 @@ defineExpose({
   font-size: 11px;
   letter-spacing: 0.04em;
 }
-.name-col { min-width: 0; }
+.name-col {
+  min-width: 0;
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
 /* 比例和调整之间留一道明显的空 —— 它们是两种不同的输入，不该挨在一起 */
 .adj-col { padding-left: 14px; }
 .share-col { text-align: right; font-variant-numeric: tabular-nums; font-size: 15px; }

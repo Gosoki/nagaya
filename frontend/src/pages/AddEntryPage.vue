@@ -127,22 +127,11 @@
         unelevated
         :disable="!canSave"
         :loading="busy"
-        :label="t('entry.save')"
-        @click="editingId === null ? save(false) : saveEdit()"
+        :label="editingId === null ? t('entry.record') : t('entry.save')"
+        @click="editingId === null ? save() : saveEdit()"
       />
       <q-btn
-        v-if="editingId === null"
-        class="col-auto q-ml-sm"
-        :color="kindPalette"
-        size="lg"
-        no-caps
-        outline
-        :disable="!canSave"
-        :label="t('entry.saveAndNext')"
-        @click="save(true)"
-      />
-      <q-btn
-        v-else
+        v-if="editingId !== null"
         class="col-auto q-ml-sm"
         color="negative"
         size="lg"
@@ -372,7 +361,7 @@ async function ensureCategory(): Promise<boolean> {
   return categoryId.value !== null
 }
 
-async function save(keepGoing: boolean) {
+async function save() {
   if (!canSave.value || payerId.value === null) return
   if (!(await ensureCategory())) return
   busy.value = true
@@ -389,14 +378,14 @@ async function save(keepGoing: boolean) {
   try {
     await ledger.create(payload)
     $q.notify({ type: 'positive', message: t('entry.saved'), timeout: 1200 })
-    reset(keepGoing)
+    reset()
   } catch (e) {
     // 只有「连不上服务器」才转存草稿。金额方向错、账期已关这类是**服务器明确拒绝**，
     // 存成草稿只会让人以后反复补交同一笔失败的账（D15）
     if (e instanceof ApiError && e.code === 'network') {
       drafts.add(payload)
       $q.notify({ type: 'warning', message: t('draft.savedOffline'), timeout: 2500 })
-      reset(keepGoing)
+      reset()
     } else {
       $q.notify({
         type: 'negative',
@@ -409,17 +398,16 @@ async function save(keepGoing: boolean) {
   }
 }
 
-/** 「保存并继续」：不跳转、不清分类，光标回到金额框，超市小票一串录完 */
-function reset(keepGoing: boolean) {
+/**
+ * 记完留在原页：清掉金额、备注、分摊，**分类留着**，光标回金额框。
+ * 超市小票一串日用品可以连着录；要换分类点一下就行，不必先清空。
+ */
+function reset() {
   amount.value = 0
   title.value = ''
   rule.value = null
   splitEl.value?.reset()
-  if (keepGoing) {
-    amountEl.value?.focus()
-  } else {
-    categoryId.value = null
-  }
+  amountEl.value?.focus()
 }
 </script>
 

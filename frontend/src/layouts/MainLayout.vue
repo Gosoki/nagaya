@@ -2,8 +2,11 @@
      主操作一律放屏幕下半部的拇指区（SPEC §7.4），顶部只放不常点的东西。 -->
 <template>
   <q-layout view="hHh lpR fFf">
-    <q-header v-if="drafts.count" class="bg-transparent">
-      <DraftBanner />
+    <!-- 顶栏固定在布局上，不放进页面里：账单三页之间切换时它不该跟着卸载重建，
+         切页只换中间那块内容，上下两条都不动 -->
+    <q-header v-if="drafts.count || onBillTabs" class="bg-white text-dark">
+      <DraftBanner v-if="drafts.count" />
+      <BillTabs v-if="onBillTabs" />
     </q-header>
 
     <q-page-container>
@@ -47,6 +50,10 @@
 import { onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
+
+import BillTabs from 'src/components/BillTabs.vue'
 import DraftBanner from 'src/components/DraftBanner.vue'
 import { useAuth } from 'src/stores/auth'
 import { useDrafts } from 'src/stores/drafts'
@@ -58,6 +65,15 @@ const meta = useMeta()
 const auth = useAuth()
 const ledger = useLedger()
 const drafts = useDrafts()
+const route = useRoute()
+
+/** 账单那三页才显示页签。从「以前」点进某一张（/bill/3）时换成返回条，不算 */
+const onBillTabs = computed(
+  () =>
+    (route.name === 'bill' && !route.params.statementId) ||
+    route.name === 'bill-current' ||
+    route.name === 'bill-past',
+)
 
 onMounted(async () => {
   if (!auth.me) await auth.restore()

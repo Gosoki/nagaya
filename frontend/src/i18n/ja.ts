@@ -16,7 +16,7 @@ export default {
     to: '送金先', title: 'メモ（任意）', note: '備考', date: '日付',
     saved: '記帳しました',
     splitEven: '均等', splitEvenAmong: '{names} で均等',
-    saveAndNext: '保存して続けて記帳', save: '保存',
+    record: '記帳する', save: '保存',
     emptyAmount: '金額を入力してください',
     dateLocked: '{date} より前は請求済みのため選べません。追記は備考へ',
     editTitle: 'この明細を修正',
@@ -85,6 +85,10 @@ export default {
     editedAfterCut: '作成後に {n} 件変更されています（当時 {frozen} → 現在 {live}）',
     coversRange: '{from} 〜 {to}',
     noPeriod: 'まだ明細がありません',
+  },
+  filter: {
+    kind: '種別', category: 'カテゴリ', payer: '支払者',
+    all: 'すべて', sum: '合計', empty: '該当する明細がありません',
   },
   draft: {
     pending: '未送信が {n} 件', submit: '送信', discard: '破棄',
