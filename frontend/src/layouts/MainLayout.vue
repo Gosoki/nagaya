@@ -11,6 +11,13 @@
 
     <q-page-container>
       <router-view v-if="meta.members.length" />
+      <!-- 起不来就得说出来。原来只有一个转圈：拉不到基础数据时它会一直转下去，
+           人只能看着一个永远不会停的动画 —— 而这恰好是断网时的默认下场 -->
+      <div v-else-if="bootFailed" class="column flex-center q-pa-xl text-center" style="height: 60vh">
+        <q-icon name="cloud_off" size="40px" color="grey-5" />
+        <div class="text-grey-7 q-my-md">{{ t('common.offlineBoot') }}</div>
+        <q-btn outline no-caps color="primary" :label="t('common.retry')" @click="boot" />
+      </div>
       <div v-else class="column flex-center" style="height: 60vh">
         <q-spinner-dots size="40px" color="primary" />
       </div>
@@ -38,10 +45,9 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import BillTabs from 'src/components/BillTabs.vue'
@@ -85,11 +91,26 @@ function go(name: string) {
 /** 账单那两页才显示页签 */
 const onBillTabs = computed(() => route.name === 'bill')
 
-onMounted(async () => {
-  if (!auth.me) await auth.restore()
-  await meta.load()
-  await ledger.refresh()
-})
+const bootFailed = ref(false)
+
+async function boot() {
+  bootFailed.value = false
+  try {
+    if (!auth.me) await auth.restore()
+    await meta.load()          // 失败时它自己会回退到本地缓存
+  } catch {
+    bootFailed.value = true
+    return
+  }
+  // 账本刷新失败**不该挡住界面**：离线时照样要能把这一笔填完存成草稿
+  try {
+    await ledger.refresh()
+  } catch {
+    /* 离线。草稿那条路不依赖它 */
+  }
+}
+
+onMounted(boot)
 </script>
 
 <!-- 非 scoped：底栏高度给固定操作条用。

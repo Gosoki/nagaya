@@ -123,9 +123,28 @@ def create_entry(
     return entry
 
 
+def _canonical_order(session: Session, keys: Iterable[str]) -> list[str]:
+    """把参与人按**成员表的固定顺序**排（display_order，再 id）。
+
+    余数归谁是靠「成员在 order 里的下标」决胜的，所以这个顺序绝不能是
+    「客户端送上来的那个字典碰巧是什么顺序」：
+      * 客户端没送规则时，后端按 display_order 展开；而记一笔那屏的分摊预览
+        用的是「自己排第一」的展示顺序 —— 同一笔账，预览和落库能差 1 円，
+        而且换个人登录差的还是另一个人。
+      * 客户端送了规则时，字典顺序就是那台手机上的展示顺序 —— 同一条规则由
+        不同的人录入，分摊结果会不一样。
+    排完之后，谁录的、谁在看，都不影响这笔钱怎么分。
+    """
+    rank = {
+        mkey(m.id): (m.display_order, m.id)
+        for m in session.exec(select(Member).order_by(Member.display_order, Member.id))
+    }
+    return sorted(keys, key=lambda k: rank.get(k) or (10**9, int(k)))
+
+
 def _write_shares(session: Session, entry: Entry, expanded: dict[str, Any], payer_id: int) -> None:
     """算分摊 → 断言合计 → 落库。entry_share 只在这里被写。"""
-    order = participants(expanded)
+    order = _canonical_order(session, participants(expanded))
     shares = split(
         expanded,
         entry.amount_jpy,
@@ -234,6 +253,7 @@ def update_entry(
             got=version,
         )
     before = _snapshot(session, entry)
+    prev_kind = entry.kind          # 下面几行就要被覆盖掉，先留一份
 
     for key in ("title", "note", "category_id", "bundle_id"):
         if key in fields:
@@ -256,14 +276,26 @@ def update_entry(
             raise LedgerError("self_transfer", "不能转给自己")
         expanded = {"mode": "exact", "exact": {mkey(to_member_id): amount}}
     else:
-        ids = (
-            list(member_ids)
-            if member_ids is not None
-            else [int(k) for k in participants(entry.split_rule_json)]
-            or [m.id for m in active_members(session, on)]
-        )
+        # **从转账改成支出/收入时，旧规则一点都不能继承。**
+        # 转账的规则是 {"mode":"exact","exact":{转入人: 全额}}，拿它当分摊基准
+        # 会把整笔钱算到当初那个转入人头上 —— 悄无声息，谁也看不出来。
+        inheritable = prev_kind != EntryKind.settlement
+
+        if member_ids is not None:
+            ids = list(member_ids)
+        else:
+            # 参与人按「谁最有发言权」取：
+            #   1. 这次提交的规则自己点名的人 —— 用户刚在分摊面板上选好的。
+            #      不认它的话，新室友搬进来之后改任何一笔旧账都会被 expand()
+            #      以 unknown_member 挡死，那笔账从此再也改不动
+            #   2. 这笔账原来的参与人（**不按新日期重挑**：改日期不该换人）
+            #   3. 实在没有，才按这笔账的日期取在籍成员
+            from_rule = [int(k) for k in participants(rule)] if rule is not None else []
+            from_entry = [int(k) for k in participants(entry.split_rule_json)] if inheritable else []
+            ids = from_rule or from_entry or [m.id for m in active_members(session, on)]
+
         global_rule = settings_svc.get(session, "default_rule")
-        base = rule if rule is not None else (entry.split_rule_json if member_ids is None else None)
+        base = rule if rule is not None else (entry.split_rule_json if (member_ids is None and inheritable) else None)
         expanded = expand(pick_rule(base, category_rule, global_rule), ids)
         if not expanded.get("remainder_to"):
             expanded["remainder_to"] = settings_svc.get(session, "remainder_to")

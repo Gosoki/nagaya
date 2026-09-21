@@ -176,6 +176,22 @@ test('权重全填 0：把缺口报出来，而且存不了', async ({ page }) =
   await expect(page.getByRole('button', { name: '记入账' })).toBeEnabled()
 })
 
+test('改日期不会把调好的分摊打回默认', async ({ page }) => {
+  await login(page)
+  await page.locator('input.amount').fill('9000')
+  await page.getByRole('button', { name: '日用品' }).click()
+  await setWeight(page, 2, 0)                     // 第三个人这次不参与
+  const before = await page.locator('.share-col').allTextContents()
+
+  // 换一天。参与人没变，调好的比例就不该动 —— 分摊面板原来是按「数组身份」
+  // 判断参与人有没有变的，而按日期现算的参与人每次都是新数组
+  await page.locator('.date-btn').click()
+  await page.locator('.q-date button').filter({ hasText: /^15$/ }).first().click()
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.q-date')).toHaveCount(0)
+  await expect(page.locator('.share-col'), '换个日期不该把调好的分摊打回默认').toHaveText(before)
+})
+
 test('账单 Tab 与账目列表', async ({ page }) => {
   await login(page)
 

@@ -41,7 +41,7 @@
           :placeholder="t('entry.title')"
           maxlength="40"
         />
-        <q-btn dense flat no-caps icon="event" :label="dateLabel" class="text-grey-7">
+        <q-btn dense flat no-caps icon="event" :label="dateLabel" class="text-grey-7 date-btn">
           <q-popup-proxy cover transition-show="scale">
             <div>
               <q-date v-model="date" mask="YYYY-MM-DD" today-btn minimal :options="dateAllowed" />
@@ -104,7 +104,7 @@
         <SplitEditor
           ref="splitEl"
           :amount="signedAmount"
-          :members="meta.activeMembersSelfFirst"
+          :members="splitMembers"
           :payer-id="payerId"
           :color="kindPalette"
           :seed-rule="ownRule ?? selectedCategoryRule"
@@ -210,6 +210,13 @@ const kindInk = computed(() => KIND_COLOR[kind.value])
 const signedAmount = computed(() => (kind.value === 'income' ? -amount.value : amount.value))
 
 /** 上次出账那天（含）之前的日期不给选 */
+/**
+ * 分摊面板的参与人。**必须是 computed 而不是模板里直接调 meta.membersOn(date)**：
+ * 那样每次渲染都返回一个新数组，prop 身份一直在变，SplitEditor 里那个
+ * watch(() => props.members) 会不停地把用户刚调好的比例重置回默认
+ */
+const splitMembers = computed(() => meta.membersOn(date.value))
+
 const minDate = computed(() => (ledger.prevCutAt ? jstDateOf(ledger.prevCutAt) : null))
 // 只有**新记**的账才限日期：新的一笔不管写哪天都落进当前草稿，选回已出账的范围
 // 只会让人以为补进了那张单子。改已有的账不受这条约束 —— 它归哪张单子由

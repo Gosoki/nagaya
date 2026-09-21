@@ -25,6 +25,20 @@ export const useMeta = defineStore('meta', () => {
   })
   const byId = computed(() => Object.fromEntries(members.value.map((m) => [m.id, m])))
 
+  /**
+   * **某一天**在籍的人，自己排第一。
+   *
+   * 记一笔可以把日期往回调（调到上次出账那天为止），而后端是按**这笔账的日期**
+   * 挑参与人的（ledger.active_members(on)）。前端要是拿「今天在籍」去算预览，
+   * 日期一旦跨过谁的入住日/退出日，预览和落库就分到了不同的人头上 —— 差的是
+   * 整整一份钱，界面上一声不吭。
+   */
+  function membersOn(date: string): Member[] {
+    const on = members.value.filter((m) => date >= m.joined_on && (!m.left_on || date <= m.left_on))
+    const me = auth.me?.id
+    return [...on.filter((m) => m.id === me), ...on.filter((m) => m.id !== me)]
+  }
+
   /** 日常记账那屏的分类：不含每月一次的固定项，也不含归档的 */
   const dailyCategories = computed(() =>
     categories.value.filter((c) => !c.monthly && !c.archived),
@@ -47,22 +61,56 @@ export const useMeta = defineStore('meta', () => {
     return row === undefined || row.value === null ? fallback : (row.value as T)
   }
 
+  /**
+   * 这三样是整个界面的地基（布局要等 members 到齐才渲染），所以**存一份在本地**。
+   *
+   * 离线冷启动原来是死的：meta.load() 一抛，布局那句 v-if="meta.members.length"
+   * 永远不成立，整个 app 停在转圈上 —— 而「断网也能填完、回来补交」（D15）
+   * 正是这个 App 的卖点之一，偏偏在最需要它的时候用不了。
+   */
+  const CACHE_KEY = 'nagaya.meta'
+
+  function useCached(): boolean {
+    try {
+      const raw = localStorage.getItem(CACHE_KEY)
+      if (!raw) return false
+      const cached = JSON.parse(raw) as { m: Member[]; c: Category[]; s: Setting[] }
+      if (!cached.m?.length) return false
+      members.value = cached.m
+      categories.value = cached.c ?? []
+      settings.value = cached.s ?? []
+      return true
+    } catch {
+      return false
+    }
+  }
+
   async function load() {
-    const [m, c, s] = await Promise.all([
-      api.get<Member[]>('/api/members'),
-      // 拉全量（含归档）：展示用的列表自己过滤，反查名字要用全量，
-      // 否则归档一个分类会让它名下的历史账目失名
-      api.get<Category[]>('/api/categories?include_archived=true'),
-      api.get<Setting[]>('/api/settings'),
-    ])
-    members.value = m
-    categories.value = c
-    settings.value = s
+    try {
+      const [m, c, s] = await Promise.all([
+        api.get<Member[]>('/api/members'),
+        // 拉全量（含归档）：展示用的列表自己过滤，反查名字要用全量，
+        // 否则归档一个分类会让它名下的历史账目失名
+        api.get<Category[]>('/api/categories?include_archived=true'),
+        api.get<Setting[]>('/api/settings'),
+      ])
+      members.value = m
+      categories.value = c
+      settings.value = s
+      try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify({ m, c, s }))
+      } catch {
+        /* 隐私模式下存不了就算了，只是下次离线启动没得回退 */
+      }
+    } catch (e) {
+      // 有缓存就照常开门；一次都没成功过（新装的 PWA 首次就离线）才认输
+      if (!useCached()) throw e
+    }
   }
 
   return {
     members, categories, settings,
-    activeMembers, activeMembersSelfFirst, byId,
+    activeMembers, activeMembersSelfFirst, membersOn, byId,
     dailyCategories, monthlyCategories, categoryById,
     setting, load,
   }

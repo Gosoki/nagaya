@@ -10,7 +10,7 @@ from sqlmodel import Session, select
 
 from app.models import Entry, EntryKind, EntryShare, Member
 from app.services import settings as settings_svc
-from app.services.ledger import LedgerError, balances, create_entry
+from app.services.ledger import LedgerError, balances, create_entry, update_entry
 
 SEP = dt.date(2026, 9, 10)
 
@@ -212,3 +212,35 @@ def test_audit_log_written(session, members) -> None:
     assert len(logs) == 1
     assert logs[0].action == "create" and logs[0].target_id == e.id
     assert logs[0].after_json["shares"]
+
+def test_settlement_turned_into_expense_is_split_again(session: Session, members) -> None:
+    """**把转账改成支出，不能继承转账那条规则。**
+
+    转账的规则是 {"exact": {转入人: 全额}}。拿它当分摊基准的话，
+    「记错成转账了，改回日用品」这个动作会把整笔钱悄悄算到当初的转入人头上。
+    """
+    a, b, c = members
+    e = create_entry(session, actor_id=a.id, kind=EntryKind.settlement, on=SEP,
+                     amount=3_000, payer_id=a.id, to_member_id=b.id)
+    assert shares_of(session, e.id) == {b.id: 3_000}
+
+    update_entry(session, e, actor_id=a.id, version=e.version,
+                 fields={"kind": EntryKind.expense, "to_member_id": None})
+    assert shares_of(session, e.id) == {a.id: 1_000, b.id: 1_000, c.id: 1_000}
+
+
+def test_editing_an_old_entry_after_a_new_roommate_moves_in(session: Session, members) -> None:
+    """新室友搬进来之后，老账目照样改得动。
+
+    参与人原来钉死在建账时那批人身上，于是带上新人的分摊规则一律被
+    expand() 以 unknown_member 挡掉 —— 那笔账从此再也改不了。
+    """
+    a, b, c = members
+    e = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                     amount=3_000, payer_id=a.id)
+    d = Member(name="d", display_name="D", display_order=3, joined_on=dt.date(2026, 1, 1))
+    session.add(d); session.commit(); session.refresh(d)
+
+    rule = {"mode": "ratio", "weights": {str(a.id): 1, str(b.id): 1, str(c.id): 1, str(d.id): 1}}
+    update_entry(session, e, actor_id=a.id, version=e.version, fields={"amount_jpy": 4_000}, rule=rule)
+    assert shares_of(session, e.id) == {a.id: 1_000, b.id: 1_000, c.id: 1_000, d.id: 1_000}

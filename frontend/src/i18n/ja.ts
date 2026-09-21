@@ -1,6 +1,7 @@
 export default {
   app: { name: '長屋', tagline: 'シェアハウス家計簿' },
   common: {
+    offlineBoot: 'サーバーに接続できず、ローカルにも控えがありません。',
     save: '保存', undo: '元に戻す', cancel: 'キャンセル', delete: '削除', edit: '編集', confirm: 'OK',
     back: '戻る', loading: '読み込み中…', yen: '{n}円', today: '今日', retry: '再試行',
     required: '必須', none: 'なし', all: 'すべて',
@@ -62,6 +63,8 @@ export default {
     copyFallback: '下のテキストを長押しして選択・コピーしてください',
     entryCount: '{n} 件',
     youPay: '{to} に {amount} 支払い',
+    youPayList: '送金：{list}',
+    youOwe: '支払い {amount}',
     youReceive: '受取 {amount}',
     youSettled: '精算済み',
     perMember: '各自の負担',

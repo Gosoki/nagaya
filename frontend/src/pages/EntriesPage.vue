@@ -174,9 +174,18 @@ const visible = computed(() =>
   ),
 )
 
-/** 转账不算进合计：它是钱在两个人之间挪，不是花出去的 */
+/**
+ * 转账不算进合计：它是钱在两个人之间挪，不是花出去的。
+ *
+ * **除非你就是在看转账**：专门筛了「转账」还给个恒为 ¥0 的合计，那不是
+ * 「转账不计入」的意思，那看着就是坏了。
+ */
+const onlySettlements = computed(() => fKind.value === 'settlement')
 const filteredTotal = computed(() =>
-  visible.value.reduce((sum, e) => sum + (e.kind === 'settlement' ? 0 : e.amount_jpy), 0),
+  visible.value.reduce(
+    (sum, e) => sum + (e.kind === 'settlement' && !onlySettlements.value ? 0 : e.amount_jpy),
+    0,
+  ),
 )
 
 const filters = computed(() => [

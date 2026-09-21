@@ -1,6 +1,7 @@
 export default {
   app: { name: '長屋', tagline: '合租记账' },
   common: {
+    offlineBoot: '连不上服务器，也没有本地缓存。连上网再试一次。',
     save: '保存', undo: '撤销', cancel: '取消', delete: '删除', edit: '编辑', confirm: '确定',
     back: '返回', loading: '加载中…', yen: '¥{n}', today: '今天', retry: '重试',
     required: '必填', none: '无', all: '全部',
@@ -62,6 +63,8 @@ export default {
     copyFallback: '长按选中下面的文字复制',
     entryCount: '{n} 笔',
     youPay: '你要给 {to} {amount}',
+    youPayList: '你要转：{list}',
+    youOwe: '你应付 {amount}',
     youReceive: '你应收 {amount}',
     youSettled: '你已结清',
     perMember: '每人',

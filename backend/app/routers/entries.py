@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from typing import Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlmodel import Session, select
@@ -15,12 +16,37 @@ router = APIRouter(prefix="/api/entries", tags=["entries"])
 
 
 def to_entry_out(session: Session, entry: Entry) -> EntryOut:
-    shares = session.exec(select(EntryShare).where(EntryShare.entry_id == entry.id)).all()
-    st = session.get(Statement, entry.statement_id) if entry.statement_id else None
+    return _to_out(entry, _shares_by_entry(session, [entry.id]), _labels(session, [entry.statement_id]))
+
+
+def _shares_by_entry(session: Session, entry_ids: Sequence[int]) -> dict[int, dict[str, int]]:
+    """一次把这些账目的分摊全捞出来。
+
+    原来是一笔一查：列表接口 500 笔就是 1000 次查询（分摊一次、所属账单一次），
+    而这个接口每次开 App、每次记完账都要调。
+    """
+    out: dict[int, dict[str, int]] = {}
+    if not entry_ids:
+        return out
+    rows = session.exec(select(EntryShare).where(EntryShare.entry_id.in_(entry_ids)))  # type: ignore[attr-defined]
+    for row in rows:
+        out.setdefault(row.entry_id, {})[str(row.member_id)] = row.amount_jpy
+    return out
+
+
+def _labels(session: Session, statement_ids: Sequence[int | None]) -> dict[int, str]:
+    ids = {i for i in statement_ids if i is not None}
+    if not ids:
+        return {}
+    rows = session.exec(select(Statement).where(Statement.id.in_(ids)))  # type: ignore[attr-defined]
+    return {s.id: s.label for s in rows}
+
+
+def _to_out(entry: Entry, shares: dict[int, dict[str, int]], labels: dict[int, str]) -> EntryOut:
     return EntryOut(
         **entry.model_dump(),
-        statement_label=st.label if st else None,
-        shares={str(s.member_id): s.amount_jpy for s in shares},
+        statement_label=labels.get(entry.statement_id) if entry.statement_id else None,
+        shares=shares.get(entry.id, {}),
     )
 
 
@@ -53,7 +79,10 @@ def list_entries(
         stmt = stmt.where(Entry.date >= since)
     if until is not None:
         stmt = stmt.where(Entry.date <= until)
-    return [to_entry_out(session, e) for e in session.exec(stmt)]
+    rows = list(session.exec(stmt))
+    shares = _shares_by_entry(session, [e.id for e in rows])
+    labels = _labels(session, [e.statement_id for e in rows])
+    return [_to_out(e, shares, labels) for e in rows]
 
 
 @router.get("/{entry_id}", response_model=EntryOut)

@@ -89,9 +89,10 @@
         >
           {{ mineText }}
         </div>
-      </div>
-      <div class="hidden">
-        <!-- 不锁历史，但改动必须可见：否则下一张的「上期结转」没人解释得清 -->
+
+        <!-- 不锁历史，但改动必须可见：否则下一张的「上期结转」没人解释得清。
+             **这条横幅是那条规矩唯一的可见凭证** —— 曾被一个 class="hidden" 的
+             外壳罩住（重构时套错的），于是「可以改」成了「改了没人知道」 -->
         <q-banner v-if="bill.edited_after_cut" dense class="bg-orange-1 text-orange-9 q-mt-sm rounded-borders">
           {{ t('bill.editedAfterCut', {
             n: bill.edited_after_cut.count,
@@ -394,11 +395,21 @@ const mineText = computed(() => {
   if (!row) return ''
   if (row.closing === 0) return t('bill.youSettled')
   if (row.closing > 0) return t('bill.youReceive', { amount: formatYen(row.closing) })
-  const to = bill.value?.transfers.find((x) => x.from_id === row.member_id)
-  return t('bill.youPay', {
-    to: to ? nameOf(to.to_id) : '',
-    amount: formatYen(Math.abs(row.closing)),
-  })
+
+  // 我要转出的每一笔。**得全列出来**：原来只取第一条、却把欠款总额安在那个人
+  // 头上 —— 要分给两个人时，屏幕上最显眼的那行字会让人把全部的钱转给其中一个
+  const mineOut = (bill.value?.transfers ?? []).filter((x) => x.from_id === row.member_id)
+  if (mineOut.length === 1) {
+    const only = mineOut[0]!
+    return t('bill.youPay', { to: nameOf(only.to_id), amount: formatYen(only.amount) })
+  }
+  if (mineOut.length > 1) {
+    return t('bill.youPayList', {
+      list: mineOut.map((x) => `${nameOf(x.to_id)} ${formatYen(x.amount)}`).join('、'),
+    })
+  }
+  // 方案里没有我这条边（已出账单用的是冻结方案，事后改账会出现这种）：只说欠多少
+  return t('bill.youOwe', { amount: formatYen(Math.abs(row.closing)) })
 })
 
 /** 改完数据强制重取这一张。进页面用的是 ensure（缓存先上屏） */
@@ -569,6 +580,7 @@ function doCut() {
       // 出账把所有缓存都变旧了（草稿清空、多出一张单子），整体重取
       bills.views = {}
       bills.statements = null
+      bills.detail = null           // 刚出的这张就是「最近一张」；不归零会停在之前翻开的旧账单上
       bills.tab = 'current'         // 出完账就该看这张新单子；地址不动
       await bills.ensure('current')
       // 记一笔那屏的「日期不许选回已出账范围」靠 ledger.prevCutAt，

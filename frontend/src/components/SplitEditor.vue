@@ -102,6 +102,7 @@ import { useI18n } from 'vue-i18n'
 import type { Member } from 'src/api/types'
 import { SplitError, split } from 'src/core/split'
 import { formatYen } from 'src/i18n'
+import { useMeta } from 'src/stores/meta'
 
 const props = defineProps<{
   amount: number
@@ -129,6 +130,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const meta = useMeta()
 
 const weights = ref<Record<string, number>>({})
 const adjustments = ref<Record<string, number>>({})
@@ -173,7 +175,10 @@ function resetWeights() {
   typing.value = {}
 }
 resetWeights()
-watch(() => props.members, resetWeights)
+// 盯的是**参与人这个集合**，不是数组的身份。按身份比的话，调用方每渲染一次
+// 传一个新数组（比如按日期现算的参与人）就会把用户刚调好的比例重置回默认 ——
+// 改一下日期，自定义分摊当场没了
+watch(() => props.members.map((m) => m.id).join(','), resetWeights)
 // 换了分类 → 换一套默认规则重来。touched 一并清掉，否则会把上一个分类的规则带过去
 watch(
   () => props.seedRule,
@@ -187,10 +192,23 @@ const rule = computed<Record<string, unknown>>(() => ({
   mode: 'ratio',
   weights: weights.value,
   adjustments: adjustments.value,
-  remainder_to: 'payer',
+  // 余数归谁是**设置项**，不是代码里写死的值。写死成 'payer' 的话，面板上
+  // 改了不生效，而且这条死值还会随规则一起存进 split_rule_json，把设置永久钉住
+  remainder_to: meta.setting<string>('remainder_to', 'payer'),
 }))
 
-const order = computed(() => props.members.map((m) => String(m.id)))
+/**
+ * 喂给分摊算法的成员顺序。**必须和后端一样（display_order）**，不能用
+ * props.members 那个「自己排第一」的展示顺序 —— 最大余数法平局时是靠成员在
+ * 这个数组里的下标决胜的，顺序一换，多出来的那 1 円就落到别人头上：
+ * 三人等分、金额除以 3 余 2 时（日常账里约三分之一），换个人登录，
+ * 预览里多担 1 円的就换一个人，而库里存的始终是后端那一份。
+ */
+const order = computed(() =>
+  [...props.members]
+    .sort((a, b) => a.display_order - b.display_order || a.id - b.id)
+    .map((m) => String(m.id)),
+)
 const error = ref('')
 
 const preview = computed<Record<string, number> | null>(() => {

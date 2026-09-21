@@ -84,6 +84,24 @@ def _net(session: Session, entries: list[Entry]) -> dict[int, int]:
     return net
 
 
+def _covers_from(prev: Statement | None, dates: list[dt.date]) -> str | None:
+    """这张单子的覆盖期从哪天算起。
+
+    正常就是**上一次出账那天** —— 它管的是那之后的一切。头一张没有上一次，
+    从第一笔算起。
+
+    但补录/回收站恢复出来的账，日期可能比上次出账还早（记一笔的日期下限只挡新记的，
+    改已有的那笔不受限）。真出现了就取更早的那个 —— 否则「7/28 〜 7/2」这种
+    头尾颠倒的区间会直接摆在账单顶上。
+    """
+    if not dates:
+        return None
+    first = min(dates)
+    if prev is None:
+        return first.isoformat()
+    return min(jst_date(prev.cut_at), first).isoformat()
+
+
 def _entries_before(session: Session, statement: Statement | None) -> list[Entry]:
     """在这张账单之前就已经出过账的全部账目 —— 用来算「上期结转」。"""
     stmt = select(Entry).where(Entry.deleted_at.is_(None), Entry.statement_id.is_not(None))
@@ -193,9 +211,7 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
         # 6/30 出账之后的一切。头一张没有上一次，只能从第一笔算起。
         # 一笔都没有就是**什么都没覆盖**，两端一起留空。
         # 只给 from 不给 to 的话，界面上会显示成「2026-09-22 〜 」这样断一截
-        "covers_from": (
-            (jst_date(prev.cut_at).isoformat() if prev else min(dates).isoformat()) if dates else None
-        ),
+        "covers_from": _covers_from(prev, dates),
         "covers_to": max(dates).isoformat() if dates else None,
         "total_expense": total_expense,
         "total_income": total_income,
@@ -306,7 +322,7 @@ def cut_statement(
     statement = Statement(
         label=label or f"{today.month}/{today.day} 出账",
         cut_at=now_utc(),
-        covers_from=jst_date(prev.cut_at) if prev else min(dates),
+        covers_from=dt.date.fromisoformat(_covers_from(prev, dates) or min(dates).isoformat()),
         covers_to=max(dates),
         cut_by=actor_id,
     )
