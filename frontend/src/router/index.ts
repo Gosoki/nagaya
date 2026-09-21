@@ -22,6 +22,8 @@ export const router = createRouter({
         // 原来的「余额」页是它的子集，留着只会让人问「这两个有什么区别」
         { path: 'bill/:statementId?', name: 'bill', component: () => import('src/pages/BillPage.vue') },
         // 静态段排在动态段前面（vue-router 自己按具体程度排，不看注册顺序）
+        // bill/current ＝ 最近出的那一张（还在收钱的那张），id 由页面自己查
+        { path: 'bill/current', name: 'bill-current', component: () => import('src/pages/BillPage.vue') },
         { path: 'bill/past', name: 'bill-past', component: () => import('src/pages/BillHistoryPage.vue') },
       ],
     },

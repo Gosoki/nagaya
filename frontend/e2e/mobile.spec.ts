@@ -226,11 +226,16 @@ test('出账单：划一条线，之后记的账进下一张', async ({ page }) 
   const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
 
   await page.goto('/bill')
-  await expect(page.getByText('当前账单（未出）')).toBeVisible()
+  await expect(page.getByText('当前账单')).toBeVisible()
   const draftTotal = (await (await page.request.get('/api/bill', { headers })).json()).total_expense
   expect(draftTotal).toBeGreaterThan(0)
 
   await page.getByRole('button', { name: '出账单' }).click()
+  // 距上次出账不到 20 天时「包括固定费」默认不勾（D29）。这条用例要的是「全扫进去」，
+  // 所以显式确认勾上 —— 不然跑过一轮 E2E 之后它会红在「草稿没清空」上，
+  // 看起来像出账坏了，其实是那个默认值在起作用
+  const withMonthly = page.locator('.q-dialog .q-checkbox')
+  if ((await withMonthly.getAttribute('aria-checked')) !== 'true') await withMonthly.click()
   await page.getByRole('button', { name: '确定' }).click()
   await expect(page.locator('.q-dialog')).toHaveCount(0)
 
@@ -722,4 +727,34 @@ test('没选分类：写了备注就记成兜底分类，两样都没有才弹�
   const bEntry = rows.find((e: { title: string }) => e.title === 'E2E弹框补的')
   expect(bEntry.amount_jpy).toBe(999)
   expect(bEntry.category_id).toBe(a.category_id)
+})
+
+test('账单三页：未出账 / 已出账 / 以前，各管一段', async ({ page }) => {
+  await login(page)
+  await page.getByRole('tab', { name: '账单' }).click()
+  await expect(page.locator('.bill-tabs .q-tab')).toHaveText(['未出账', '已出账', '以前'])
+
+  // ① 未出账：还没归到任何账单上的流水
+  await expect(page).toHaveURL(/\/bill$/)
+  await expect(page.locator('.head')).toContainText('当前账单')
+  await expect(page.getByRole('button', { name: '出账单' })).toBeVisible()
+
+  // ② 已出账：最近出的那一张，点了出账但可能还没转清
+  await page.getByRole('tab', { name: '已出账' }).click()
+  await expect(page).toHaveURL(/\/bill\/current$/)
+  // 先用会自动重试的断言等内容换过来：load() 是异步的，
+  // 直接 innerText 读到的还是上一页的标题
+  await expect(page.getByRole('button', { name: '出账单' }), '已出的账单上不该再有出账按钮').toHaveCount(0)
+  const openLabel = (await page.locator('.head .text-subtitle1').innerText()).trim()
+  expect(openLabel, '已出账该显示一张已经出过的账单').toContain('出账')
+
+  // ③ 以前：**不含**已出账那一张，两处都列会让人以为是两张
+  await page.getByRole('tab', { name: '以前' }).click()
+  await expect(page).toHaveURL(/\/bill\/past$/)
+  const past = await page.locator('.q-item').allTextContents()
+  expect(past.some((t) => t.includes(openLabel)), '已出账那张不该在「以前」里重复出现').toBe(false)
+  // 不写死张数：跑过一轮 E2E 之后库里会多出几张，写死了红在一个跟这屏无关的地方
+  const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
+  const all = await (await page.request.get('/api/statements', { headers })).json()
+  expect(past.length, '「以前」应当正好少列一张（那张在「已出账」）').toBe(all.length - 1)
 })

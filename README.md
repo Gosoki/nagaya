@@ -42,7 +42,8 @@
 cd backend
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m tools.seed_dev        # 建库 + 三个开发账号（密码 dev12345）
-./run.sh                                  # http://localhost:8000
+./run.sh                                  # 监听 0.0.0.0:8000，同一个 WiFi 下手机直接开
+                                          # 地址：ipconfig getifaddr en0 → http://<那个 IP>:8000
 
 # 前端（开发）
 cd frontend

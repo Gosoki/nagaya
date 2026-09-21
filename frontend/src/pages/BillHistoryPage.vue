@@ -1,4 +1,5 @@
-<!-- 出过的账单，新的在前。每行直接给金额和结清状态 —— 翻旧账最常问的
+<!-- 更早的账单，新的在前。**不含最近那一张** —— 它在「已出账」那页，
+     两处都列会让人以为是两张。每行直接给金额和结清状态，翻旧账最常问的
      就是「那个月多少钱、转清了没」，不该点进去才看得到。 -->
 <template>
   <q-page class="q-pb-xl">
@@ -52,7 +53,8 @@ const router = useRouter()
 const statements = ref<Statement[]>([])
 
 onMounted(async () => {
-  statements.value = await api.get<Statement[]>('/api/statements')
+  // 最近那一张归「已出账」管，这里从第二张开始
+  statements.value = (await api.get<Statement[]>('/api/statements')).slice(1)
 })
 
 function open(id: number) {

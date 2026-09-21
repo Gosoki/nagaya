@@ -8,15 +8,17 @@
 -->
 <template>
   <q-page class="page">
-    <!-- 本期和以前分成两页：看本期问的是「还要填什么、该出账了没」，
-         翻旧单子问的是「上个月多少、谁转了没」，混一页两边都别扭 -->
-    <BillTabs v-if="statementId === null" />
+    <!-- 三个页签是一笔账的三段人生：未出账 → 已出账 → 以前。
+         从「以前」点进某一张时换成返回条，那时哪个页签都不该亮着 -->
+    <BillTabs v-if="!pinned" />
     <div v-else class="page-head">
       <q-btn dense flat round icon="arrow_back" @click="backToPast" />
       <div class="col text-weight-medium">{{ t('bill.tabPast') }}</div>
     </div>
 
-    <div v-if="!bill" class="text-center text-grey-6 q-mt-xl">{{ t('bill.noPeriod') }}</div>
+    <div v-if="!bill" class="text-center text-grey-6 q-mt-xl">
+      {{ isOpenTab ? t('bill.noOpen') : t('bill.noPeriod') }}
+    </div>
 
     <template v-else>
       <div class="head q-pa-md">
@@ -320,8 +322,10 @@ const auth = useAuth()
 const ledger = useLedger()
 
 const bill = ref<Bill | null>(null)
-/** 路由里带的账单 id。null ＝ 本期那张草稿 */
-const statementId = computed(() => Number(route.params.statementId) || null)
+/** 从「以前」点进来的那一张：地址里写死了 id，页签换成返回条 */
+const pinned = computed(() => Number(route.params.statementId) || null)
+/** 「已出账」那页：看的是最近出的那一张，id 由页面自己查 */
+const isOpenTab = computed(() => route.name === 'bill-current')
 const draftEntries = ref<Entry[]>([])
 const busy = ref<number | null>(null)
 const showFallback = ref(false)
@@ -358,9 +362,23 @@ const dueText = computed(() => {
   return day ? t('bill.dueBy', { date: `${day}` }) : t('bill.unsettled')
 })
 
-/** 看哪一张完全由路由决定：/bill ＝本期草稿，/bill/3 ＝那张出过的 */
+/**
+ * 看哪一张完全由路由决定：
+ *   /bill          未出账（还没归到任何账单上的流水）
+ *   /bill/current  已出账（最近出的那一张，id 现查）
+ *   /bill/3        以前那一张
+ */
 async function load() {
-  const id = statementId.value
+  let id = pinned.value
+  if (isOpenTab.value) {
+    const sts = await api.get<Statement[]>('/api/statements')
+    id = sts[0]?.id ?? null
+    if (id === null) {
+      bill.value = null
+      draftEntries.value = []
+      return
+    }
+  }
   bill.value = id
     ? await api.get<Bill>(`/api/statements/${id}/bill`)
     : await api.get<Bill>('/api/bill')
@@ -418,7 +436,7 @@ function backToPast() {
 }
 
 onMounted(load)
-watch(statementId, load)   // 在两张单子之间跳时组件不会重建，得自己重新拉
+watch(() => route.fullPath, load)   // 页签之间跳时组件不会重建，得自己重新拉
 
 /** 贴进 LINE 的纯文本。在前端拼，所以自动跟随界面语言（SPEC §7.5）。 */
 const billText = computed(() => {
@@ -525,7 +543,7 @@ function doCut() {
       const cut = await api.get<Bill>(`/api/statements/${st.id}/bill`)
       cutResult.value = cut
       // 跳到这张新单子的地址上，界面才跟 URL 对得上（顶上会变成返回条）
-      await router.push({ name: 'bill', params: { statementId: String(st.id) } })
+      await router.push({ name: 'bill-current' })
       // 记一笔那屏的「日期不许选回已出账范围」靠 ledger.prevCutAt，
       // 出完账不刷新的话它还是出账前的旧值，锁就形同虚设
       await ledger.refresh()
