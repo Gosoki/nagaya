@@ -117,6 +117,13 @@ const props = defineProps<{
    * touched 就置位，保存时把显式的 1:1:1 传上去，把分类的固定金额规则顶掉了。
    */
   seedRule?: Record<string, unknown> | null
+  /**
+   * 这笔账的 id。只在「余数归谁 ＝ 逐笔轮转」时才用得上 —— 后端的轮转依据是
+   * `entry.id`，不给的话这边恒为 0，除不尽的每一笔（三个人分摊里大多数）
+   * 预览和落库指的就不是同一个人。改已有的账时 id 是已知的，先把这一半补上；
+   * 新记的那一笔在保存之前没有 id，那 1 円归谁只能以后端为准。
+   */
+  entryId?: number | null
   /** 段选中态的颜色，跟着账目类型走（支出蓝 / 收入绿 / 转账黄）。固定费面板不传，就是蓝 */
   color?: string
 }>()
@@ -241,6 +248,7 @@ const preview = computed<Record<string, number> | null>(() => {
     return split(rule.value as never, props.amount, {
       order: order.value,
       payer: props.payerId === null ? null : String(props.payerId),
+      rotateSeed: props.entryId ?? 0,
     })
   } catch (e) {
     // 权重全 0 时不另外红一行「没人参与分摊」：底下的合计已经把缺口报出来了，

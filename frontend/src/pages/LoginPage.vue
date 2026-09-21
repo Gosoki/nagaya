@@ -70,7 +70,14 @@ async function submit() {
     await auth.login(name.value, password.value)
     await router.push({ name: 'add' })
   } catch (e) {
-    error.value = e instanceof ApiError ? t('login.failed') : String(e)
+    // 只有后端真的说「不认识你」才是密码不对。断网、服务器没起来、500 都不是 ——
+    // 原来一律显示「用户名或密码不对」，于是没网的时候人会一遍遍去改密码
+    error.value =
+      e instanceof ApiError
+        ? e.status === 401
+          ? t('login.failed')
+          : e.text
+        : String(e)
   } finally {
     busy.value = false
   }

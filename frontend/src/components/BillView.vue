@@ -200,7 +200,10 @@
               </div>
             </div>
             <div class="breakdown text-caption text-grey-6">
-              <span>{{ t('bill.owed') }} {{ formatYen(row.owed) }}</span>
+              <!-- 和旁边四项一个规矩：是 0 就别占一行。
+                   刚出完账的草稿页上，三个人各显示一遍「应担 ¥0」，
+                   底下还跟着一句「大家都平了，不用转账」—— 同一件事说四遍 -->
+              <span v-if="row.owed">{{ t('bill.owed') }} {{ formatYen(row.owed) }}</span>
               <span v-if="row.paid">{{ t('bill.paid') }} {{ formatYen(row.paid) }}</span>
               <span v-if="row.transferred_out">
                 {{ t('bill.prepaid') }} {{ formatYen(row.transferred_out) }}
@@ -477,9 +480,23 @@ const billText = computed(() => {
   lines.push(`【${head}】 ${t('bill.total')} ${formatYen(b.total_expense)}`)
   if (b.covers_from) lines.push(t('bill.coversRange', { from: b.covers_from, to: b.covers_to }))
   if (!b.is_draft) lines.push(b.settled ? t('bill.settledBadge') : t('bill.unsettled'))
+  // 每人明细是**实时**重算的，转账方案却是出账当时冻结的那份 —— 这张单子
+  // 被改过之后两者必然对不上。屏幕上那条橙色横幅是这条规矩唯一的凭证，
+  // 而复制文本才是「用户手里那份」，不能只有屏幕上有
+  if (b.edited_after_cut) {
+    lines.push(
+      b.edited_after_cut.from_earlier
+        ? t('bill.driftedFromEarlier')
+        : t('bill.editedAfterCut', {
+            n: b.edited_after_cut.count,
+            frozen: formatYen(b.edited_after_cut.frozen_total ?? 0),
+            live: formatYen(b.edited_after_cut.live_total),
+          }),
+    )
+  }
   lines.push('')
   for (const r of b.members) {
-    const bits = [`${t('bill.owed')} ${formatYen(r.owed)}`]
+    const bits = r.owed ? [`${t('bill.owed')} ${formatYen(r.owed)}`] : []
     if (r.paid) bits.push(`${t('bill.paid')} ${formatYen(r.paid)}`)
     if (r.transferred_out) bits.push(`${t('bill.prepaid')} ${formatYen(r.transferred_out)}`)
     if (r.transferred_in) bits.push(`${t('bill.received')} ${formatYen(r.transferred_in)}`)
@@ -512,12 +529,21 @@ async function copyBill() {
   }
 }
 
-/** 点「已完成」＝记一笔转账。金额可改小，差额自动结转 —— 这就是赊账。 */
+/**
+ * 点「已完成」＝记一笔转账。金额可改小，差额自动结转 —— 这就是赊账。
+ *
+ * 预填的是**还差多少**，不是方案上的全额。原来永远预填全额，而部分还款之后
+ * 这一屏一个字都不会变（转账进的是下一张草稿，这张的每人行、方案、结清标记
+ * 全由它自己的明细算），于是「我刚才是不是没点上」→ 再按一次确定 → 重复记了
+ * 一整笔。屏幕上没有任何地方提示过。
+ */
 function confirmReceived(tr: BillTransfer, index: number) {
+  const paid = bill.value?.settled_paid?.[index] ?? 0
+  const left = Math.max(tr.amount - paid, 0)
   $q.dialog({
     title: t('bill.done'),
     message: t('bill.doneHint', { from: nameOf(tr.from_id), to: nameOf(tr.to_id) }),
-    prompt: { model: String(tr.amount), type: 'number' },
+    prompt: { model: String(left || tr.amount), type: 'number' },
     cancel: true,
   }).onOk(async (value: string) => {
     const amount = Math.floor(Number(value))
@@ -535,6 +561,17 @@ function confirmReceived(tr: BillTransfer, index: number) {
         to_member_id: tr.to_id,
       })
       await load()
+      // 「记上了」这件事必须看得见。没有这一句的话，部分还款在这一屏上
+      // 完全没有反馈 —— 人只会再按一次
+      $q.notify({
+        type: 'positive',
+        timeout: 3000,
+        message: t('bill.doneRecorded', {
+          from: nameOf(tr.from_id),
+          to: nameOf(tr.to_id),
+          amount: formatYen(amount),
+        }),
+      })
     } catch (e) {
       $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e) })
     } finally {
@@ -573,13 +610,13 @@ function doCut() {
       // 不该让人再自己翻回去找
       const cut = await api.get<Bill>(`/api/statements/${st.id}/bill`)
       cutResult.value = cut
-      // 跳到这张新单子的地址上，界面才跟 URL 对得上（顶上会变成返回条）
-      // 出账把所有缓存都变旧了（草稿清空、多出一张单子），整体重取
-      bills.views = {}
-      bills.statements = null
-      bills.detail = null           // 刚出的这张就是「最近一张」；不归零会停在之前翻开的旧账单上
+      // 出账把所有缓存都变旧了（草稿清空、多出一张单子、固定费整批挪走），整体重取。
+      // **固定费那份缓存以前不在这里面**，于是切回「未出账」会把刚出账的那批
+      // 当本期草稿画出来，还可点可改
+      bills.invalidate()
       bills.tab = 'current'         // 出完账就该看这张新单子；地址不动
       await bills.ensure('current')
+      void bills.loadMonthly('draft').catch(() => {})   // 顺手补热，切回草稿不白闪
       // 记一笔那屏的「日期不许选回已出账范围」靠 ledger.prevCutAt，
       // 出完账不刷新的话它还是出账前的旧值，锁就形同虚设
       await ledger.refresh()

@@ -612,14 +612,28 @@ test('删掉一项固定费，本期已录的那笔账仍然留在账单上', as
   await expect(page.locator('.q-dialog')).toContainText('4,200')
   await page.getByRole('button', { name: '确定' }).click()
   await expect(page.locator('.q-dialog')).toHaveCount(0)
-  await expect(page.locator('.q-expansion-item').filter({ hasText: '燃气' })).toHaveCount(0)
+
+  // **那一行要留着，而且要说明白自己是什么状态。**
+  // 钱还在账单的合计和每人应担里，行一消失这笔钱就在界面上彻底看不见了 ——
+  // 同一张草稿两个对不上的合计，而且那笔钱既改不了也删不掉。
+  // 所以：行留着、金额照显、状态位写「已删掉，这笔还在」、不再给「删掉这一项」
+  const gone = page.locator('.q-expansion-item').filter({ hasText: '燃气' })
+  await expect(gone).toHaveCount(1)
+  await expect(gone).toContainText('已删掉，这笔还在')
+  await expect(gone.locator('.amount-input')).toHaveValue('4,200')
+  const cat = (await (await page.request.get('/api/categories?include_archived=true', { headers })).json())
+    .find((c: { id: number }) => c.id === gas.id)
+  expect(cat.archived, '分类本身确实归档了').toBe(true)
 
   // 账没动：余额一分不差，account 也还在账目里
   const after = (await (await page.request.get('/api/balances', { headers })).json()).balances
   expect(after, '删一项固定费不该动到任何人的余额').toEqual(before)
 
   await page.getByRole('button', { name: '撤销' }).click()
-  await expect(page.locator('.q-expansion-item').filter({ hasText: '燃气' })).toHaveCount(1)
+  await expect.poll(async () =>
+    (await (await page.request.get('/api/categories', { headers })).json())
+      .some((c: { id: number }) => c.id === gas.id),
+  ).toBe(true)
 })
 
 test('账单 Tab 上就能看到并填固定费', async ({ page }) => {
@@ -958,12 +972,12 @@ test('「和上期一样」：只搬开了开关的那几项，而且要说出�
     (await (await page.request.get('/api/entries?unbilled_only=true&limit=100', { headers })).json())
       .find((e: { category_id: number }) => e.category_id === id)
 
-  // 房租开、燃气不开；把两者本期的记录都清掉
+  // 房租开、燃气不开。**用「出账」来造出一期干净的草稿**，不是把草稿里那两笔删掉 ——
+  // 手动删掉的项现在不许被搬回来（删一次复活一次的话用户根本删不掉），
+  // 拿删除来造前提等于在测一条相反的规矩
   await page.request.patch(`/api/categories/${rent.id}`, { headers, data: { same_as_last: true } })
-  for (const id of [rent.id, gas.id]) {
-    const e = await draftOf(id)
-    if (e) await page.request.delete(`/api/entries/${e.id}`, { headers })
-  }
+  await page.request.post('/api/statements', { headers })
+  expect(await draftOf(rent.id), '出完账草稿该是空的').toBeFalsy()
 
   await page.goto('/bill')
   // 自动记的钱必须当场报出来 —— 悄悄填上正是那条规矩要防的事
@@ -971,6 +985,14 @@ test('「和上期一样」：只搬开了开关的那几项，而且要说出�
   await expect(page.locator('.q-notification')).toContainText('房租')
   await expect.poll(async () => (await draftOf(rent.id))?.amount_jpy).toBeTruthy()
   expect(await draftOf(gas.id), '没开开关的一分都不许自动记').toBeFalsy()
+
+  // **删掉之后不许复活。** 这个月真的没有房租时，用户删掉它 ——
+  // 而面板每挂载一次就调一次 carry，不挡住的话他永远删不掉
+  const carried = await draftOf(rent.id)
+  await page.request.delete(`/api/entries/${carried.id}`, { headers })
+  await page.reload()
+  await expect(page.locator('.wrap')).toBeVisible()
+  await expect.poll(async () => (await draftOf(rent.id))?.amount_jpy).toBeFalsy()
 
   await page.request.patch(`/api/categories/${rent.id}`, { headers, data: { same_as_last: false } })
 })

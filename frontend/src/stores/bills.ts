@@ -73,6 +73,11 @@ export const useBills = defineStore('bills', () => {
   /** 在飞的请求数。为 0 且没数据，才敢说「这儿是空的」 */
   const pending = ref(0)
   const inflight = new Map<string, Promise<void>>()
+  /**
+   * 每个槽位发出去的第几发。用来认「我是不是已经过时了」——
+   * 强制重取时旧的那一发照样会回来，回来之后不许再往缓存里写。
+   */
+  const seq = new Map<string, number>()
 
   /**
    * 路由 key → 缓存 key。
@@ -102,7 +107,7 @@ export const useBills = defineStore('bills', () => {
     return statementsTask
   }
 
-  async function fetchView(key: BillKey): Promise<void> {
+  async function fetchView(key: BillKey, slot: string, my: number): Promise<void> {
     // 「已出账」每次都把列表重取一遍：别人出了新的一张，这儿得跟上
     if (key === 'current' || statements.value === null) await loadStatements()
     const ck = cacheKey(key)
@@ -116,6 +121,9 @@ export const useBills = defineStore('bills', () => {
           : `/api/entries?statement_id=${id}&limit=200`,
       ),
     ])
+    // 我不是这个槽位上最新的那一发了 —— 别把旧数据盖回去。
+    // 少了这一句，reload 发出的新请求先回、写对了，随后旧的那发才回来又盖成旧值
+    if (seq.get(slot) !== my) return
     views.value = { ...views.value, [ck]: { bill, entries } }
   }
 
@@ -124,16 +132,22 @@ export const useBills = defineStore('bills', () => {
    * 按**缓存 key** 去重，不按路由 key —— 否则 'current' 和 'st:4' 明明是
    * 同一张单子，会各发各的
    */
-  function run(key: BillKey): Promise<void> {
+  function run(key: BillKey, force = false): Promise<void> {
     // 'current' 单独占一个槽，不跟 'st:N' 合并：它比别人多干一件事 ——
     // 重取单子列表。并到某个 'st:N' 的在飞请求上的话，别人刚出的那张新账单
     // 就一直进不到列表里，这一页会一直显示上一张
     const slot = key === 'current' ? 'current' : (cacheKey(key) ?? key)
     const already = inflight.get(slot)
-    if (already) return already
+    // **只有「进页面校正」才许复用在飞的那一发。** 改完数据的强制重取不能复用：
+    // 一个在写之前发出的 GET，回来的必然是写之前的数据，而它被当成「重取结果」
+    // 写进缓存之后就再也没有人纠正了 —— 连填五项固定费时，最后一项的钱
+    // 会从账单合计里永久少掉，而那份数字正是要复制进群里的
+    if (already && !force) return already
+    const my = (seq.get(slot) ?? 0) + 1
+    seq.set(slot, my)
     pending.value += 1
-    const task = fetchView(key).finally(() => {
-      inflight.delete(slot)
+    const task = fetchView(key, slot, my).finally(() => {
+      if (inflight.get(slot) === task) inflight.delete(slot)
       pending.value -= 1
     })
     inflight.set(slot, task)
@@ -150,8 +164,8 @@ export const useBills = defineStore('bills', () => {
     return Promise.resolve()
   }
 
-  /** 改完数据强制重取，要等它 */
-  const reload = (key: BillKey) => run(key)
+  /** 改完数据强制重取，要等它。force：绝不复用改动之前发出的那一发 */
+  const reload = (key: BillKey) => run(key, true)
 
   /** 固定费面板。ck 是缓存 key（'draft' 或 'st:4'），面板自己算得出来 */
   async function loadMonthly(ck: string): Promise<MonthlyData> {
@@ -168,8 +182,23 @@ export const useBills = defineStore('bills', () => {
    */
   function refreshCached(): void {
     for (const ck of Object.keys(views.value)) {
-      run(ck as BillKey).catch(() => {})
+      run(ck as BillKey, true).catch(() => {})
     }
+  }
+
+  /**
+   * 出账之后把缓存整个丢掉。
+   *
+   * 出账把草稿里那批固定费整个挪到新单子上了 —— `monthly['draft']` 里存的
+   * entry_id/version 于是全指向**已经归到新账单上的**那几笔账。而固定费面板是
+   * 缓存先上屏的：切回「未出账」会把刚出账的那批当本期草稿画出来，还可点可改。
+   * monthly 以前不在这组清理里，漏了整整一块。
+   */
+  function invalidate(): void {
+    views.value = {}
+    monthly.value = {}
+    statements.value = null
+    detail.value = null
   }
 
   /** 预热另外两页 + 固定费面板，第一次切过去就不用等 */
@@ -180,6 +209,6 @@ export const useBills = defineStore('bills', () => {
 
   return {
     tab, detail, statements, views, monthly, pending,
-    cacheKey, loadStatements, loadMonthly, ensure, reload, refreshCached, warm,
+    cacheKey, loadStatements, loadMonthly, ensure, reload, refreshCached, invalidate, warm,
   }
 })

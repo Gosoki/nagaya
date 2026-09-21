@@ -10,7 +10,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
-import { api } from 'src/api/client'
+import { ApiError, api } from 'src/api/client'
 import type { Entry, EntryPayload } from 'src/api/types'
 
 const KEY = 'nagaya.drafts'
@@ -60,20 +60,32 @@ export const useDrafts = defineStore('drafts', () => {
     write(items.value)
   }
 
-  /** 补交。逐条提交，成功一条删一条 —— 中途再断网也不会重复提交已成功的。 */
-  async function submitAll(): Promise<{ ok: number; failed: number }> {
+  /**
+   * 补交。逐条提交，成功一条删一条 —— 中途再断网也不会重复提交已成功的。
+   *
+   * **区分「没网」和「后端不收」。** 原来一律算失败、一律报「连不上服务器」：
+   * 一条被后端明确拒绝的草稿（金额为 0、分类被归档了、日期落进已出账范围）
+   * 会永远卡在那儿，横幅一直挂着「有 1 笔没提交」，点多少次都是同一句错话，
+   * 而真正的原因一个字都看不到。
+   *
+   * 被拒的那条照样留着（里面是用户真填过的钱，不能替他扔掉），但要把后端那句话
+   * 带回去说清楚，让人知道该去改哪儿。
+   */
+  async function submitAll(): Promise<{ ok: number; offline: number; rejected: string[] }> {
     let ok = 0
-    let failed = 0
+    let offline = 0
+    const rejected: string[] = []
     for (const draft of [...items.value]) {
       try {
         await api.post<Entry>('/api/entries', draft.payload)
         remove(draft.id)
         ok += 1
-      } catch {
-        failed += 1
+      } catch (e) {
+        if (e instanceof ApiError && e.code !== 'network') rejected.push(e.text)
+        else offline += 1
       }
     }
-    return { ok, failed }
+    return { ok, offline, rejected }
   }
 
   return { items, count, add, remove, clear, submitAll }

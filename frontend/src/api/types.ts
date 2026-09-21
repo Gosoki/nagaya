@@ -112,6 +112,8 @@ export interface Bill {
   suggest_monthly: boolean
   settled: boolean
   settled_transfers: boolean[]
+  /** 方案里每一笔**已经转过去多少**。界面拿它算「还差多少」，别再预填全额 */
+  settled_paid: number[]
   total_expense: number
   total_income: number
   entry_count: number
@@ -131,6 +133,8 @@ export interface MonthlyRow {
   default_payer_id: number | null
   /** 每期金额都一样 */
   same_as_last: boolean
+  /** 这一项已经删掉（归档）了，只是本期还挂着钱，所以那一行还留着 */
+  archived: boolean
   entry_id: number | null
   amount: number | null
   version: number | null

@@ -5,9 +5,16 @@ import { api } from 'src/api/client'
 import type { Entry, EntryPayload } from 'src/api/types'
 import { useBills } from 'src/stores/bills'
 
+/**
+ * 账目列表。
+ *
+ * **写成功就是成功。** 写完之后的那些刷新（账单缓存、列表）一律不许把失败冒泡上来 ——
+ * 原来 create/update/remove 都是 `await api.get('/api/balances')` 紧跟在写后面，
+ * 于是「账已经记上了、只是后面那个 GET 断网了」会被调用方当成「这笔没记上」，
+ * 原样存进离线草稿；补交时再 POST 一遍，账本里就有了两笔一模一样的钱。
+ */
 export const useLedger = defineStore('ledger', () => {
   const entries = ref<Entry[]>([])
-  const balances = ref<Record<string, number>>({})
   const loading = ref(false)
   /** 上一张出过的账单是什么时候切的。用来挡住把日期选回已出账的范围里 */
   const prevCutAt = ref<string | null>(null)
@@ -23,15 +30,15 @@ export const useLedger = defineStore('ledger', () => {
   async function refresh() {
     loading.value = true
     try {
-      const [e, b, bill] = await Promise.all([
+      // 不拉 /api/balances：它存下来之后没有任何组件读过（余额页早就并进账单页了），
+      // 每次开 App、每记一笔都白跑一个来回
+      const [e, bill] = await Promise.all([
         // 筛选在前端做，拉少了就筛不全
         api.get<Entry[]>(`/api/entries?limit=${LIMIT}`),
-        api.get<{ balances: Record<string, number> }>('/api/balances'),
         api.get<{ prev_cut_at: string | null; prev_label: string | null }>('/api/bill'),
       ])
       entries.value = e
       truncated.value = e.length >= LIMIT
-      balances.value = b.balances
       prevCutAt.value = bill.prev_cut_at
       prevLabel.value = bill.prev_label
     } finally {
@@ -43,10 +50,8 @@ export const useLedger = defineStore('ledger', () => {
   async function create(payload: EntryPayload): Promise<Entry> {
     const saved = await api.post<Entry>('/api/entries', payload)
     entries.value = [saved, ...entries.value]
-    const b = await api.get<{ balances: Record<string, number> }>('/api/balances')
-    balances.value = b.balances
     // 账单那几页缓存着，记完这笔它们就旧了。后台刷，不清空 ——
-    // 清空的话下次点过去又要白屏等一遍
+    // 清空的话下次点过去又要白屏等一遍。**失败也不冒泡**：这笔已经记上了
     useBills().refreshCached()
     return saved
   }
@@ -55,8 +60,6 @@ export const useLedger = defineStore('ledger', () => {
   async function update(id: number, version: number, payload: Partial<EntryPayload>): Promise<Entry> {
     const saved = await api.patch<Entry>(`/api/entries/${id}?version=${version}`, payload)
     entries.value = entries.value.map((e) => (e.id === id ? saved : e))
-    const b = await api.get<{ balances: Record<string, number> }>('/api/balances')
-    balances.value = b.balances
     useBills().refreshCached()
     return saved
   }
@@ -64,13 +67,19 @@ export const useLedger = defineStore('ledger', () => {
   async function remove(entry: Entry) {
     await api.del(`/api/entries/${entry.id}`)
     entries.value = entries.value.filter((e) => e.id !== entry.id)
-    const b = await api.get<{ balances: Record<string, number> }>('/api/balances')
-    balances.value = b.balances
     useBills().refreshCached()
   }
 
+  /** 撤销刚才那次删除。后端一直是软删，只是以前前端没接这个入口 */
+  async function restore(id: number): Promise<Entry> {
+    const back = await api.post<Entry>(`/api/entries/${id}/restore`)
+    entries.value = [back, ...entries.value.filter((e) => e.id !== id)]
+    useBills().refreshCached()
+    return back
+  }
+
   return {
-    entries, balances, loading, truncated, prevCutAt, prevLabel,
-    refresh, create, update, remove,
+    entries, loading, truncated, prevCutAt, prevLabel,
+    refresh, create, update, remove, restore,
   }
 })

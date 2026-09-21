@@ -110,6 +110,7 @@
           :payer-id="payerId"
           :color="kindPalette"
           :seed-rule="ownRule ?? selectedCategoryRule"
+          :entry-id="editingId"
           @change="onSplitChange"
         />
       </div>
@@ -191,6 +192,13 @@ const version = ref(0)
 const billedLabel = ref<string | null>(null)
 /** 改的时候分摊要从**这笔自己的规则**起步，不是分类默认值 —— 否则一打开就被改回默认 */
 const ownRule = ref<Record<string, unknown> | null>(null)
+/**
+ * 这笔账**落库时**那条规则和 kind。和 ownRule 分开存：ownRule 会被「换分类」清掉，
+ * 而后端算参与人时看的是 entry.split_rule_json，换不换分类都照看不误。
+ * 只用 ownRule 的话，「改日期 ＋ 换分类」会再次和后端对不上。
+ */
+const loadedRule = ref<Record<string, unknown> | null>(null)
+const loadedKind = ref<EntryKind | null>(null)
 
 const rule = ref<Record<string, unknown> | null>(null)
 const splitValid = ref(true)
@@ -216,6 +224,23 @@ const gridCategories = computed(() => {
 
 /** 支出蓝 / 收入绿 / 转账黄 —— 金额、主按钮、段选中态都跟着它走，
     一眼就知道自己在记哪种账，不用回头看顶上选中的是哪个 */
+/**
+ * 从「转账」切成支出/收入时，把这笔账原来的规则丢掉。
+ *
+ * 转账落库的规则是 `{"mode":"exact","exact":{转入人: 全额}}`。拿它当分摊基准，
+ * SplitEditor 会把它换算成「全额挂在原转入人头上」的调整额 —— 屏幕上写着
+ * A ¥0 / B ¥1,000 / C ¥0，合计对得上、还是绿的。直接存 → 后端按均分存，
+ * 和刚才看到的不是一回事；在面板上碰一下 → 那条换算规则真被上传，B 凭空多担 667 円。
+ * 后端本来就防着这件事（update_entry 里 `inheritable = prev_kind != settlement`），
+ * 是前端把这道防线绕开的，这里把同一条规矩镜像一遍。
+ */
+watch(kind, (now, before) => {
+  if (before === 'settlement' && now !== 'settlement') {
+    ownRule.value = null
+    loadedRule.value = null
+  }
+})
+
 const kindPalette = computed(() => KIND_PALETTE[kind.value])
 const kindInk = computed(() => KIND_COLOR[kind.value])
 
@@ -228,7 +253,23 @@ const signedAmount = computed(() => (kind.value === 'income' ? -amount.value : a
  * 那样每次渲染都返回一个新数组，prop 身份一直在变，SplitEditor 里那个
  * watch(() => props.members) 会不停地把用户刚调好的比例重置回默认
  */
-const splitMembers = computed(() => meta.membersOn(date.value))
+const splitMembers = computed(() => {
+  // **改一笔账时不按新日期重挑参与人。** 后端明写着「改日期不该换人」
+  // （update_entry 的 from_entry 那一支），预览要是跟着日期走，只要这笔账原来的
+  // 参与人里有谁不在新日期当天在籍的名单里（改日期跨过某人的入住日、或者事后
+  // 补填了谁的搬出日），屏幕上就比落库少分一个人 —— 而合计照样等于总额，
+  // balanced 是绿的，一点提示都没有
+  if (editingId.value !== null && loadedRule.value && loadedKind.value !== 'settlement') {
+    const ids = Object.keys(
+      (loadedRule.value.exact as Record<string, unknown>) ??
+        (loadedRule.value.weights as Record<string, unknown>) ??
+        {},
+    ).map(Number)
+    const rows = ids.map((id) => meta.byId[id]).filter(Boolean)
+    if (rows.length) return [...rows].sort((a, b) => a.display_order - b.display_order || a.id - b.id)
+  }
+  return meta.membersOn(date.value)
+})
 
 const minDate = computed(() => (ledger.prevCutAt ? jstDateOf(ledger.prevCutAt) : null))
 // 只有**新记**的账才限日期：新的一笔不管写哪天都落进当前草稿，选回已出账的范围
@@ -281,6 +322,8 @@ async function loadForEdit(id: number) {
     date.value = e.date
     version.value = e.version
     ownRule.value = e.split_rule_json
+    loadedRule.value = e.split_rule_json
+    loadedKind.value = e.kind
     billedLabel.value = e.statement_label
   } catch (err) {
     $q.notify({ type: 'negative', message: err instanceof ApiError ? err.text : String(err) })
@@ -322,13 +365,49 @@ async function saveEdit() {
   }
 }
 
+/**
+ * 删掉这一笔。
+ *
+ * 两处以前是缺的：
+ *   * **失败没有任何提示** —— 回调裸着一个 await，断网或者这笔刚被别人删掉时
+ *     对话框关掉、页面不动，用户只会反复点；
+ *   * **删完没有撤销** —— 后端一直是软删（`POST /entries/{id}/restore` 早就在那儿），
+ *     可前端从没接过这个入口。对比一下：删掉一个**固定费项目**（只是归档一个分类）
+ *     反而给了 6 秒撤销，而删掉一笔真金白银的账没有后悔药，轻重正好反了。
+ */
 function removeEntry() {
   if (editingId.value === null) return
+  const id = editingId.value
   $q.dialog({ title: t('common.delete'), message: t('entry.deleteConfirm'), cancel: true }).onOk(
     async () => {
-      await api.del(`/api/entries/${editingId.value}`)
-      await ledger.refresh()
+      try {
+        await api.del(`/api/entries/${id}`)
+      } catch (e) {
+        $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e) })
+        return
+      }
+      await ledger.refresh().catch(() => {})
       goBack()
+      $q.notify({
+        type: 'positive',
+        message: t('entry.deleted'),
+        timeout: 6000,
+        actions: [
+          {
+            label: t('common.undo'),
+            color: 'white',
+            handler: async () => {
+              try {
+                await ledger.restore(id)
+                await ledger.refresh().catch(() => {})
+                $q.notify({ type: 'positive', message: t('entry.restored'), timeout: 1500 })
+              } catch (e) {
+                $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e) })
+              }
+            },
+          },
+        ],
+      })
     },
   )
 }

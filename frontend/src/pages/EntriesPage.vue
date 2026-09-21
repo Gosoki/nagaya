@@ -100,11 +100,12 @@
 </template>
 
 <script setup lang="ts">
+import { useQuasar } from 'quasar'
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 
-import { api } from 'src/api/client'
+import { ApiError, api } from 'src/api/client'
 import type { Entry, EntryKind, Statement } from 'src/api/types'
 import { jstDateOf } from 'src/date'
 import { formatYen } from 'src/i18n'
@@ -116,6 +117,7 @@ import { KIND_COLOR } from 'src/theme'
 import { useMeta } from 'src/stores/meta'
 
 const { t } = useI18n()
+const $q = useQuasar()
 const meta = useMeta()
 const ledger = useLedger()
 const memos = useMemos()
@@ -125,9 +127,15 @@ const router = useRouter()
 const route = useRoute()
 
 onMounted(async () => {
-  // 带着 ?category= 进来的（固定费面板上「本期有 N 笔」点进来）：直接筛好
+  // 带着 ?category= 进来的（固定费面板上「本期有 N 笔」点进来）：直接筛好。
+  // **页签也要拨回流水**：这一屏显示哪块由 memos.tab 决定，而它记在 sessionStorage 里 ——
+  // 只要这次会话去过「更多 → 备忘/设置」，这个链接就把人送到备忘面板上，
+  // 一笔账都看不到。而固定费项目的增删改就在设置那一屏，停在 settings 是常态
   const wanted = Number(route.query.category)
-  if (wanted) fCategory.value = wanted
+  if (wanted) {
+    memos.tab = 'ledger'
+    fCategory.value = wanted
+  }
   statements.value = await api.get<Statement[]>('/api/statements')
 })
 
@@ -280,8 +288,15 @@ function sharesText(e: Entry): string {
 }
 
 async function onRefresh(done: () => void) {
-  await ledger.refresh()
-  done()
+  // done() 必须在 finally 里：断网时 refresh 抛异常，原来那个圈就一直转下去，
+  // 而下拉刷新最常用的场合恰恰是「好像没更新，我拉一下」—— 也就是网不好的时候
+  try {
+    await ledger.refresh()
+  } catch (e) {
+    $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e) })
+  } finally {
+    done()
+  }
 }
 
 </script>

@@ -502,6 +502,9 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
                 "name": c.name,
                 "icon": c.icon,
                 "color": c.color,
+                #: 已经删掉（归档）但本期还挂着钱的那种。界面要明说，
+                #: 否则「点了删除这一行还在」看上去就是没删掉
+                "archived": c.archived,
                 "default_rule_json": c.default_rule_json,
                 #: 这一项默认谁垫。面板据此预填「谁付的」，不再是「谁填的算谁」
                 "default_payer_id": c.default_payer_id,
@@ -556,18 +559,20 @@ def carry_same_as_last(session: Session, *, actor_id: int | None) -> dict[str, A
         return {"created": [], "failed": []}
 
     # 「本期已经处理过」＝ 录了 **或者** 手动删掉了。
-    # 只看 unbilled() 的话删掉的那笔不在里面，下次挂载面板又给它记回来
+    # 只看 unbilled() 的话删掉的那笔不在里面，下次挂载面板又给它记回来。
+    #
+    # 「本期」要按**上次出账那一刻**卡：软删的账目 statement_id 永远留着 NULL
+    # （出账只认没删的），所以光看 statement_id IS NULL 的话，半年前删过一次的
+    # 分类会从此**永远**不再自动记 —— 那是另一个方向的静默失效。
     handled = {e.category_id for e in unbilled(session) if e.category_id is not None}
-    handled |= {
-        e.category_id
-        for e in session.exec(
-            select(Entry).where(
-                Entry.statement_id.is_(None),
-                Entry.deleted_at.is_not(None),
-                Entry.category_id.is_not(None),
-            )
-        )
-    }
+    since = session.exec(select(Statement).order_by(Statement.cut_at.desc())).first()
+    dropped = select(Entry).where(
+        Entry.deleted_at.is_not(None),
+        Entry.category_id.is_not(None),
+    )
+    if since is not None:
+        dropped = dropped.where(Entry.deleted_at > since.cut_at)
+    handled |= {e.category_id for e in session.exec(dropped)}
     last = _last_billed_amount(session, [c.id for c in categories])
     # 分类上没定垫付人时回退到全局设置，再没有才算当前这个人 ——
     # 和 models.py 上写的那条链、以及固定费面板的 payerOf() 对齐。

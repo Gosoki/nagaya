@@ -61,6 +61,23 @@ describe('i18n 词条完整性', () => {
     expect(missing.map((m) => `${m.key} (${m.where})`), '缺词条，界面会直接显示原始 key').toEqual([])
   })
 
+  it('没有谁也不用的词条', () => {
+    // 死词条不会让界面出错，但它会骗人：改文案时以为改到了、其实那一条早就没人读。
+    // 实测清出 25 条 —— 包括整个 balance.* 段（余额页并进账单页之后忘了删）
+    // 和 bill.cutEmpty（本来是给 nothing_to_cut 准备的，结果一直没接上）。
+    //
+    // 这三个前缀是**按 code 现查**的，静态扫不到，不能算死：
+    //   errors.*          client.ts 用 t(`errors.${code}`)
+    //   settings.label.*  SettingsPanel 用 t(`settings.label.${key}`)
+    //   settings.option.* 同上
+    const DYNAMIC = ['errors.', 'settings.label.', 'settings.option.']
+    const used = new Set(usedKeys().map((u) => u.key))
+    const dead = [...zhKeys].filter(
+      (k) => !used.has(k) && !DYNAMIC.some((p) => k.startsWith(p)),
+    )
+    expect(dead, '这些词条没有任何地方引用').toEqual([])
+  })
+
   it('中日两份词条的键必须一一对应', () => {
     const onlyZh = [...zhKeys].filter((k) => !jaKeys.has(k))
     const onlyJa = [...jaKeys].filter((k) => !zhKeys.has(k))

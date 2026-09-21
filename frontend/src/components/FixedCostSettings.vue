@@ -159,12 +159,15 @@ const payerLabel = (c: Category) =>
     ? t('settings.none')
     : (meta.byId[c.default_payer_id]?.display_name ?? String(c.default_payer_id))
 
-async function save(c: Category, patch: Record<string, unknown>) {
+/** 存一个字段。**成功与否要说得出来** —— 调用方靠返回值决定后面还做不做 */
+async function save(c: Category, patch: Record<string, unknown>): Promise<boolean> {
   try {
     const saved = await api.patch<Category>(`/api/categories/${c.id}`, patch)
     meta.categories = meta.categories.map((x) => (x.id === saved.id ? saved : x))
+    return true
   } catch (e) {
     $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e), timeout: 5000 })
+    return false
   }
 }
 
@@ -204,7 +207,9 @@ function remove(c: Category) {
     message: t('monthly.removeConfirm', { name: c.name }),
     cancel: true,
   }).onOk(async () => {
-    await save(c, { archived: true })
+    // save() 自己已经把错弹出来了。这里必须看它的脸色：原来无论成没成都照样
+    // 弹一句绿色的「已删掉」，而那个撤销按钮点下去还会再静默失败一次
+    if (!(await save(c, { archived: true }))) return
     await meta.load()
     $q.notify({
       type: 'positive',
@@ -215,8 +220,7 @@ function remove(c: Category) {
           label: t('common.undo'),
           color: 'white',
           handler: async () => {
-            await api.patch(`/api/categories/${c.id}`, { archived: false })
-            await meta.load()
+            if (await save(c, { archived: false })) await meta.load()
           },
         },
       ],

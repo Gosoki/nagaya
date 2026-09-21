@@ -368,3 +368,31 @@ def test_archived_category_keeps_its_row_while_it_still_holds_money(
     assert monthly_rows(session)["total"] == 5_500
     # 没钱的归档项照旧不占位
     assert "水道" in rows and "旧契約" not in rows
+
+
+def test_a_long_ago_deletion_does_not_disable_carry_forever(session: Session, members) -> None:
+    """**上一期**删过一次，不该让这一项从此再也不自动记。
+
+    软删的账目 statement_id 永远留着 NULL（出账只认没删的），所以「本期删过没有」
+    不能只看 statement_id IS NULL —— 那样半年前删过一次的分类会从此永久失效，
+    这是「删一次复活一次」的反面，同样是静默的。判据要按**上次出账那一刻**卡。
+    """
+    a, *_ = members
+    c = cats(session)
+    c["家賃"].same_as_last = True
+    session.add(c["家賃"])
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG,
+                 amount=120_000, payer_id=a.id, category_id=c["家賃"].id)
+    cut_statement(session, actor_id=a.id)                    # 上上期
+
+    # 上一期：搬过来又删掉了（那个月真的没有房租）
+    assert len(carry_same_as_last(session, actor_id=a.id)["created"]) == 1
+    dropped = next(e for e in unbilled(session) if e.category_id == c["家賃"].id)
+    delete_entry(session, dropped, actor_id=a.id)
+    assert carry_same_as_last(session, actor_id=a.id)["created"] == []
+
+    # 这一期：又该自动记了
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                 amount=1, payer_id=a.id, category_id=c["電気"].id)
+    cut_statement(session, actor_id=a.id)
+    assert [m["name"] for m in carry_same_as_last(session, actor_id=a.id)["created"]] == ["家賃"]

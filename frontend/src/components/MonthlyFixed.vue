@@ -110,13 +110,14 @@
             :amount="valueOf(row)"
             :members="meta.activeMembersSelfFirst"
             :payer-id="payerOf(row)"
+            :entry-id="row.entry_id"
             :seed-rule="row.rule"
             @change="(rule, valid, diff) => onRule(row, rule, valid, diff)"
           />
           <!-- 删除入口放在展开区里，不放行头：行头有金额输入框，误触成本太高。
                翻旧账单时不给删：那是归档整个分类，不是这一屏该干的事 -->
           <q-btn
-            v-if="!historic"
+            v-if="!historic && !row.archived"
             dense flat no-caps size="sm" color="negative" icon="delete_outline"
             class="q-mt-sm"
             :label="t('monthly.removeItem')"
@@ -142,6 +143,7 @@ import SplitEditor from 'src/components/SplitEditor.vue'
 import { formatYen } from 'src/i18n'
 import { useAuth } from 'src/stores/auth'
 import { useBills } from 'src/stores/bills'
+import { useLedger } from 'src/stores/ledger'
 import { useMeta } from 'src/stores/meta'
 
 interface Row extends MonthlyRow {
@@ -152,6 +154,16 @@ interface Row extends MonthlyRow {
   rule_diff: number
   /** 已录账目的原始付款人。面板不改它，只拿来喂给分摊预览 */
   payer_id: number | null
+  /**
+   * 刚被「清空＝删除」那一笔的分摊规则和日期。
+   *
+   * 清空再重打本来只是「改个金额」，可走的是 delete + create 两步：
+   * create 时 rule 传 null，后端就换成了分类默认规则 —— 而展开区里显示的
+   * 还是原来那条（seed-rule 还是 row.rule，没动过就不会 emit）。
+   * 于是屏幕上写着 1:1:0、存进去的是均分，两边对不上且一声不吭。
+   */
+  deleted_rule: Record<string, unknown> | null
+  deleted_date: string | null
 }
 
 /** 传了就是在翻一张出过的账单：只读那张单子上真有的几项，不能加也不能删 —— */
@@ -164,6 +176,7 @@ const { t } = useI18n()
 const $q = useQuasar()
 const meta = useMeta()
 const bills = useBills()
+const ledger = useLedger()
 const router = useRouter()
 const auth = useAuth()
 
@@ -221,6 +234,8 @@ function build(d: MonthlyData) {
       rule_valid: held?.rule_valid ?? true,
       rule_diff: held?.rule_diff ?? 0,
       payer_id: null,
+      deleted_rule: held?.deleted_rule ?? null,
+      deleted_date: held?.deleted_date ?? null,
     })
   })
 }
@@ -269,21 +284,42 @@ onMounted(() => {
 async function carry() {
   if (historic.value) return
   try {
-    const { created } = await api.post<{ created: { name: string; amount: number }[] }>(
-      '/api/monthly/carry',
-    )
-    if (!created.length) return
+    const { created, failed } = await api.post<{
+      created: { name: string; amount: number }[]
+      failed: { name: string }[]
+    }>('/api/monthly/carry')
+    if (!created.length && !failed.length) return
     await load()
-    emit('saved')
+    if (created.length) {
+      emit('saved')
+      void ledger.refresh().catch(() => {})
+      $q.notify({
+        type: 'info',
+        timeout: 6000,
+        message: t('monthly.carried', {
+          list: created.map((c) => `${c.name} ${formatYen(c.amount)}`).join('、'),
+        }),
+      })
+    }
+    // **搬不过来的也必须说出来。** 这个开关存在的全部理由是「自动记的钱要看得见」，
+    // 那么「自动记账已经停了」同样要看得见 —— 原来这里是个空 catch，
+    // 有人搬走之后它就一声不吭地失效了，而屏幕上只是几个空框
+    if (failed.length) {
+      $q.notify({
+        type: 'warning',
+        timeout: 8000,
+        message: t('monthly.carryFailed', { list: failed.map((f) => f.name).join('、') }),
+      })
+    }
+  } catch (e) {
+    // 整个请求失败（断网/后端炸了）：也得出声，并且把已经落库的那部分拉回来 ——
+    // 不 reload 的话用户会照着空框再填一遍，同一分类当期就有了两笔
+    await load().catch(() => {})
     $q.notify({
-      type: 'info',
+      type: 'negative',
       timeout: 6000,
-      message: t('monthly.carried', {
-        list: created.map((c) => `${c.name} ${formatYen(c.amount)}`).join('、'),
-      }),
+      message: `${t('monthly.title')}: ${e instanceof ApiError ? e.text : String(e)}`,
     })
-  } catch {
-    /* 搬不过来就照旧留灰色占位，不打断填账 */
   }
 }
 
@@ -309,14 +345,23 @@ function onRule(row: Row, rule: Record<string, unknown> | null, valid: boolean, 
   row.rule_diff = diff
 }
 
-/** 本来有值、被清空了 —— 保存时删掉那笔。软删，进回收站，捞得回来 */
-const willDelete = (row: Row) => row.entry_id !== null && row.text === ''
+/**
+ * 本来有值、被清空（或者填成 0）了 —— 保存时删掉那笔。软删，捞得回来。
+ *
+ * 判据认的是**值**不是空串：占位符就写着 0，等于在邀请用户填 0；
+ * 而只认空串的话，在已录的行里打个 0 会走 PATCH amount_jpy=0，
+ * 撞后端的「金额不能是 0」红在那儿，人只能全选删光才过得去。
+ */
+const willDelete = (row: Row) => row.entry_id !== null && valueOf(row) === 0
 
 /**
  * 这一行的状态说明。**正常录好的不出声** —— 黑色实数本身就说明录了，
  * 五行里重复五次「已录」只是噪音。只有需要你注意的才说话。
  */
 function stateText(row: Row): string {
+  // 已经删掉、只是本期这笔钱还挂着的那种。不说的话，点完「删掉这一项」
+  // 这一行还杵在那儿，看上去就是没删掉 —— 而钱确实必须留着（它在账单合计里）
+  if (row.archived) return t('monthly.removedKeeps')
   // 只报「还有几笔没显示出来」。原来那句写全了整个来龙去脉，四十来个字，
   // 在 40px 高、右边还杵着输入框的一行里根本放不下，被省略号截掉大半 ——
   // 而这句话现在是个入口，点进去就看得到全部
@@ -327,7 +372,9 @@ function stateText(row: Row): string {
 const stateClass = (row: Row) =>
   row.entry_count > 1
     ? 'text-warning'
-    : willDelete(row)
+    : row.archived
+      ? 'text-grey-6'
+      : willDelete(row)
       ? 'text-negative'
       : row.entry_id !== null
         ? 'text-positive'
@@ -381,10 +428,17 @@ async function saveRow(row: Row) {
     return
   }
   const value = valueOf(row)
+  // 合计的底数是后端给的那个，而它只在 load() 时刷新。存成功之后这一行的差额
+  // 从 pending 里消失、底数却没动 —— 合计当场掉回挂载时的数（删除时则不减）。
+  // 在这儿把底数跟着改：新增 before=0、改金额取差、删除 row.amount=null 就是减掉
+  const before = row.amount ?? 0
   busy.value = true
   try {
     if (willDelete(row)) {
       await api.del(`/api/entries/${row.entry_id}`)
+      // 留着这笔的分摊和日期：清空再重打是「改个金额」，不该顺手把分摊换掉
+      row.deleted_rule = row.rule
+      row.deleted_date = row.date
       row.entry_id = null
       row.version = null
       row.amount = null
@@ -407,12 +461,12 @@ async function saveRow(row: Row) {
         '/api/entries',
         {
           kind: 'expense',
-          date: data.value!.default_date,
+          date: row.deleted_date ?? data.value!.default_date,
           amount_jpy: value,
           payer_id: payerOf(row),
           category_id: row.category_id,
           title: row.name,
-          rule: row.rule_override,
+          rule: row.rule_override ?? row.deleted_rule ?? null,
           // 和分摊预览用的是同一批人，避免预览与落库分摊到不同的人头上
           member_ids: meta.activeMembers.map((m) => m.id),
         },
@@ -420,13 +474,19 @@ async function saveRow(row: Row) {
       row.entry_id = saved.id
       row.version = saved.version
       row.amount = saved.amount_jpy
+      row.deleted_rule = null
+      row.deleted_date = null
     } else {
       row.dirty = false          // 空着又没录过：没什么可存的
       return
     }
+    if (data.value) data.value.total += (row.amount ?? 0) - before
     row.dirty = false
     row.rule_override = null
     emit('saved')                // 账单总额/转账方案跟着刷新
+    // 账目页那份列表是另一个 store 管的。这一屏从头到尾直接打 /api/entries，
+    // 不通知它的话，刚录的固定费在账目页整个 session 都看不见
+    void ledger.refresh().catch(() => {})
   } catch (e) {
     // 失败就留在 dirty，输入原样保着，人能看见也能改了重来
     $q.notify({
