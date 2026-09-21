@@ -50,11 +50,13 @@ def carry_monthly(
 ) -> dict:
     """把「和上期一样」的固定费按上期金额记进当前草稿。
 
-    只动明确开了那个开关的项，已经录过的一律不碰。
-    返回这次记了哪几笔 —— **自动记的钱必须让人看见**，这是那条
-    「上次金额只作灰色占位」的规矩留下的唯一出口。
+    只动明确开了那个开关的项；已经录过的、以及**本期手动删掉的**一律不碰。
+
+    返回 `{"created": [...], "failed": [...]}`。两份都要给出去：
+    自动记的钱必须让人看见（这是那个开关唯一的出口），而搬不过来的那几项
+    同样必须让人看见 —— 否则「自动记账已经停了」这件事没有任何人会知道。
     """
-    return {"created": bill_svc.carry_same_as_last(session, actor_id=member.id)}
+    return bill_svc.carry_same_as_last(session, actor_id=member.id)
 
 
 @router.get("/statements", response_model=list[StatementOut])

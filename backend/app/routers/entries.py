@@ -64,7 +64,9 @@ def list_entries(
     since: dt.date | None = None,
     until: dt.date | None = None,
     include_deleted: bool = False,
-    limit: int = Query(200, le=1000),
+    # ge=1 不是洁癖：limit=-1 会变成 SQL 的 LIMIT -1 ＝ 不限，
+    # 一次把整个账本吐出来，还让「只算了最近 500 笔」那句截断提示失真
+    limit: int = Query(200, ge=1, le=1000),
     session: Session = Depends(get_session),
     _: Member = Depends(current_member),
 ):

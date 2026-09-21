@@ -7,7 +7,7 @@ from app.auth import current_member
 from app.core.rules import RuleError, expand
 from app.core.split import SplitError, split
 from app.db import get_session
-from app.models import Member
+from app.models import Category, Member
 from app.schemas import SettingIn, SettingOut
 from app.services import settings as settings_svc
 from app.settings_spec import SETTINGS_SPEC
@@ -47,7 +47,21 @@ def update_setting(
     spec = SETTINGS_SPEC[key]
     value = body.value
 
-    if spec["type"] in {"int", "int_or_null"}:
+    # 引用类的两项要查存在性。原来 member_id_or_null **一个分支都没匹配上**，
+    # 直接穿过整条 if/elif 落库：实测 "不是数字" / {"a":1} / [1,2,3] / 3.14 / 99999 全收。
+    # 存进去之后固定费面板拿它当兜底垫付人，记账当场 400 unknown_member，
+    # 而报错指向的是账目、不是这条设置 —— 人被卡在「记不了账」且找不到原因。
+    # 同一个文件里 json 类型的设置是「当场试着用一下」的，这一层照做
+    if spec["type"] == "member_id_or_null" or key.endswith("_category_id"):
+        model = Member if spec["type"] == "member_id_or_null" else Category
+        if value is not None:
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{key} 要填一个 id")
+            if session.get(model, value) is None:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{key} 指向的东西不存在：{value}")
+    elif spec["type"] == "str" and not isinstance(value, str):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{key} 要填一行文字")
+    elif spec["type"] in {"int", "int_or_null"}:
         if value is not None:
             if not isinstance(value, int) or isinstance(value, bool):
                 raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{key} 要填整数")

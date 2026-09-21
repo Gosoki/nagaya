@@ -33,6 +33,9 @@ def _sqlite_pragmas(dbapi_connection, connection_record) -> None:
     cur.execute("PRAGMA journal_mode=WAL")
     cur.execute("PRAGMA foreign_keys=ON")   # 默认是 OFF，不打开等于没有外键
     cur.execute("PRAGMA synchronous=NORMAL")
+    # 两个人同时写时先等一会儿再说。不设的话 SQLite 立刻抛 "database is locked"，
+    # 而那对用户来说就是记账随机失败一次，重试又好了 —— 最难查的那种
+    cur.execute("PRAGMA busy_timeout=5000")
     cur.close()
 
 

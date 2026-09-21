@@ -8,7 +8,12 @@ import pytest
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
+from fastapi.testclient import TestClient
+
 import app.db  # noqa: F401  —— 导入即注册 PRAGMA（外键约束默认是关的）
+from app.auth import hash_password
+from app.db import get_session
+from app.main import app as fastapi_app
 from app.models import Member
 from app.services.settings import seed_settings
 
@@ -40,3 +45,22 @@ def members(session: Session) -> list[Member]:
     for m in rows:
         session.refresh(m)
     return rows
+
+
+@pytest.fixture
+def client(session: Session):
+    fastapi_app.dependency_overrides[get_session] = lambda: session
+    yield TestClient(fastapi_app)   # 不用 with：避免触发 lifespan 去建真实的库
+    fastapi_app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def auth(client: TestClient, session: Session, members: list[Member]) -> dict[str, str]:
+    """以 A 的身份登录，返回请求头。"""
+    a = members[0]
+    a.password_hash = hash_password("pw123456")
+    session.add(a)
+    session.commit()
+    r = client.post("/api/auth/login", json={"name": "a", "password": "pw123456"})
+    assert r.status_code == 200, r.text
+    return {"Authorization": f"Bearer {r.json()['token']}"}

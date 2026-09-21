@@ -21,6 +21,8 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any
 
+from sqlalchemy import func, or_
+from sqlalchemy import update as sa_update
 from sqlmodel import Session, select
 
 from app.core.settle import Transfer, plan_pairwise, plan_simplified
@@ -74,14 +76,49 @@ def _shares_of(session: Session, entry_ids: list[int]) -> dict[int, dict[int, in
     return out
 
 
-def _net(session: Session, entries: list[Entry]) -> dict[int, int]:
-    """这批账目让每个人的余额net变化多少（＝付出 − 应担）。"""
-    shares = _shares_of(session, [e.id for e in entries])
+def _earlier_ids(session: Session, statement: Statement | None) -> list[int] | None:
+    """这张账单**之前**出过的那些单子。None ＝ 不限（草稿：全部出过账的都算）。"""
+    if statement is None:
+        return None
+    return [
+        s.id for s in session.exec(select(Statement).where(Statement.cut_at < statement.cut_at))
+    ]
+
+
+def _scope_billed(stmt, ids: list[int] | None):
+    """把查询限定在「这张账单之前出过账的那些账目」上。"""
+    stmt = stmt.where(Entry.deleted_at.is_(None), Entry.statement_id.is_not(None))
+    return stmt if ids is None else stmt.where(Entry.statement_id.in_(ids))
+
+
+def _opening(session: Session, statement: Statement | None) -> dict[int, int]:
+    """上期结转 ＝ 这张账单之前的全部账目让每个人净赚/净欠多少。
+
+    **用 SQL 聚合，不把账本搬进内存。** 原来的写法是先把之前所有 Entry 全部 ORM 化，
+    再把它们的 EntryShare 全部捞出来在 Python 里一条条加。
+    账单页是这个 App 最常开的一屏，而这个成本**随历史线性增长，永远只会更慢** ——
+    实测 5 年 3000 笔时 build_bill 要 120ms，其中 110ms 花在这里，
+    而 ledger.balances() 干同样的活只要 3.4ms，差的就是这两条 group by。
+    """
+    ids = _earlier_ids(session, statement)
+    if ids is not None and not ids:
+        return {}
     net: dict[int, int] = {}
-    for e in entries:
-        net[e.payer_id] = net.get(e.payer_id, 0) + e.amount_jpy
-        for m, sh in shares.get(e.id, {}).items():
-            net[m] = net.get(m, 0) - sh
+    for mid, total in session.exec(
+        _scope_billed(select(Entry.payer_id, func.sum(Entry.amount_jpy)), ids).group_by(
+            Entry.payer_id
+        )
+    ):
+        net[mid] = net.get(mid, 0) + int(total or 0)
+    for mid, total in session.exec(
+        _scope_billed(
+            select(EntryShare.member_id, func.sum(EntryShare.amount_jpy)).join(
+                Entry, Entry.id == EntryShare.entry_id
+            ),
+            ids,
+        ).group_by(EntryShare.member_id)
+    ):
+        net[mid] = net.get(mid, 0) - int(total or 0)
     return net
 
 
@@ -103,20 +140,6 @@ def _covers_from(prev: Statement | None, dates: list[dt.date]) -> str | None:
     return min(jst_date(prev.cut_at), first).isoformat()
 
 
-def _entries_before(session: Session, statement: Statement | None) -> list[Entry]:
-    """在这张账单之前就已经出过账的全部账目 —— 用来算「上期结转」。"""
-    stmt = select(Entry).where(Entry.deleted_at.is_(None), Entry.statement_id.is_not(None))
-    if statement is not None:
-        earlier = [
-            s.id
-            for s in session.exec(select(Statement).where(Statement.cut_at < statement.cut_at))
-        ]
-        if not earlier:
-            return []
-        stmt = stmt.where(Entry.statement_id.in_(earlier))
-    return list(session.exec(stmt))
-
-
 # ------------------------------------------------------------------ 账单
 
 
@@ -125,7 +148,7 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
     entries = unbilled(session) if statement is None else entries_of(session, statement.id)
     shares = _shares_of(session, [e.id for e in entries])
     members = list(session.exec(select(Member).order_by(Member.display_order, Member.id)))
-    opening = _net(session, _entries_before(session, statement))
+    opening = _opening(session, statement)
 
     owed: dict[int, int] = {}
     paid: dict[int, int] = {}
@@ -184,7 +207,7 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
         transfers = (
             plan_simplified(closing)
             if simplify
-            else plan_pairwise(_pair_debts(session, _entries_before(session, statement) + entries))
+            else plan_pairwise(_pair_debts(session, statement))
         )
 
     dates = [e.date for e in entries]
@@ -196,7 +219,9 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
     # 刚出过账又出一张，多半是临时结的小账，固定费还没到下一轮 —— 默认别带上。
     # 阈值在设置里，代码只认这个数怎么用。
     ref = statement.cut_at if statement else now_utc()
-    gap_days = (ref - prev.cut_at).days if prev else None
+    # 按 JST 的**自然日**数，不是 24 小时整段。昨晚 23 点出的账、今天上午再出一张，
+    # 整段算只有 0.5 天 → 0 天，会让「包括固定费」在该勾的时候默认不勾
+    gap_days = (jst_date(ref) - jst_date(prev.cut_at)).days if prev else None
     threshold = int(settings_svc.get(session, "monthly_gap_days"))
     return {
         "prev_cut_at": prev.cut_at.isoformat() if prev else None,
@@ -227,22 +252,52 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
     }
 
 
-def _pair_debts(session: Session, entries: list[Entry]) -> dict[tuple[int, int], int]:
-    """逐对债权，用于「按原始债权结算」：谁垫的钱就还给谁。"""
-    shares = _shares_of(session, [e.id for e in entries])
+def _pair_debts(session: Session, statement: Statement | None) -> dict[tuple[int, int], int]:
+    """逐对债权，用于「按原始债权结算」：谁垫的钱就还给谁。
+
+    覆盖范围 ＝ 这张账单**自己的**账目 ＋ 它之前出过账的全部账目（草稿就是全部）。
+    和 _opening 一样走 SQL 聚合：原来这里把同一批 share 又整个捞了第二遍
+    （_opening 一遍、这里一遍），5 年数据下光这一处就是 78ms。
+    """
+    ids = _earlier_ids(session, statement)
+
+    def scope(stmt):
+        stmt = stmt.where(Entry.deleted_at.is_(None))
+        if statement is None:
+            return stmt                                  # 草稿：出过账的 + 没出账的，全算
+        if ids:
+            return stmt.where(
+                or_(Entry.statement_id == statement.id, Entry.statement_id.in_(ids))
+            )
+        return stmt.where(Entry.statement_id == statement.id)
+
     debts: dict[tuple[int, int], int] = {}
-    for e in entries:
-        if e.kind == EntryKind.settlement:
-            if e.to_member_id is not None:
-                key = (e.to_member_id, e.payer_id)
-                debts[key] = debts.get(key, 0) + e.amount_jpy
+    rows = session.exec(
+        scope(
+            select(EntryShare.member_id, Entry.payer_id, func.sum(EntryShare.amount_jpy))
+            .join(Entry, Entry.id == EntryShare.entry_id)
+            .where(Entry.kind != EntryKind.settlement)
+        ).group_by(EntryShare.member_id, Entry.payer_id)
+    )
+    for member_id, payer_id, total in rows:
+        if member_id == payer_id or not total:
             continue
-        for m, sh in shares.get(e.id, {}).items():
-            if m == e.payer_id or sh == 0:
-                continue
-            key = (m, e.payer_id)
-            debts[key] = debts.get(key, 0) + sh
-    return debts
+        key = (member_id, payer_id)
+        debts[key] = debts.get(key, 0) + int(total)
+
+    # 转账反向抵消：A 转给 B，就是 B 对 A 的债权少了这么多
+    paid = session.exec(
+        scope(
+            select(Entry.to_member_id, Entry.payer_id, func.sum(Entry.amount_jpy)).where(
+                Entry.kind == EntryKind.settlement, Entry.to_member_id.is_not(None)
+            )
+        ).group_by(Entry.to_member_id, Entry.payer_id)
+    )
+    for to_id, payer_id, total in paid:
+        key = (to_id, payer_id)
+        debts[key] = debts.get(key, 0) + int(total or 0)
+
+    return {k: v for k, v in debts.items() if v}
 
 
 def _edited_after_cut(
@@ -348,10 +403,25 @@ def cut_statement(
     session.add(statement)
     session.flush()
 
-    for e in entries:
-        e.statement_id = statement.id
-        session.add(e)
-    session.flush()
+    # **归期要做成一条带条件的 UPDATE。** 原来是逐条 `e.statement_id = statement.id`，
+    # 而 unbilled() 那次 SELECT 根本不在写事务里（pysqlite 读不开事务）：
+    # 两次出账重叠时两边读到同一批账目，后提交的把它们全抢走，先出的那张
+    # 一笔账都不剩 —— 可它的快照还冻结着全额，从此在列表里挂着 ¥0 / 未结清，
+    # 还会当上下一张的 prev，把覆盖期和「固定费默认不带」一起带歪。
+    # 手机上出账按钮点两下就够复现。
+    # flush() 已经把连接推进写事务，所以这条 UPDATE 自带串行化保证。
+    ids = [e.id for e in entries]
+    claimed = session.execute(
+        sa_update(Entry)
+        .where(Entry.id.in_(ids), Entry.statement_id.is_(None))
+        .values(statement_id=statement.id)
+        .execution_options(synchronize_session=False)
+    ).rowcount
+    if claimed != len(ids):
+        # 连同上面那批固定费的日期覆盖一起回滚 —— 那同样是对陈旧行的无条件写
+        session.rollback()
+        raise BillError("nothing_to_cut", "刚才已经有人出过账了，刷新一下再看")
+    session.expire_all()   # bulk UPDATE 绕过了身份映射，手里那份 statement_id 还是旧的
 
     # 快照里不存结算进度：它是**实时**的（转账是出账之后才发生的），
     # 而快照算在 snapshot_json 还没写入的那一刻，plan 为空会被当成「已结清」，
@@ -396,9 +466,15 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
     # 只按「现在还没归档」过滤的话，归档一个分类会让它名下的旧账凭空消失，
     # 而账单合计不变 —— 一眼看去就是「这几项加不出总数」
     stmt = select(Category).where(Category.monthly == True)  # noqa: E712
-    if statement is None:
-        stmt = stmt.where(Category.archived == False)  # noqa: E712
     categories = list(session.exec(stmt.order_by(Category.display_order, Category.id)))
+    if statement is None:
+        # 草稿里归档的项默认不占位（归档＝以后不用填了），但**它名下本期已经录了钱的
+        # 除外**：那笔钱还在账单的合计和每人应担里，面板上却一行都看不见，
+        # 于是同一张草稿出现两个对不上的合计，而且那笔钱既改不了也删不掉
+        with_money = {
+            e.category_id for e in unbilled(session) if e.category_id is not None
+        }
+        categories = [c for c in categories if not c.archived or c.id in with_money]
     # 同一个分类在这张草稿里可能有不止一笔（两个人同时填、或者填完重试了一次）。
     # 面板一行只显示得下一笔，**但账单是全都算的** —— 不把重复说出来的话，
     # 用户看到「家賃 170,000」，完全不知道还有一笔 120,000 也在总额里。
@@ -450,7 +526,7 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
     }
 
 
-def carry_same_as_last(session: Session, *, actor_id: int | None) -> list[dict[str, Any]]:
+def carry_same_as_last(session: Session, *, actor_id: int | None) -> dict[str, Any]:
     """把「和上期一样」的固定费按上期金额记进当前草稿。
 
     **只动明确开了这个开关的项**。默认全是关的：「上次的金额只作灰色占位」
@@ -458,7 +534,14 @@ def carry_same_as_last(session: Session, *, actor_id: int | None) -> list[dict[s
     电费燃气水费恰恰每期都不一样，给它们开这个等于把那条规矩废掉。
 
     已经录过的一律不碰；从来没出过账的（没有上期金额可抄）跳过。
-    返回这次记了哪几笔，界面要把它说出来 —— 自动记的钱必须看得见。
+    **本期手动删掉的也不碰** —— 否则每打开一次账单页就复活一次，用户删不掉。
+
+    返回 `{"created": [...], "failed": [...]}`：记了哪几笔要说出来（自动记的钱
+    必须看得见），**搬不过来的也要说出来**（「自动记账已经停了」同样必须看得见）。
+    每一项各自兜错：原来是整个循环一把梭，中间任何一笔抛异常，
+    前面那几笔**已经 commit 进草稿了**（create_entry 自己 commit），
+    而返回值随异常一起丢掉、接口返 400、前端一个空 catch 吞掉 ——
+    屏幕上那几行还是空框，用户照着空框再填一遍，同一分类当期就有了两笔。
     """
     categories = list(
         session.exec(
@@ -470,27 +553,77 @@ def carry_same_as_last(session: Session, *, actor_id: int | None) -> list[dict[s
         )
     )
     if not categories:
-        return []
-    already = {e.category_id for e in unbilled(session) if e.category_id is not None}
+        return {"created": [], "failed": []}
+
+    # 「本期已经处理过」＝ 录了 **或者** 手动删掉了。
+    # 只看 unbilled() 的话删掉的那笔不在里面，下次挂载面板又给它记回来
+    handled = {e.category_id for e in unbilled(session) if e.category_id is not None}
+    handled |= {
+        e.category_id
+        for e in session.exec(
+            select(Entry).where(
+                Entry.statement_id.is_(None),
+                Entry.deleted_at.is_not(None),
+                Entry.category_id.is_not(None),
+            )
+        )
+    }
     last = _last_billed_amount(session, [c.id for c in categories])
+    # 分类上没定垫付人时回退到全局设置，再没有才算当前这个人 ——
+    # 和 models.py 上写的那条链、以及固定费面板的 payerOf() 对齐。
+    # 少了中间这一级的话，「本期第一个打开账单页的人」就成了房租的垫付人
+    fallback_payer = settings_svc.get(session, "default_payer_id") or actor_id
+    active = {m.id for m in ledger.active_members(session, today_jst())}
 
     made: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
     for c in categories:
         amount = last.get(c.id)
-        if c.id in already or not amount:
+        if c.id in handled or not amount:
             continue
-        entry = ledger.create_entry(
-            session,
-            actor_id=actor_id,
-            kind=EntryKind.expense,
-            on=today_jst(),
-            amount=amount,
-            payer_id=c.default_payer_id or actor_id,
-            category_id=c.id,
-            category_rule=c.default_rule_json,
-        )
+        try:
+            entry = ledger.create_entry(
+                session,
+                actor_id=actor_id,
+                kind=EntryKind.expense,
+                on=today_jst(),
+                amount=amount,
+                payer_id=c.default_payer_id or fallback_payer,
+                category_id=c.id,
+                category_rule=_prune_rule(c.default_rule_json, active),
+            )
+        except (ValueError, KeyError) as e:   # LedgerError / RuleError / SplitError 都是 ValueError
+            session.rollback()
+            failed.append({"category_id": c.id, "name": c.name, "reason": str(e)})
+            continue
         made.append({"category_id": c.id, "name": c.name, "amount": entry.amount_jpy})
-    return made
+    return {"created": made, "failed": failed}
+
+
+def _prune_rule(rule: dict[str, Any] | None, active: set[int]) -> dict[str, Any] | None:
+    """把分类默认规则里**已经不在籍的人**剔掉。
+
+    分类的默认分摊是当年按那时候几个人写死的（房租那条就点名了 adjustments）。
+    有人搬走之后，expand() 会拿「今天在籍的人」当参与人，发现规则里多出一个
+    不认识的 id，直接抛 unknown_member —— 于是那一行固定费永远存不上，
+    「和上期一样」也从此一声不吭地停了。
+
+    剔掉而不是报错：这是一条**为上一期写的**规则，拿它硬套今天的人本来就不对。
+    注意剩下的人分摊会变（adjustments 是「先抠掉再按比例分」），所以调整额一并去掉
+    的那份钱会回到大家头上 —— 这是唯一说得通的默认，规则本身该由用户重新定。
+    """
+    if not rule:
+        return rule
+    out = dict(rule)
+    for field in ("weights", "adjustments", "exact"):
+        if isinstance(out.get(field), dict):
+            out[field] = {k: v for k, v in out[field].items() if int(k) in active}
+            if not out[field]:
+                out.pop(field)
+    # weights 全被剔光时退回「所有在籍成员同权」，别留一条空规则
+    if out.get("mode", "ratio") == "ratio" and "weights" not in out:
+        out.setdefault("equal_weight", 1)
+    return out
 
 
 def _last_billed_amount(session: Session, category_ids: list[int]) -> dict[int, int]:
@@ -506,7 +639,10 @@ def _last_billed_amount(session: Session, category_ids: list[int]) -> dict[int, 
             Entry.category_id.in_(category_ids),
             Entry.deleted_at.is_(None),
             Entry.statement_id.is_not(None),
-            Entry.kind != EntryKind.settlement,
+            # 只抄支出。收入的金额是**负数**，抄过来 carry 以 expense 建账，
+            # 当场撞 bad_sign「支出金额要填正数」—— 而那一项的「和上期一样」
+            # 从此每次都失败，用户只看到它一直空着
+            Entry.kind == EntryKind.expense,
         )
         .order_by(Entry.date.desc(), Entry.id.desc())
     ).all()
@@ -520,19 +656,28 @@ def _last_billed_amount(session: Session, category_ids: list[int]) -> dict[int, 
 def settlement_progress(session: Session, statement: Statement | None) -> dict[str, Any]:
     """这张账单开出来的转账，记完了几笔。
 
-    判据是「按这张单子的方案，该转的钱有没有转够」：
-    出账之后、下一张出账之前记的转账，按「谁给谁」配对累加，
-    每一对都够了就算结清 —— 也就是用户说的「转账按钮都点过了」。
+    判据是「按这张单子的方案，该给的钱后来给够了没有」：出账之后记的转账，
+    按「谁给谁」配对累加，每一对都够了就算结清 —— 也就是用户说的
+    「转账按钮都点过了」。
+
+    **不拿下一张的出账时刻当上界。** 原来是那么写的，于是「拖到下一张出账之后
+    才还钱」这条最常见的路径永远点不亮：那张单子的方案是冻结的（钱到账它也不会变），
+    settled_transfers 里那一格于是永远是 False。用户看不到任何变化，
+    多半会照着屏幕再转一次 —— 这一屏的全部作用就是防这件事。
+
+    代价说清楚：它意味着**旧单子的绿灯会被后来的钱追认**（B 为了还这一期的
+    11,000 转过去，上一期那笔 10,000 也会跟着亮）。债权本来就是全局累计的，
+    这个语义说得通；真要更严就得按「这一对之间的净债权是否已清」算，那是另一套。
+
+    只累计 plan 里出现过的那几对：别把下一期新冒出来的别的转账算进这一张。
     """
     if statement is None:
-        return {"settled": False, "settled_transfers": []}
+        return {"settled": False, "settled_transfers": [], "settled_paid": []}
     plan = (statement.snapshot_json or {}).get("transfers") or []
     if not plan:
-        return {"settled": True, "settled_transfers": []}
+        return {"settled": True, "settled_transfers": [], "settled_paid": []}
 
-    nxt = session.exec(
-        select(Statement).where(Statement.cut_at > statement.cut_at).order_by(Statement.cut_at)
-    ).first()
+    pairs = {(t["from_id"], t["to_id"]) for t in plan}
     rows = session.exec(
         select(Entry).where(
             Entry.kind == EntryKind.settlement,
@@ -540,19 +685,20 @@ def settlement_progress(session: Session, statement: Statement | None) -> dict[s
             Entry.created_at > statement.cut_at,
         )
     ).all()
-    if nxt is not None:
-        rows = [e for e in rows if e.created_at < nxt.cut_at]
 
     paid: dict[tuple[int, int], int] = {}
     for e in rows:
         if e.to_member_id is None:
             continue
         key = (e.payer_id, e.to_member_id)
+        if key not in pairs:
+            continue
         paid[key] = paid.get(key, 0) + e.amount_jpy
 
-    done = []
-    for t in plan:
-        key = (t["from_id"], t["to_id"])
-        done.append(paid.get(key, 0) >= t["amount"])
-    return {"settled": all(done), "settled_transfers": done}
+    # 顺手把「已经转了多少」也给出去：界面要拿它算「还差多少」。
+    # 原来只给一个布尔，于是部分还款之后「确认已完成」还预填全额，
+    # 再按一次就重复记了一整笔
+    amounts = [paid.get((t["from_id"], t["to_id"]), 0) for t in plan]
+    done = [amounts[i] >= t["amount"] for i, t in enumerate(plan)]
+    return {"settled": all(done), "settled_transfers": done, "settled_paid": amounts}
 

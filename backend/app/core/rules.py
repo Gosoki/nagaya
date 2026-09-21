@@ -37,6 +37,27 @@ def pick_rule(*candidates: Mapping[str, Any] | None) -> dict[str, Any]:
     return {"mode": "ratio", "equal_weight": 1}
 
 
+def _as_int(value: Any, field: str, key: str) -> int:
+    """规则里的数字必须**本来就是整数**。
+
+    原来这里写的是 `int(value)`，两头都出事：
+      * 传进来 None / 字符串 / 对象时，int() 抛的 TypeError 一路冒到 FastAPI 顶上变成 500
+      * 传浮点时更隐蔽 —— int(0.5) 静默截成 0。权重 0.5/0.5/1 于是变成 0/0/1：
+        前两个人一分不出、第三个人全担，屏幕上一个字都不提。
+        而分摊引擎两边（split.py 的 _require_int、split.ts 的 requireInt）**本来是挡了的**，
+        是这一行抢在它们前面把证据抹掉了 —— 于是前端预览抛错、后端静默存下，
+        正好是那 523 条 fixture 想钉死的「预览和落库不一样」。
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise RuleError(
+            "not_integer",
+            f"{field}[{key}] 必须是整数，收到 {value!r}",
+            field=field,
+            member=key,
+        )
+    return value
+
+
 def expand(rule: Mapping[str, Any], member_ids: Sequence[int]) -> dict[str, Any]:
     """把规则展开成显式的、逐人列全的形式，交给分摊引擎。
 
@@ -54,7 +75,7 @@ def expand(rule: Mapping[str, Any], member_ids: Sequence[int]) -> dict[str, Any]
         unknown = sorted(set(exact) - set(keys))
         if unknown:
             raise RuleError("unknown_member", f"固定金额给了不在参与人里的人：{unknown}", members=unknown)
-        return {"mode": "exact", "exact": {k: int(exact.get(k, 0)) for k in keys}}
+        return {"mode": "exact", "exact": {k: _as_int(exact.get(k, 0), "exact", k) for k in keys}}
 
     if mode != "ratio":
         raise RuleError("unknown_mode", f"未知的分摊模式：{mode}", mode=mode)
@@ -65,16 +86,20 @@ def expand(rule: Mapping[str, Any], member_ids: Sequence[int]) -> dict[str, Any]
         if unknown:
             raise RuleError("unknown_member", f"权重给了不在参与人里的人：{unknown}", members=unknown)
         # 规则里没提到的人按 0 补齐 —— 「没写＝不参与」，而不是「没写＝报错」
-        weights = {k: int(weights_raw.get(k, 0)) for k in keys}
+        weights = {k: _as_int(weights_raw.get(k, 0), "weights", k) for k in keys}
     else:
-        w = int(rule.get("equal_weight", 1))
+        w = _as_int(rule.get("equal_weight", 1), "equal_weight", "*")
         weights = {k: w for k in keys}
 
     adjustments_raw = _normalize(rule.get("adjustments") or {})
     unknown = sorted(set(adjustments_raw) - set(keys))
     if unknown:
         raise RuleError("unknown_member", f"调整额给了不在参与人里的人：{unknown}", members=unknown)
-    adjustments = {k: int(v) for k, v in adjustments_raw.items() if int(v) != 0}
+    adjustments = {
+        k: v
+        for k, v in ((k, _as_int(v, "adjustments", k)) for k, v in adjustments_raw.items())
+        if v != 0
+    }
 
     out: dict[str, Any] = {"mode": "ratio", "weights": weights}
     if adjustments:

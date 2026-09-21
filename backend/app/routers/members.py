@@ -67,6 +67,12 @@ def update_member(
     # 用 exclude_none 的话 left_on 一旦填错就再也清不掉 —— null 会被当成「没发」，
     # 于是那个人永远是「已退出」，回不来
     fields = body.model_dump(exclude_unset=True, exclude={"password", "old_password"})
+    # 显式传 null 的那几个：数据库上是 NOT NULL，直接 setattr 下去就是 500。
+    # left_on 不在里面 —— 它**必须**清得掉，否则填错一次那个人就永远是「已退出」
+    nulled = [k for k in ("name", "display_name", "color", "display_order", "joined_on", "lang")
+              if k in fields and fields[k] is None]
+    if nulled:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"这些字段不能清空：{', '.join(nulled)}")
     if "name" in fields:
         if not fields["name"]:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "登录名不能为空")

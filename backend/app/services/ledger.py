@@ -16,6 +16,7 @@ from app.core.rules import expand, mkey, participants, pick_rule
 from app.core.split import split
 from app.models import (
     AuditLog,
+    Bundle,
     Category,
     Entry,
     EntryKind,
@@ -25,6 +26,11 @@ from app.models import (
     today_jst,
 )
 from app.services import settings as settings_svc
+
+
+#: PATCH 一笔账时不许被清空的字段。数据库上就是 NOT NULL，
+#: 传 null 进来原来会撞成 500
+_NOT_NULLABLE = ("kind", "date", "amount_jpy", "payer_id", "title", "note")
 
 
 class LedgerError(ValueError):
@@ -47,9 +53,22 @@ def active_members(session: Session, on: dt.date | None = None) -> list[Member]:
 # ------------------------------------------------------------------ 记一笔
 
 
+#: 金额上界。超过这个数就不是手滑，是输错了。
+#: 不设上界的话 10**19 会一路撞到 SQLite 的 INTEGER 上溢出成 500；
+#: 而 10**18 更坏 —— 它**存得进去**，从此每张账单的合计都带着它，
+#: 全局余额恒等式照样成立，屏幕上却没有一处能看出哪笔账错了。
+MAX_AMOUNT = 1_000_000_000_000
+
+
 def _validate_amount(kind: EntryKind, amount: int) -> None:
     if not isinstance(amount, int) or isinstance(amount, bool):
         raise LedgerError("not_integer", f"金额必须是整数日元，收到 {amount!r}")
+    if abs(amount) > MAX_AMOUNT:
+        raise LedgerError(
+            "amount_too_large",
+            f"金额超过上限 {MAX_AMOUNT}：{amount}",
+            limit=MAX_AMOUNT,
+        )
     if amount == 0:
         raise LedgerError("zero_amount", "金额不能是 0")
     if kind == EntryKind.expense and amount < 0:
@@ -67,8 +86,9 @@ def _check_refs(
     to_member_id: int | None = None,
     member_ids: Sequence[int] | None = None,
     category_id: int | None = None,
+    bundle_id: int | None = None,
 ) -> None:
-    """引用到的成员/分类必须真实存在。
+    """引用到的成员/分类/套餐必须真实存在。
 
     不查的话，不存在的 id 会一路撞到数据库的外键约束上，返回 500 ——
     客户端拿到的是一句「服务器错误」，既看不出是哪个字段，也不知道能不能重试。
@@ -81,6 +101,10 @@ def _check_refs(
             raise LedgerError("unknown_member", f"参与人不存在：{mid}", member_id=mid)
     if category_id is not None and session.get(Category, category_id) is None:
         raise LedgerError("unknown_category", f"分类不存在：{category_id}", category_id=category_id)
+    # bundle 是这里唯一漏掉过的外键：乱指一个 id 会一路撞到数据库的约束上返回 500，
+    # 而这个函数存在的全部理由就是别让那种事发生
+    if bundle_id is not None and session.get(Bundle, bundle_id) is None:
+        raise LedgerError("unknown_bundle", f"套餐不存在：{bundle_id}", bundle_id=bundle_id)
 
 
 def create_entry(
@@ -105,7 +129,7 @@ def create_entry(
     分摊只在这一刻算一次。之后改默认比例、加成员、删分类，这条账都不会变。
     """
     _check_refs(session, payer_id=payer_id, to_member_id=to_member_id,
-                member_ids=member_ids, category_id=category_id)
+                member_ids=member_ids, category_id=category_id, bundle_id=bundle_id)
     _validate_amount(kind, amount)
 
     if kind == EntryKind.settlement:
@@ -272,6 +296,16 @@ def update_entry(
     version 是乐观锁：两个人同时改同一笔时，后提交的那个会被挡下来，
     而不是悄悄覆盖掉对方的修改。
     """
+    # PATCH 里**显式传 null** 的字段：不能留空的那几个一律当成错误挡下来。
+    # 原来是直接 setattr 下去，title=None 撞 NOT NULL、kind=None 撞 _validate_amount，
+    # 两条都是 500 —— 而客户端拿到「服务器错误」既看不出哪个字段，也不知道能不能重试。
+    # left_on / category_id / to_member_id / bundle_id 不在这张表里：它们**可以**被清空
+    nulled = [k for k in _NOT_NULLABLE if k in fields and fields[k] is None]
+    if nulled:
+        raise LedgerError(
+            "null_field", f"这些字段不能清空：{', '.join(nulled)}", fields=nulled
+        )
+
     if entry.deleted_at is not None:
         # 回收站里的账不许改。原来改得动而且返回 200：那边界面上已经删掉了，
         # 这边却在给它重算分摊、写审计日志，谁也不知道这笔账到底是什么状态
@@ -310,7 +344,8 @@ def update_entry(
     payer_id = fields.get("payer_id", entry.payer_id)
     to_member_id = fields.get("to_member_id", entry.to_member_id)
     _check_refs(session, payer_id=payer_id, to_member_id=to_member_id,
-                member_ids=member_ids, category_id=fields.get("category_id"))
+                member_ids=member_ids, category_id=fields.get("category_id"),
+                bundle_id=fields.get("bundle_id"))
     _validate_amount(kind, amount)
 
     entry.kind, entry.date, entry.amount_jpy = kind, on, amount
@@ -340,6 +375,11 @@ def update_entry(
             from_rule = [int(k) for k in participants(rule)] if rule is not None else []
             from_entry = [int(k) for k in participants(entry.split_rule_json)] if inheritable else []
             ids = from_rule or from_entry or [m.id for m in active_members(session, on)]
+            # 参与人从规则里推出来时，得自己再验一遍存在性 —— 上面那次 _check_refs
+            # 验的是 body 里显式传的 member_ids。规则里点名一个不存在的 id 的话，
+            # expand() 会觉得「规则和参与人对得上」放行，一直到写 entry_share 才撞外键：
+            # 同一个输入走 POST 是规规矩矩的 400，走 PATCH 却是 500
+            _check_refs(session, member_ids=ids)
 
         # 换了分类就该用新分类的默认分摊 —— 界面上分摊预览当场就变成新分类的样子了，
         # 继续沿用旧规则的话，存下去和刚才看到的不是一回事

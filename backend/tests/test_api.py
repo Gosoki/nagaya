@@ -4,37 +4,13 @@ from __future__ import annotations
 
 import datetime as dt
 
-import pytest
-from fastapi.testclient import TestClient
-from sqlmodel import Session
-
 import base64
 import io
 
 from app.auth import hash_password
-from app.db import get_session
-from app.main import app
 from app.models import Member
 
 SEP = "2026-09-10"
-
-
-@pytest.fixture
-def client(session: Session):
-    app.dependency_overrides[get_session] = lambda: session
-    yield TestClient(app)          # 不用 with：避免触发 lifespan 去建真实的库
-    app.dependency_overrides.clear()
-
-
-@pytest.fixture
-def auth(client, session, members):
-    a = members[0]
-    a.password_hash = hash_password("pw123456")
-    session.add(a)
-    session.commit()
-    r = client.post("/api/auth/login", json={"name": "a", "password": "pw123456"})
-    assert r.status_code == 200, r.text
-    return {"Authorization": f"Bearer {r.json()['token']}"}
 
 
 def test_login_rejects_wrong_password(client, session, members):

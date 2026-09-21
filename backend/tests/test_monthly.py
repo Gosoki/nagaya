@@ -12,7 +12,7 @@ import datetime as dt
 from sqlmodel import Session
 
 from app.models import Category, EntryKind
-from app.services.bill import carry_same_as_last, cut_statement, monthly_rows
+from app.services.bill import carry_same_as_last, cut_statement, monthly_rows, unbilled
 from app.services.ledger import create_entry, delete_entry
 
 AUG = dt.date(2026, 8, 10)
@@ -86,7 +86,7 @@ def test_carry_looks_back_past_statements_without_that_item(session, members) ->
                  amount=8_700, payer_id=a.id, category_id=c["電気"].id)
     cut_statement(session, actor_id=a.id)                       # 8 月那张（没有水费）
 
-    assert [m["amount"] for m in carry_same_as_last(session, actor_id=a.id)] == [12_000]
+    assert [m["amount"] for m in carry_same_as_last(session, actor_id=a.id)["created"]] == [12_000]
 
 
 def test_deleted_entries_are_not_carried(session, members) -> None:
@@ -101,7 +101,7 @@ def test_deleted_entries_are_not_carried(session, members) -> None:
     create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG,
                  amount=1, payer_id=a.id, category_id=c["水道"].id)
     cut_statement(session, actor_id=a.id)
-    assert carry_same_as_last(session, actor_id=a.id) == []
+    assert carry_same_as_last(session, actor_id=a.id)["created"] == []
 
 
 def test_rule_falls_back_to_category_default(session, members) -> None:
@@ -141,7 +141,7 @@ def test_monthly_rows_of_a_past_statement_only_lists_what_is_on_it(session, memb
 
     空行会诱人往里填，而填出来的是**新账目**，落进当前草稿，根本不会进这张单子。
     """
-    from app.services.bill import carry_same_as_last, cut_statement, monthly_rows
+    from app.services.bill import carry_same_as_last, cut_statement, monthly_rows, unbilled
 
     a, *_ = members
     rent = Category(name="家賃", monthly=True, display_order=0)
@@ -222,7 +222,7 @@ def test_carry_only_touches_items_that_opted_in(session: Session, members) -> No
     session.add(c["家賃"])
     session.commit()
 
-    made = carry_same_as_last(session, actor_id=a.id)
+    made = carry_same_as_last(session, actor_id=a.id)["created"]
     assert [m["name"] for m in made] == ["家賃"]
     assert made[0]["amount"] == 120_000
     rows = {r["name"]: r for r in monthly_rows(session)["rows"]}
@@ -231,7 +231,7 @@ def test_carry_only_touches_items_that_opted_in(session: Session, members) -> No
     assert 8_000 not in rows["電気"].values(), "没开开关的，上期金额一点都不许漏过来"
 
     # 再跑一次不会重复记
-    assert carry_same_as_last(session, actor_id=a.id) == []
+    assert carry_same_as_last(session, actor_id=a.id)["created"] == []
 
 
 def test_carry_skips_items_that_never_had_an_amount(session: Session, members) -> None:
@@ -241,4 +241,130 @@ def test_carry_skips_items_that_never_had_an_amount(session: Session, members) -
     c["家賃"].same_as_last = True
     session.add(c["家賃"])
     session.commit()
-    assert carry_same_as_last(session, actor_id=a.id) == []
+    assert carry_same_as_last(session, actor_id=a.id)["created"] == []
+
+
+def test_carry_uses_the_global_default_payer_when_the_category_has_none(
+    session: Session, members
+) -> None:
+    """分类上没定垫付人时要回退到全局设置，不能算「谁先打开账单页」头上。
+
+    少了中间这一级的话，房租那 12 万会算到本期第一个点开账单页的人名下 ——
+    两个人各错一整笔房租的钱，而通知里只说「已按上期记入 家賃 ¥120,000」，
+    一个字都不提算谁的。
+    """
+    from app.services import settings as settings_svc
+
+    a, b, _ = members
+    c = cats(session)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG,
+                 amount=120_000, payer_id=b.id, category_id=c["家賃"].id)
+    cut_statement(session, actor_id=a.id)
+
+    c["家賃"].same_as_last = True          # 分类上**故意不设** default_payer_id
+    session.add(c["家賃"])
+    session.commit()
+    settings_svc.set_(session, "default_payer_id", b.id)
+
+    made = carry_same_as_last(session, actor_id=a.id)["created"]
+    assert [m["name"] for m in made] == ["家賃"]
+    entry = next(e for e in unbilled(session) if e.category_id == c["家賃"].id)
+    assert entry.payer_id == b.id, "垫付人该是全局设置里的那个人，不是点开页面的人"
+
+
+def test_carry_survives_a_roommate_moving_out(session: Session, members) -> None:
+    """有人搬走之后，「和上期一样」不许整条静默失效。
+
+    分类的默认分摊是当年按那时候几个人写死的。有人填了 left_on 之后，
+    expand() 拿「今天在籍的人」当参与人，发现规则里多出个不认识的 id 就抛
+    unknown_member —— 原来这会让**整个循环**炸掉：排在前面的项已经 commit 进草稿，
+    返回值随异常一起丢，接口 400，前端一个空 catch 吞掉。
+    屏幕上那几行还是空框，用户照着空框再填一遍，同一分类当期就有了两笔。
+    """
+    a, b, c_ = members
+    c = cats(session)
+    for name, amount in [("家賃", 120_000), ("電気", 8_000)]:
+        create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG,
+                     amount=amount, payer_id=a.id, category_id=c[name].id)
+    cut_statement(session, actor_id=a.id)
+
+    # 房租这条规则点名了三个人（按房间大小分），电费没有规则
+    c["家賃"].same_as_last = True
+    c["家賃"].default_rule_json = {
+        "mode": "ratio", "equal_weight": 1,
+        "adjustments": {str(a.id): 5_000, str(c_.id): -5_000},
+    }
+    c["電気"].same_as_last = True
+    session.add(c["家賃"]); session.add(c["電気"])
+    c_.left_on = dt.date(2026, 8, 31)                 # 第三个人搬走了
+    session.add(c_)
+    session.commit()
+
+    out = carry_same_as_last(session, actor_id=a.id)
+    assert {m["name"] for m in out["created"]} == {"家賃", "電気"}, out
+    assert out["failed"] == []
+    rows = rows_by_name(session)
+    assert rows["家賃"]["amount"] == 120_000
+    assert rows["電気"]["amount"] == 8_000
+    # 搬走的人不该再被分摊
+    entry = next(e for e in unbilled(session) if e.category_id == c["家賃"].id)
+    assert str(c_.id) not in entry.split_rule_json.get("adjustments", {})
+
+
+def test_carry_does_not_resurrect_a_manually_deleted_row(session: Session, members) -> None:
+    """本期手动删掉的那笔不许被搬回来 —— 否则每打开一次账单页复活一次，用户删不掉。"""
+    a, *_ = members
+    c = cats(session)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG,
+                 amount=120_000, payer_id=a.id, category_id=c["家賃"].id)
+    cut_statement(session, actor_id=a.id)
+    c["家賃"].same_as_last = True
+    session.add(c["家賃"])
+    session.commit()
+
+    assert len(carry_same_as_last(session, actor_id=a.id)["created"]) == 1
+    made = next(e for e in unbilled(session) if e.category_id == c["家賃"].id)
+    delete_entry(session, made, actor_id=a.id)          # 这个月没有房租，删掉
+
+    assert carry_same_as_last(session, actor_id=a.id)["created"] == []
+    assert rows_by_name(session)["家賃"]["amount"] is None
+
+
+def test_carry_never_copies_an_income_amount(session: Session, members) -> None:
+    """收入的金额是负数，抄过来以 expense 建账当场撞 bad_sign。
+
+    那一项的「和上期一样」于是每次都失败，而用户只看到它一直空着。
+    """
+    a, *_ = members
+    c = cats(session)
+    create_entry(session, actor_id=a.id, kind=EntryKind.income, on=AUG,
+                 amount=-3_000, payer_id=a.id, category_id=c["電気"].id)
+    cut_statement(session, actor_id=a.id)
+    c["電気"].same_as_last = True
+    session.add(c["電気"])
+    session.commit()
+    out = carry_same_as_last(session, actor_id=a.id)
+    assert out == {"created": [], "failed": []}
+
+
+def test_archived_category_keeps_its_row_while_it_still_holds_money(
+    session: Session, members
+) -> None:
+    """归档一个**本期已经录了钱**的固定费项：那一行必须留着。
+
+    不留的话那笔钱还在账单的合计和每人应担里，面板上却一行都看不见 ——
+    同一张草稿两个对不上的合计，而那笔钱既改不了也删不掉。
+    """
+    a, *_ = members
+    c = cats(session)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                 amount=5_500, payer_id=a.id, category_id=c["電気"].id)
+    c["電気"].archived = True
+    session.add(c["電気"])
+    session.commit()
+
+    rows = rows_by_name(session)
+    assert rows["電気"]["amount"] == 5_500, "钱还在账单里，行就不能消失"
+    assert monthly_rows(session)["total"] == 5_500
+    # 没钱的归档项照旧不占位
+    assert "水道" in rows and "旧契約" not in rows

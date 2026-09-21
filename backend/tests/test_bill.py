@@ -462,3 +462,60 @@ def test_cut_without_monthly_leaves_their_dates_alone(session: Session, members)
     session.refresh(fixed)
     assert fixed.date == SEP
     assert fixed.statement_id is None
+
+
+def test_a_late_transfer_still_lights_up_the_bill_it_was_paying(
+    session: Session, members
+) -> None:
+    """拖到下一张出账之后才还的钱，也得把当初那张点亮。
+
+    原来的判据拿「下一张的出账时刻」当上界，于是这条最常见的路径永远点不亮：
+    那张单子的方案是冻结的（钱到账也不会变），屏幕上哪儿都不变绿。
+    用户以为没点上，照着屏幕再转一次 —— 这一屏的全部作用就是防这件事。
+    """
+    a, b, _ = members
+    cat = Category(name="日用品", monthly=False)
+    session.add(cat)
+    session.commit()
+    session.refresh(cat)
+
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                 amount=30_000, payer_id=a.id, category_id=cat.id)
+    s1 = cut_statement(session, actor_id=a.id)
+    plan = (s1.snapshot_json or {})["transfers"]
+    assert plan, "这张单子该开出转账方案"
+
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=OCT,
+                 amount=3_000, payer_id=a.id, category_id=cat.id)
+    cut_statement(session, actor_id=a.id)                  # 下一张先出了
+
+    t = plan[0]
+    # 部分还款：还没够，不许点亮，但「已经转了多少」要说得出来
+    create_entry(session, actor_id=a.id, kind=EntryKind.settlement, on=OCT,
+                 amount=t["amount"] - 1, payer_id=t["from_id"], to_member_id=t["to_id"])
+    bill = build_bill(session, s1)
+    assert bill["settled_transfers"][0] is False
+    assert bill["settled_paid"][0] == t["amount"] - 1
+
+    # 补齐那 1 円 —— 当初那张必须跟着变绿
+    create_entry(session, actor_id=a.id, kind=EntryKind.settlement, on=OCT,
+                 amount=1, payer_id=t["from_id"], to_member_id=t["to_id"])
+    assert build_bill(session, s1)["settled_transfers"][0] is True
+
+
+def test_unrelated_transfers_do_not_settle_a_bill(session: Session, members) -> None:
+    """跟这张单子的方案无关的那几对，转再多也不算数。"""
+    a, b, c = members
+    cat = Category(name="日用品", monthly=False)
+    session.add(cat)
+    session.commit()
+    session.refresh(cat)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                 amount=30_000, payer_id=a.id, category_id=cat.id)
+    s1 = cut_statement(session, actor_id=a.id)
+    t = (s1.snapshot_json or {})["transfers"][0]
+    other = next(m.id for m in (a, b, c) if m.id not in (t["from_id"], t["to_id"]))
+
+    create_entry(session, actor_id=a.id, kind=EntryKind.settlement, on=OCT,
+                 amount=999_999, payer_id=t["from_id"], to_member_id=other)
+    assert build_bill(session, s1)["settled"] is False

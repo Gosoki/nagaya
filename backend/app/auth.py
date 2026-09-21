@@ -19,6 +19,7 @@ from sqlmodel import Session, select
 
 from app.db import DB_PATH, get_session
 from app.models import Member
+from app.services.ledger import LedgerError
 
 ALGORITHM = "HS256"
 TOKEN_DAYS = 90
@@ -45,8 +46,16 @@ SECRET = _load_secret()
 
 
 def hash_password(raw: str) -> str:
+    # 抛 LedgerError 而不是裸 ValueError：裸的那个没人接，一路冒到 FastAPI 顶上变成
+    # 500「Internal Server Error」。这是个中日文界面的 App，拿一句中文当密码
+    # （25 个汉字就是 75 字节）是最自然的写法，不该以「服务器坏了」收场。
+    # 走 {code,message,detail} 这条线，文案才留在前端 —— 后端不返界面文案
     if len(raw.encode()) > MAX_PASSWORD_BYTES:
-        raise ValueError(f"密码不能超过 {MAX_PASSWORD_BYTES} 字节")
+        raise LedgerError(
+            "password_too_long",
+            f"password exceeds {MAX_PASSWORD_BYTES} bytes",
+            limit=MAX_PASSWORD_BYTES,
+        )
     return bcrypt.hashpw(raw.encode(), bcrypt.gensalt()).decode()
 
 
