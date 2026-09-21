@@ -83,17 +83,11 @@
         </q-btn>
       </div>
 
-      <!-- 默认展开：日常网格只剩三个按钮之后竖向空间够用，
-           直接看到每人分多少，比藏起来更踏实 -->
-      <q-expansion-item
-        v-if="kind !== 'settlement'"
-        dense
-        default-opened
-        class="q-mt-sm split-panel"
-        header-class="q-px-none text-primary"
-        :label="t('entry.splitDetail')"
-        :caption="splitSummary"
-      >
+      <!-- 不做折叠：日常网格只剩三个按钮之后竖向空间够用，
+           每人分多少一直摆在那儿，比藏在一个要点开的抽屉里踏实。
+           折起来的那个抽屉还带个没用的摘要行（「Go / Kan / Zen」），白占一行 -->
+      <div v-if="kind !== 'settlement'" class="q-mt-sm split-panel">
+        <div class="text-grey-7 label q-mb-xs">{{ t('entry.split') }}</div>
         <SplitEditor
           ref="splitEl"
           :amount="signedAmount"
@@ -102,7 +96,7 @@
           :seed-rule="ownRule ?? selectedCategoryRule"
           @change="onSplitChange"
         />
-      </q-expansion-item>
+      </div>
     </div>
 
     <!-- 主操作在拇指区；合计对不上时差额就摆在按钮正上方，不用滚回去找 -->
@@ -238,11 +232,6 @@ const selectedCategoryRule = computed(
       | null
       | undefined) ?? null,
 )
-
-const splitSummary = computed(() => {
-  if (!rule.value) return ''
-  return meta.activeMembers.map((m) => m.display_name).join(' / ')
-})
 
 onMounted(async () => {
   if (editingId.value !== null) {

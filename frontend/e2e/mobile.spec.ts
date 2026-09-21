@@ -111,7 +111,6 @@ test('金额 → 分类 → 保存，三步录完一笔', async ({ page }) => {
 test('分摊编辑器：实时算钱、合计对得上', async ({ page }) => {
   await login(page)
   await page.locator('input.amount').fill('10000')
-  await page.locator('.split-panel [role="button"]').first().click()
 
   const shares = page.locator('.member-row .share-col')
   // 必须验可见：q-expansion-item 折叠着的时候内容也在 DOM 里，
@@ -144,7 +143,6 @@ test('固定金额模式：合计对不上就红字报差额且存不了', async
   await page.locator('input.amount').fill('120000')
   // 分类现在是必选的：不选的话后端拿不到分类默认规则，会悄悄掉回全员均分
   await page.getByRole('button', { name: '日用品' }).click()
-  await page.locator('.split-panel [role="button"]').first().click()
   await page.getByRole('button', { name: '固定金额' }).click()
 
   const inputs = page.locator('.exact-col .num-input')
@@ -428,10 +426,10 @@ test('固定费不必等到出账单：账单 Tab 一点就到', async ({ page }
   await page.screenshot({ path: 'e2e/shots/14-monthly-standalone.png' })
 })
 
-test('记一笔：分摊默认就是展开的', async ({ page }) => {
+test('记一笔：分摊一直摆在那儿，不用点开', async ({ page }) => {
   await login(page)
   await page.locator('input.amount').fill('3000')
-  // 不用点「改分摊」，每人分多少直接看得见
+  // 没有折叠这回事：每人分多少直接看得见
   await expect(page.locator('.member-row .share-col').first()).toBeVisible()
   const texts = await page.locator('.member-row .share-col').allTextContents()
   expect(texts.reduce((s, t) => s + Number(t.replace(/[^\d-]/g, '')), 0)).toBe(3000)
