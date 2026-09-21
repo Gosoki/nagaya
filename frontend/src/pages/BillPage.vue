@@ -384,8 +384,11 @@ const others = computed(() =>
 
 const categoryOfEntry = (e: Entry) =>
   e.category_id === null ? undefined : meta.categoryById[e.category_id]
-const colorOfEntry = (e: Entry) => categoryOfEntry(e)?.color ?? '#90a4ae'
-const iconOfEntry = (e: Entry) => categoryOfEntry(e)?.icon ?? 'receipt_long'
+// 收入没有分类，得有自己的图标色，否则跟「分类丢了」长得一模一样
+const colorOfEntry = (e: Entry) =>
+  e.kind === 'income' ? '#43a047' : (categoryOfEntry(e)?.color ?? '#90a4ae')
+const iconOfEntry = (e: Entry) =>
+  e.kind === 'income' ? 'savings' : (categoryOfEntry(e)?.icon ?? 'receipt_long')
 const labelOfEntry = (e: Entry) => e.title || categoryOfEntry(e)?.name || t(`kind.${e.kind}`)
 
 async function open(id: number | null) {

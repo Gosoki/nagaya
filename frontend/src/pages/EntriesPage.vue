@@ -130,9 +130,9 @@ const grouped = computed(() => {
 const categoryOf = (e: Entry) =>
   e.category_id === null ? undefined : meta.categoryById[e.category_id]
 const colorOf = (e: Entry) =>
-  e.kind === 'settlement' ? '#78909c' : (categoryOf(e)?.color ?? '#90a4ae')
+  e.kind === 'settlement' ? '#78909c' : e.kind === 'income' ? '#43a047' : (categoryOf(e)?.color ?? '#90a4ae')
 const iconOf = (e: Entry) =>
-  e.kind === 'settlement' ? 'swap_horiz' : (categoryOf(e)?.icon ?? 'receipt_long')
+  e.kind === 'settlement' ? 'swap_horiz' : e.kind === 'income' ? 'savings' : (categoryOf(e)?.icon ?? 'receipt_long')
 
 const labelOf = (e: Entry) =>
   e.title || categoryOf(e)?.name || t(`kind.${e.kind}`)

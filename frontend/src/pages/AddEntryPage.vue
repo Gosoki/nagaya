@@ -30,8 +30,8 @@
 
     <AmountInput ref="amountEl" v-model="amount" />
 
-    <!-- 分类：大色块网格，一点即选。转账没有分类 -->
-    <div v-if="kind !== 'settlement'" class="cat-grid">
+    <!-- 分类：大色块网格，一点即选。只有支出分类；收入和转账都没有 -->
+    <div v-if="kind === 'expense'" class="cat-grid">
       <button
         v-for="c in gridCategories"
         :key="c.id"
@@ -223,9 +223,10 @@ const canSave = computed(
     amount.value > 0 &&
     payerId.value !== null &&
     splitValid.value &&
-    // 支出/收入必须选分类。不选的话后端拿不到分类默认规则，会悄悄掉回「全员均分」——
+    // 支出必须选分类。不选的话后端拿不到分类默认规则，会悄悄掉回「全员均分」——
     // 一笔本该 1:1:0 的账就变成 1:1:1，而界面上没有任何提示。
-    (kind.value === 'settlement' || categoryId.value !== null) &&
+    // 收入没有分类：返现、給付金这些套不上「日用品/食費」，写在备注里更清楚。
+    (kind.value !== 'expense' || categoryId.value !== null) &&
     (kind.value !== 'settlement' || (toMemberId.value !== null && toMemberId.value !== payerId.value)),
 )
 
@@ -285,7 +286,7 @@ async function saveEdit() {
       amount_jpy: signedAmount.value,
       payer_id: payerId.value,
       to_member_id: kind.value === 'settlement' ? toMemberId.value : null,
-      category_id: kind.value === 'settlement' ? null : categoryId.value,
+      category_id: kind.value === 'expense' ? categoryId.value : null,
       title: title.value,
       rule: kind.value === 'settlement' ? null : rule.value,
     })
@@ -342,7 +343,7 @@ async function save(keepGoing: boolean) {
       amount_jpy: signedAmount.value,
       payer_id: payerId.value,
       to_member_id: kind.value === 'settlement' ? toMemberId.value : null,
-      category_id: kind.value === 'settlement' ? null : categoryId.value,
+      category_id: kind.value === 'expense' ? categoryId.value : null,
       title: title.value,
       rule: kind.value === 'settlement' ? null : rule.value,
   }
