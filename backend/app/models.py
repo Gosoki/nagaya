@@ -15,7 +15,7 @@ from enum import Enum
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import JSON, Column, UniqueConstraint
+from sqlalchemy import JSON, Column, LargeBinary, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 #: 业务日期一律按日本时间算。部署到海外 VPS 也不会错位。
@@ -65,6 +65,15 @@ class Member(SQLModel, table=True):
     left_on: Optional[dt.date] = Field(default=None, description="退出日；留空＝在籍")
     password_hash: str = ""
     lang: Lang = Field(default=Lang.zh)
+    avatar: Optional[bytes] = Field(
+        default=None,
+        sa_column=Column(LargeBinary),
+        description=(
+            "头像图片（WebP）。**存库里不存目录**：压完才几 KB，三个人加起来不到 50KB，"
+            "而备份本来就是拷贝这个 .db —— 换成目录就得再管一套备份和权限。"
+        ),
+    )
+    avatar_version: int = Field(default=0, description="改一次加一，前端拿它做缓存键")
     created_at: dt.datetime = Field(default_factory=now_utc)
 
     def is_active(self, on: dt.date | None = None) -> bool:

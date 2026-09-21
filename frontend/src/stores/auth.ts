@@ -35,10 +35,22 @@ export const useAuth = defineStore('auth', () => {
     return saved
   }
 
+  async function uploadAvatar(file: File): Promise<Member> {
+    const saved = await api.upload<Member>(`/api/members/${me.value!.id}/avatar`, file)
+    me.value = saved
+    return saved
+  }
+
+  async function removeAvatar(): Promise<Member> {
+    const saved = await api.del<Member>(`/api/members/${me.value!.id}/avatar`)
+    me.value = saved
+    return saved
+  }
+
   function logout() {
     setToken(null)
     me.value = null
   }
 
-  return { me, ready, login, restore, updateMe, logout }
+  return { me, ready, login, restore, updateMe, uploadAvatar, removeAvatar, logout }
 })

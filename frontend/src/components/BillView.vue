@@ -182,9 +182,7 @@
           :class="{ 'bg-blue-1': row.member_id === auth.me?.id }"
         >
           <q-item-section avatar>
-            <q-avatar size="30px" :style="{ background: colorOf(row.member_id) }" text-color="white">
-              {{ nameOf(row.member_id).slice(0, 1) }}
-            </q-avatar>
+            <MemberAvatar :member-id="row.member_id" />
           </q-item-section>
           <!-- 名字和金额一行，明细在下面**占满整行**排成两列。
                明细原来挤在名字那一列里（右边被金额占走近百 px），四项排不下，
@@ -341,6 +339,7 @@ import { useRouter } from 'vue-router'
 
 import { ApiError, api } from 'src/api/client'
 import type { Bill, BillTransfer, Entry, Statement } from 'src/api/types'
+import MemberAvatar from 'src/components/MemberAvatar.vue'
 import MonthlyFixed from 'src/components/MonthlyFixed.vue'
 import { todayJst } from 'src/date'
 import { formatYen } from 'src/i18n'
@@ -379,7 +378,6 @@ const showFallback = ref(false)
 const cutResult = ref<Bill | null>(null)
 
 const nameOf = (id: number) => meta.byId[id]?.display_name ?? String(id)
-const colorOf = (id: number) => meta.byId[id]?.color ?? '#90a4ae'
 
 /** 自己在这张账单上的那一行 */
 const showCutResult = computed({

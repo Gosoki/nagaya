@@ -33,9 +33,7 @@
       <!-- 点头像/名字＝这个人这笔不参与（比例设 0），再点一下恢复。
            「谁没在」是改分摊时最常做的事，不该还要先点开比例再选一次 -->
       <button class="name-col row items-center no-wrap" @click="toggleOut(m.id)">
-        <q-avatar size="30px" :style="{ background: m.color }" text-color="white" class="q-mr-sm">
-          {{ m.display_name.slice(0, 1) }}
-        </q-avatar>
+        <MemberAvatar :member-id="m.id" class="q-mr-sm" />
         <div class="name ellipsis">{{ m.display_name }}</div>
       </button>
 
@@ -100,6 +98,7 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import type { Member } from 'src/api/types'
+import MemberAvatar from 'src/components/MemberAvatar.vue'
 import { SplitError, split } from 'src/core/split'
 import { formatYen } from 'src/i18n'
 import { useMeta } from 'src/stores/meta'
@@ -175,13 +174,36 @@ function resetWeights() {
   typing.value = {}
 }
 resetWeights()
-// 盯的是**参与人这个集合**，不是数组的身份。按身份比的话，调用方每渲染一次
-// 传一个新数组（比如按日期现算的参与人）就会把用户刚调好的比例重置回默认 ——
-// 改一下日期，自定义分摊当场没了
-watch(() => props.members.map((m) => m.id).join(','), resetWeights)
-// 换了分类 → 换一套默认规则重来。touched 一并清掉，否则会把上一个分类的规则带过去
+/**
+ * 参与人变了。
+ *
+ * **已经调过的比例不能被抹掉。** 参与人这个列表会因为各种与用户无关的原因
+ * 重新算一遍（成员刷新、自己那条记录晚到导致「自己排第一」的顺序变了……），
+ * 每次都整体重置的话，用户刚调好的分摊会在某个说不清的时刻悄悄跳回默认 ——
+ * 而屏幕上只是「数字自己变了一下」，没人看得出发生了什么。
+ * 固定费面板那边早就是这个规矩（load() 保留还没保存的输入）。
+ *
+ * 所以：没动过的整体重来；动过的只补进新来的人、去掉走了的人。
+ */
 watch(
-  () => props.seedRule,
+  () => props.members.map((m) => m.id).join(','),
+  () => {
+    if (!touched.value) {
+      resetWeights()
+      return
+    }
+    const keys = props.members.map((m) => String(m.id))
+    weights.value = Object.fromEntries(keys.map((k) => [k, weights.value[k] ?? 1]))
+    adjustments.value = Object.fromEntries(
+      keys.filter((k) => adjustments.value[k]).map((k) => [k, adjustments.value[k]!]),
+    )
+  },
+)
+// 换了分类 → 换一套默认规则重来。touched 一并清掉，否则会把上一个分类的规则带过去。
+// **只认真正换了内容的**：categoryById 重算一次就会给出一个内容相同的新对象，
+// 按引用比的话，一次无关的成员刷新就能把用户调好的比例冲掉
+watch(
+  () => JSON.stringify(props.seedRule ?? null),
   () => {
     touched.value = false
     resetWeights()

@@ -11,6 +11,9 @@ export interface Member {
   left_on: string | null
   lang: Lang
   is_active: boolean
+  /** 头像，data:image/webp;base64,…。没设过就是 null，界面退回那个带首字的色圆 */
+  avatar: string | null
+  avatar_version: number
 }
 
 /** 自己加的备忘条目。固定费那几项的备忘写在 Category.note 上 */

@@ -1013,6 +1013,45 @@ test('个人设置：头像色 / 昵称 / 语言 / 改密码', async ({ page }) 
     .toBe(before.display_name)
 })
 
+test('换头像：传一张照片，全站跟着换；撤掉就回色圆', async ({ page }) => {
+  await login(page, 'kan')          // 跟「个人设置」那条一样，别拿 go 来折腾
+  const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
+  const me = async () => (await (await page.request.get('/api/auth/me', { headers })).json())
+
+  // **别假设起点是干净的**：上一轮要是红在半路上，头像就留在库里了 ——
+  // 而头像只能自己删，afterEach 用的是 go 的身份，替 kan 收拾不了
+  await page.request.delete(`/api/members/${(await me()).id}/avatar`, { headers })
+
+  await page.getByRole('tab', { name: '更多' }).click()
+  await page.getByRole('tab', { name: '设置' }).click()
+  await page.reload()
+  await page.getByRole('tab', { name: '设置' }).click()
+  await expect(page.locator('.avatar-btn img')).toHaveCount(0)
+
+  await page.locator('input[type="file"]').setInputFiles('e2e/fixtures/avatar.jpg')
+  await expect(page.locator('.avatar-btn img')).toHaveCount(1)
+
+  // 后端得压到几 KB —— 原图一点七 MB，原样存进库里迟早把备份撑爆
+  const after = await me()
+  expect(after.avatar.startsWith('data:image/webp;base64,')).toBe(true)
+  const bytes = (after.avatar.length - 23) * 3 / 4
+  expect(bytes, `压完还有 ${Math.round(bytes / 1024)}KB`).toBeLessThan(40_000)
+
+  // 全站都读同一份：账单的「每人」里，**自己那一行**也换了。
+  // 不数全局的 img 张数 —— 别人也可能设了头像，那跟这条用例没关系
+  await page.getByRole('tab', { name: '账单' }).click()
+  await expect(
+    page.locator('.per-member .q-item').filter({ hasText: 'Kan' }).locator('img'),
+  ).toHaveCount(1)
+
+  // 撤掉，回到那个带首字的色圆
+  await page.getByRole('tab', { name: '更多' }).click()
+  await page.getByRole('tab', { name: '设置' }).click()
+  await page.getByRole('button', { name: '用回色圆' }).click()
+  await expect(page.locator('.avatar-btn img')).toHaveCount(0)
+  expect((await me()).avatar).toBeNull()
+})
+
 test('账目筛选：按分类/付款人筛，并给出筛选后的合计', async ({ page }) => {
   await login(page)
   await page.goto('/entries')

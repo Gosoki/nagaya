@@ -100,6 +100,7 @@ export default {
   },
   profile: {
     title: 'プロフィール',
+    photo: 'アイコン', pickPhoto: '写真を選ぶ', removePhoto: '色に戻す', photoHint: 'タップして写真を変更（最大 5MB）。未設定なら下の色を使います', tooBig: '画像は 5MB までです',
     color: 'アイコンの色', displayName: '表示名', loginName: 'ログイン名', lang: '言語',
     displayNameHint: '請求書や分担で表示される名前。アイコンには先頭の一文字',
     loginNameHint: 'ログイン用の名前。自分にしか見えません',

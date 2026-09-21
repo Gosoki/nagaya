@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session
 
@@ -12,7 +14,13 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 def to_member_out(m: Member) -> MemberOut:
-    return MemberOut(**m.model_dump(), is_active=m.is_active())
+    data = m.model_dump()
+    blob = data.pop("avatar", None)
+    return MemberOut(
+        **data,
+        is_active=m.is_active(),
+        avatar=f"data:image/webp;base64,{base64.b64encode(blob).decode()}" if blob else None,
+    )
 
 
 @router.post("/login", response_model=LoginOut)

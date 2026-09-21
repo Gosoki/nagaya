@@ -25,6 +25,11 @@ class MemberOut(SQLModel):
     left_on: Optional[dt.date]
     lang: Lang
     is_active: bool
+    #: 头像，`data:image/webp;base64,...`。**随成员一起下发**，不单开一个图片地址：
+    #: `<img>` 带不了 Bearer token，做成公开端点等于在局域网上开个口子；
+    #: 而且压完才几 KB，跟着成员走还能进本地缓存，离线时头像照样在
+    avatar: Optional[str] = None
+    avatar_version: int = 0
 
 
 class LoginOut(SQLModel):

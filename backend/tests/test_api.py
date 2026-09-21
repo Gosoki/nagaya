@@ -8,6 +8,9 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
+import base64
+import io
+
 from app.auth import hash_password
 from app.db import get_session
 from app.main import app
@@ -265,3 +268,68 @@ def test_category_note_is_a_standing_memo(client, auth) -> None:
                            json={"note": "隔月收：6 / 8 / 10 月"}).json()
     assert updated["note"] == "隔月收：6 / 8 / 10 月"
     assert updated["name"] == "水费", "只发了 note，别的字段不许动"
+
+
+def _photo(width: int = 2400, height: int = 1600) -> bytes:
+    """一张「手机拍的」大图：横着的、带 EXIF 里的方向、几百 KB 起。"""
+    from PIL import Image
+
+    img = Image.new("RGB", (width, height))
+    px = img.load()
+    for y in range(height):
+        for x in range(0, width, 7):          # 画点花纹，纯色压完只有几百字节，测不出东西
+            px[x, y] = ((x * 3) % 256, (y * 5) % 256, ((x + y) * 7) % 256)
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=95)
+    return buf.getvalue()
+
+
+def test_avatar_upload_compresses_hard(client, auth, members) -> None:
+    """五 MB 的手机照片进来，存下去得是几 KB 的小方图。"""
+    me, *_ = members
+    raw = _photo()
+    assert len(raw) > 200_000, "测试素材本身要够大，不然压缩比没意义"
+
+    r = client.post(f"/api/members/{me.id}/avatar", headers=auth,
+                    files={"file": ("photo.jpg", raw, "image/jpeg")})
+    assert r.status_code == 200
+    out = r.json()
+    assert out["avatar"].startswith("data:image/webp;base64,")
+    assert out["avatar_version"] == 1
+
+    stored = base64.b64decode(out["avatar"].split(",", 1)[1])
+    assert len(stored) < 30_000, f"压完还有 {len(stored)} 字节，太大了"
+    assert len(stored) < len(raw) / 20, "至少要小一个数量级"
+
+    from PIL import Image
+    img = Image.open(io.BytesIO(stored))
+    assert img.size == (192, 192), "头像是个圆，必须裁成正方形，不能压扁"
+    assert img.format == "WEBP"
+
+    # 列表里也带着，前端拿一次成员就有头像，不用再发一轮请求
+    listed = {m["id"]: m for m in client.get("/api/members", headers=auth).json()}
+    assert listed[me.id]["avatar"] == out["avatar"]
+
+
+def test_avatar_rules(client, auth, members) -> None:
+    me, other, *_ = members
+    # 超过 5MB 直接拒
+    big = b"\xff\xd8\xff" + b"0" * (5 * 1024 * 1024)
+    assert client.post(f"/api/members/{me.id}/avatar", headers=auth,
+                       files={"file": ("big.jpg", big, "image/jpeg")}).status_code == 413
+    # 不是图片的，给 400 说清楚，别撞成 500
+    assert client.post(f"/api/members/{me.id}/avatar", headers=auth,
+                       files={"file": ("a.txt", b"hello", "text/plain")}).status_code == 400
+    # 只能换自己的
+    assert client.post(f"/api/members/{other.id}/avatar", headers=auth,
+                       files={"file": ("photo.jpg", _photo(60, 60), "image/jpeg")}).status_code == 403
+
+
+def test_avatar_can_be_removed(client, auth, members) -> None:
+    """撤掉头像回到那个色圆 —— 换上去了就撤不下来的话，等于逼着人一直用。"""
+    me, *_ = members
+    client.post(f"/api/members/{me.id}/avatar", headers=auth,
+                files={"file": ("photo.jpg", _photo(300, 300), "image/jpeg")})
+    r = client.delete(f"/api/members/{me.id}/avatar", headers=auth)
+    assert r.status_code == 200 and r.json()["avatar"] is None
+    assert r.json()["avatar_version"] == 2, "版本号要继续往前走，缓存才知道换了"

@@ -11,16 +11,34 @@
     </q-item>
 
     <q-list separator>
-      <!-- 头像：这个 App 的头像就是一个带首字的色圆，所以「换头像」＝换颜色 -->
+      <!-- 点头像换图片；没设图片时，下面那排颜色就是头像 -->
       <q-item class="profile-row">
         <q-item-section avatar>
-          <q-avatar size="40px" :style="{ background: auth.me.color }" text-color="white">
-            {{ auth.me.display_name.slice(0, 1) }}
-          </q-avatar>
+          <button class="avatar-btn" :aria-label="t('profile.pickPhoto')" @click="pickFile">
+            <MemberAvatar :member-id="auth.me.id" size="48px" />
+            <q-icon v-if="!uploading" name="photo_camera" size="14px" class="cam" />
+            <q-spinner v-else size="14px" class="cam" color="white" />
+          </button>
+          <input
+            ref="fileEl"
+            class="hidden"
+            type="file"
+            accept="image/*"
+            @change="onFile"
+          />
         </q-item-section>
         <q-item-section>
-          <q-item-label>{{ t('profile.color') }}</q-item-label>
-          <div class="swatches q-mt-xs">
+          <q-item-label class="row items-center no-wrap">
+            <div class="col">{{ auth.me.avatar ? t('profile.photo') : t('profile.color') }}</div>
+            <q-btn
+              v-if="auth.me.avatar"
+              dense flat no-caps size="sm" color="grey-7"
+              :label="t('profile.removePhoto')"
+              @click="removePhoto"
+            />
+          </q-item-label>
+          <q-item-label caption>{{ t('profile.photoHint') }}</q-item-label>
+          <div v-if="!auth.me.avatar" class="swatches q-mt-xs">
             <button
               v-for="c in COLORS"
               :key="c"
@@ -129,6 +147,7 @@ import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { ApiError } from 'src/api/client'
+import MemberAvatar from 'src/components/MemberAvatar.vue'
 import { useAuth } from 'src/stores/auth'
 import { useMeta } from 'src/stores/meta'
 
@@ -147,6 +166,45 @@ const open = ref(false)
 const oldPw = ref('')
 const newPw = ref('')
 const busy = ref(false)
+
+const fileEl = ref<HTMLInputElement | null>(null)
+const uploading = ref(false)
+
+/** 5MB 上限在前端也挡一道：手机拍的照片动辄七八 MB，传上去再被拒等于白等 */
+const MAX_BYTES = 5 * 1024 * 1024
+
+function pickFile() {
+  fileEl.value?.click()
+}
+
+async function onFile(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''              // 清掉，下次选同一张照片也能再触发 change
+  if (!file) return
+  if (file.size > MAX_BYTES) {
+    $q.notify({ type: 'negative', message: t('profile.tooBig'), timeout: 4000 })
+    return
+  }
+  uploading.value = true
+  try {
+    const saved = await auth.uploadAvatar(file)
+    meta.members = meta.members.map((m) => (m.id === saved.id ? saved : m))
+  } catch (err) {
+    $q.notify({ type: 'negative', message: err instanceof ApiError ? err.text : String(err), timeout: 5000 })
+  } finally {
+    uploading.value = false
+  }
+}
+
+async function removePhoto() {
+  try {
+    const saved = await auth.removeAvatar()
+    meta.members = meta.members.map((m) => (m.id === saved.id ? saved : m))
+  } catch (err) {
+    $q.notify({ type: 'negative', message: err instanceof ApiError ? err.text : String(err), timeout: 5000 })
+  }
+}
 
 function toggle() {
   open.value = !open.value
@@ -186,6 +244,26 @@ async function savePassword() {
 
 <style scoped>
 .profile-row { padding-top: 8px; padding-bottom: 8px; }
+/* 头像按钮：右下角压一个小相机，告诉人这儿点得动 */
+.avatar-btn {
+  position: relative;
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  line-height: 0;
+}
+.cam {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  background: #3d4785;
+  color: #fff;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  padding: 3px;
+  box-sizing: content-box;
+}
 .swatches { display: flex; flex-wrap: wrap; gap: 8px; }
 .swatch {
   width: 30px;

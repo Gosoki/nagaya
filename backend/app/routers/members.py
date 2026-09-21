@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import io
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from PIL import Image, ImageOps
 from sqlmodel import Session, select
 
 from app.auth import current_member, hash_password, verify_password
@@ -75,6 +78,85 @@ def update_member(
         setattr(member, key, value)
     if body.password:
         member.password_hash = hash_password(body.password)
+    session.add(member)
+    session.commit()
+    session.refresh(member)
+    return to_member_out(member)
+
+
+#: 头像上传上限。手机随手拍就是四五 MB，挡在读之前 —— 不能先读进内存再判断
+MAX_AVATAR_BYTES = 5 * 1024 * 1024
+#: 存下来的边长。界面上最大只用到 40px，三倍屏也就 120px，192 足够清楚了
+AVATAR_SIZE = 192
+
+
+def _compress_avatar(raw: bytes) -> bytes:
+    """把上传的图片压成一张小方图。
+
+    做四件事，缺一不可：
+      * **按 EXIF 摆正** —— 手机横过来拍的照片，不转的话头像是躺着的
+      * **居中裁成正方形** —— 头像是个圆，直接缩放会把人脸压扁
+      * 转成 WebP —— 同画质下比 JPEG 小三成左右
+      * 丢掉所有元数据 —— EXIF 里有拍摄地点的 GPS
+    """
+    try:
+        img = Image.open(io.BytesIO(raw))
+        img = ImageOps.exif_transpose(img) or img
+        img = ImageOps.fit(img, (AVATAR_SIZE, AVATAR_SIZE), method=Image.Resampling.LANCZOS)
+        img = img.convert("RGB")
+    except Exception as e:  # Pillow 认不出的、或者解压炸弹
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "这个文件不是图片") from e
+    buf = io.BytesIO()
+    img.save(buf, "WEBP", quality=80, method=6)
+    return buf.getvalue()
+
+
+@router.post("/{member_id}/avatar", response_model=MemberOut)
+async def upload_avatar(
+    member_id: int,
+    file: UploadFile = File(...),
+    session: Session = Depends(get_session),
+    me: Member = Depends(current_member),
+):
+    """换头像。只能换自己的。"""
+    member = session.get(Member, member_id)
+    if member is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "成员不存在")
+    if member.id != me.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "只能改自己的头像")
+
+    # 多读一个字节：正好等于上限的放过，超一点就拒 —— 不先整个读进内存
+    raw = await file.read(MAX_AVATAR_BYTES + 1)
+    if len(raw) > MAX_AVATAR_BYTES:
+        raise HTTPException(
+            status.HTTP_413_CONTENT_TOO_LARGE,
+            f"图片不能超过 {MAX_AVATAR_BYTES // 1024 // 1024}MB",
+        )
+    if not raw:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "没收到文件")
+
+    member.avatar = _compress_avatar(raw)
+    member.avatar_version += 1
+    session.add(member)
+    session.commit()
+    session.refresh(member)
+    return to_member_out(member)
+
+
+@router.delete("/{member_id}/avatar", response_model=MemberOut)
+def delete_avatar(
+    member_id: int,
+    session: Session = Depends(get_session),
+    me: Member = Depends(current_member),
+):
+    """撤掉头像，回到那个带首字的色圆。"""
+    member = session.get(Member, member_id)
+    if member is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "成员不存在")
+    if member.id != me.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "只能改自己的头像")
+    member.avatar = None
+    member.avatar_version += 1
     session.add(member)
     session.commit()
     session.refresh(member)

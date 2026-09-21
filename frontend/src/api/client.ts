@@ -56,11 +56,18 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const headers: Record<string, string> = {}
   const token = getToken()
   if (token) headers.Authorization = `Bearer ${token}`
-  if (body !== undefined) headers['Content-Type'] = 'application/json'
+  // FormData 的 Content-Type 必须让浏览器自己写 —— 里面带着 multipart 的分隔串，
+  // 手写一个 'multipart/form-data' 会漏掉它，后端解不出任何字段
+  const form = body instanceof FormData
+  if (body !== undefined && !form) headers['Content-Type'] = 'application/json'
 
   let res: Response
   try {
-    res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) })
+    res = await fetch(path, {
+      method,
+      headers,
+      body: body === undefined ? undefined : form ? (body as FormData) : JSON.stringify(body),
+    })
   } catch {
     throw new ApiError('network', 'fetch failed')
   }
@@ -88,4 +95,9 @@ export const api = {
   patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, body),
   put: <T>(path: string, body?: unknown) => request<T>('PUT', path, body),
   del: <T>(path: string) => request<T>('DELETE', path),
+  upload: <T>(path: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<T>('POST', path, form)
+  },
 }
