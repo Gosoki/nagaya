@@ -16,11 +16,9 @@
      Go 头上，两人余额各错一个电费钱。现在 PATCH 只发真正改过的字段。
 -->
 <template>
-  <div v-if="data" class="wrap">
-    <!-- 标题条跟已出账那页的完全同构：同一个 q-item、同样的内边距、
-         右边同样给出本期合计。两页来回切时这一条不该跳 -->
-    <q-item dense class="q-pt-md q-pb-xs">
-      <q-item-section class="text-subtitle2">{{ t('monthly.title') }}</q-item-section>
+  <div v-if="data" class="wrap bill-section">
+    <q-item dense class="section-head">
+      <q-item-section>{{ t('monthly.title') }}</q-item-section>
       <!-- 没有保存按钮：离开输入框就存。这里只报状态。
            dirtyCount > 0 只会在存失败时出现 —— 那时必须显眼，别让人以为存好了 -->
       <q-item-section side class="text-caption" :class="dirtyCount ? 'text-negative' : 'text-grey-6'">
@@ -29,10 +27,6 @@
           {{ busy ? t('monthly.saving') : dirtyCount ? t('monthly.unsaved', { n: dirtyCount }) : t('monthly.autoSaved') }}
         </div>
       </q-item-section>
-      <q-item-section side class="text-grey-9">{{ formatYen(total) }}</q-item-section>
-      <!-- 占位：已出账那页这里是个 chevron。留出同样的宽度，
-           合计才和下面每一行的金额落在同一条竖线上 -->
-      <q-item-section side><q-icon name="chevron_right" size="18px" class="invisible" /></q-item-section>
     </q-item>
 
     <q-list separator>
@@ -90,6 +84,14 @@
           />
         </div>
       </q-expansion-item>
+
+      <!-- 合计收在列表最后一行，和已出账那页同一个位置、同一套尺寸 -->
+      <q-item dense class="fee-total">
+        <q-item-section class="text-grey-7">{{ t('bill.total') }}</q-item-section>
+        <q-item-section side class="amount text-weight-medium text-grey-9">
+          {{ formatYen(total) }}
+        </q-item-section>
+      </q-item>
     </q-list>
 
     <!--
@@ -419,7 +421,10 @@ defineExpose({ reload: load })
 </script>
 
 <style scoped>
-.wrap { border-bottom: 8px solid #f2f2f2; }
+/* 合计这一行也吃固定费那套尺寸：行高、金额字号、金额右距都跟上面每一行一样。
+   它在 q-expansion-item 之外，所以得自己写一遍右距（那些行是被展开箭头顶出来的） */
+.fee-total { min-height: var(--nagaya-fee-row-h); padding-right: var(--nagaya-fee-amount-gap); }
+.fee-total .amount { font-size: var(--nagaya-fee-amount-fs); font-variant-numeric: tabular-nums; }
 /* 金额列对齐：右边距 ＝ 行内边距 16 + 展开箭头 24 + 这一格的左内边距。
    要凑到 --nagaya-fee-amount-gap，这里就该留下减掉那 40px 的部分 */
 .wrap :deep(.q-expansion-item .q-item__section--side:last-child) {

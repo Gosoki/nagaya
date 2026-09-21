@@ -206,14 +206,19 @@ test('账单：期初/应担/应付对得上，转账方案能把人清零', asy
   await page.getByRole('tab', { name: '账单' }).click()
   await expect(page.locator('.q-page .q-item').first()).toBeVisible()
 
-  // 每人的「应收/应付」加起来必须是 0 —— 账单上直接看得见的那条恒等式
-  const signed = await page.locator('.q-item').evaluateAll((items) =>
+  // 每人的「应收/应付」加起来必须是 0 —— 账单上直接看得见的那条恒等式。
+  // **只扫「每人」那一块**：拿全页的 .q-item 去找粗体金额，会把固定费的合计行
+  // 之类也算进来，然后红在一个跟恒等式毫无关系的地方
+  const signed = await page.locator('.per-member .q-item').evaluateAll((items) =>
     items.map((el) => {
       const amount = Number((el.querySelector('.text-weight-medium')?.textContent ?? '0').replace(/[^\d]/g, ''))
       const isPay = el.textContent?.includes('应付')
       return isPay ? -amount : amount
     }),
   )
+  // 收窄之后多了个洞：选择器过期就是空数组，空数组求和也是 0，会白白通过
+  expect(signed.filter(Boolean).length, '没读到每人那一块的金额，多半是选择器过期了')
+    .toBeGreaterThanOrEqual(2)
   expect(signed.reduce((a, b) => a + b, 0), '账单上应收与应付对不上').toBe(0)
 
   await expect(page.getByText(/转账方案/)).toBeVisible()

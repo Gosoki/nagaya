@@ -18,7 +18,7 @@
     <!-- 用 v-if 而不是 v-else：上面那句多了个「还在加载」的条件，
          两个都不成立时（冷启动的头几十毫秒）这一页就该是干净的 -->
     <template v-if="bill">
-      <div class="head q-pa-md">
+      <div class="head bill-section q-pa-md">
         <div class="row items-baseline">
           <div class="text-subtitle1 text-weight-medium">
             {{ bill.is_draft ? t('bill.draft') : bill.label }}
@@ -71,10 +71,9 @@
 
            整段只有一个入口，通向固定费那一屏 —— 不给每行挂一个箭头去单笔编辑页：
            固定费是一整屏一起看的东西，拆成一笔笔既多按钮又不好改。 -->
-      <div v-else class="others">
-        <q-item clickable dense class="q-pt-md q-pb-xs" @click="openMonthly">
-          <q-item-section class="text-subtitle2">{{ t('monthly.title') }}</q-item-section>
-          <q-item-section side class="text-grey-9">{{ formatYen(monthlyTotal) }}</q-item-section>
+      <div v-else class="bill-section">
+        <q-item clickable dense class="section-head" @click="openMonthly">
+          <q-item-section>{{ t('monthly.title') }}</q-item-section>
           <q-item-section side><q-icon name="chevron_right" color="grey-5" size="18px" /></q-item-section>
         </q-item>
         <!-- 行的尺寸照着未出账那页的可编辑面板来：一样的行高、一样的金额字号、
@@ -92,14 +91,26 @@
             </q-item-section>
             <q-item-section side class="amount text-grey-9">{{ formatYen(e.amount_jpy) }}</q-item-section>
           </q-item>
+
+          <!-- 未出账那页这个位置是「加一项固定费」。已出的账单加不了东西，
+               这一格就用来收尾：一行合计，两页的块于是一样高、一样收口 -->
+          <q-item dense class="fee-total">
+            <q-item-section class="text-grey-7">{{ t('bill.total') }}</q-item-section>
+            <q-item-section side class="amount text-weight-medium text-grey-9">
+              {{ formatYen(monthlyTotal) }}
+            </q-item-section>
+          </q-item>
         </q-list>
         <div v-else class="text-caption text-grey-6 q-px-md q-pb-md">{{ t('monthly.noneBilled') }}</div>
       </div>
 
       <!-- 固定费之下，把这期其他的开销也摆出来：
            不然账单上只看得见固定项，日用品/食費那些钱是从哪来的就说不清 -->
-      <div class="others">
-        <div class="text-subtitle2 q-px-md q-pt-md q-pb-xs">{{ t('bill.others') }}</div>
+      <!-- .others 这个 class 是 E2E 用来指「本期其他那一块」的，别随手删 -->
+      <div class="bill-section others">
+        <q-item dense class="section-head">
+          <q-item-section>{{ t('bill.others') }}</q-item-section>
+        </q-item>
         <q-list v-if="others.length" separator>
           <q-item v-for="e in others" :key="e.id" dense clickable @click="editEntry(e.id)">
             <q-item-section avatar>
@@ -122,8 +133,12 @@
         <div v-else class="text-caption text-grey-6 q-px-md q-pb-md">{{ t('bill.othersEmpty') }}</div>
       </div>
 
-      <div class="text-subtitle2 q-px-md q-pt-md q-pb-xs">{{ t('bill.perMember') }}</div>
-      <q-list separator>
+      <!-- .per-member 是 E2E 用来指「每人那一块」的锚点，别随手删 -->
+      <div class="bill-section per-member">
+        <q-item dense class="section-head">
+          <q-item-section>{{ t('bill.perMember') }}</q-item-section>
+        </q-item>
+        <q-list separator>
         <q-item
           v-for="row in bill.members"
           :key="row.member_id"
@@ -152,12 +167,16 @@
             </div>
           </q-item-section>
         </q-item>
-      </q-list>
+        </q-list>
+      </div>
 
-      <div class="q-pa-md">
-        <div class="text-subtitle2 q-mb-sm">
-          {{ bill.transfers.length ? t('bill.plan', { n: bill.transfers.length }) : t('bill.planEmpty') }}
-        </div>
+      <div>
+        <q-item dense class="section-head">
+          <q-item-section>
+            {{ bill.transfers.length ? t('bill.plan', { n: bill.transfers.length }) : t('bill.planEmpty') }}
+          </q-item-section>
+        </q-item>
+        <div class="q-px-md q-pb-md">
         <q-card v-for="(tr, i) in bill.transfers" :key="i" flat bordered class="q-mb-sm">
           <q-card-section class="row items-center q-py-sm q-px-md">
             <div class="col">
@@ -190,6 +209,7 @@
             />
           </q-card-section>
         </q-card>
+        </div>
       </div>
 
       <!-- 主操作固定在拇指区，和记一笔那屏一个规矩：这一页很长，
@@ -513,7 +533,6 @@ function doCut() {
 </script>
 
 <style scoped>
-.head { border-bottom: 1px solid rgba(0, 0, 0, 0.08); }
 /* 本期固定费：和未出账那页的面板对齐到同一套尺寸 —— 行高 40、金额 16px、
    右边留 50px（那页那儿是展开箭头，这页没有，用内边距占出来） */
 .monthly-list .q-item {
@@ -524,6 +543,7 @@ function doCut() {
   font-size: var(--nagaya-fee-amount-fs);
   font-variant-numeric: tabular-nums;
 }
+.monthly-list .fee-total .q-item__section--main { font-size: 14px; }
 /* 自己那笔：这一屏最该一眼看到的东西 */
 .mine { font-size: 17px; font-weight: 600; }
 .mine.owe { color: #c10015; }

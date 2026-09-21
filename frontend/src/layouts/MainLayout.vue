@@ -110,6 +110,18 @@ onMounted(async () => {
   /* 金额列离右边多远。未出账那页那儿站着展开箭头，已出账那页用内边距占出来 */
   --nagaya-fee-amount-gap: 50px;
 }
+/* 账单上的一「块」：固定费、本期其他、每人、转账方案各算一块。
+   块与块之间用 8px 的灰带断开 —— 1px 细线在手机上分不出「同一块里的两行」
+   和「两块之间」，整页会糊成一长条 */
+.bill-section { border-bottom: 8px solid #f2f2f2; }
+/* 每一块的标题条。未出账和已出账两页、四个块共用这一份，免得又各写各的 */
+.section-head {
+  min-height: var(--nagaya-fee-row-h);
+  padding-top: 16px;
+  padding-bottom: 4px;
+}
+.section-head .q-item__section--main { font-size: 14px; font-weight: 500; }
+
 /* 二级页面的返回条。原来三个页面各写各的，最矮的只有 42px，挤在一起显得小气 */
 .page-head {
   display: flex;
