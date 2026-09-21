@@ -5,9 +5,21 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any, Optional
 
+from pydantic import field_validator
 from sqlmodel import SQLModel
 
 from app.models import EntryKind, Lang
+
+
+def _no_bool_amount(v: Any) -> Any:
+    """`amount_jpy: true` 会被 Pydantic 悄悄转成 1，入库成 ¥1。
+
+    服务层那句 `isinstance(amount, bool)` 挡不住它 —— 等它到服务层时已经是 int 了。
+    要挡只能挡在转换之前。
+    """
+    if isinstance(v, bool):
+        raise ValueError("金额不能是 true/false")
+    return v
 
 
 class LoginIn(SQLModel):
@@ -104,6 +116,8 @@ class EntryIn(SQLModel):
     rule: Optional[dict[str, Any]] = None
     bundle_id: Optional[int] = None
 
+    _amount_not_bool = field_validator("amount_jpy", mode="before")(_no_bool_amount)
+
 
 class EntryPatch(SQLModel):
     """改一笔账。**每个字段都可选** —— 没传的就不动。
@@ -124,6 +138,8 @@ class EntryPatch(SQLModel):
     member_ids: Optional[list[int]] = None
     rule: Optional[dict[str, Any]] = None
     bundle_id: Optional[int] = None
+
+    _amount_not_bool = field_validator("amount_jpy", mode="before")(_no_bool_amount)
 
 
 class EntryOut(SQLModel):
