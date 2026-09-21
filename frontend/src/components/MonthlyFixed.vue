@@ -50,11 +50,11 @@
           <!-- 状态字（参考 8/31 出账 / 有 2 笔 / 会删掉）写在名字**旁边**，不另起一行：
                另起一行的话有状态的行比没状态的高一截，一列高高低低 -->
           <q-item-section>
-            <q-item-label class="row items-baseline no-wrap">
-              <span>{{ row.name }}</span>
-              <span v-if="stateText(row)" class="state ellipsis" :class="stateClass(row)">
-                {{ stateText(row) }}
-              </span>
+            <!-- 不用 flex：items-baseline 会按两种字号各自的基线去对齐，
+                 把行盒撑高 1px、名字再偏 0.5px —— 于是有状态的行和没状态的行，
+                 名字在一列里上下跳。普通行内文字就没这问题，撑不撑得起由 strut 说了算 -->
+            <q-item-label class="name-line">
+              {{ row.name }}<span v-if="stateText(row)" class="state" :class="stateClass(row)">{{ stateText(row) }}</span>
             </q-item-label>
           </q-item-section>
           <q-item-section side>
@@ -444,14 +444,20 @@ defineExpose({ reload: load })
      当初写 44px 是因为行有 52px 高、上下各留出一条点了会误展开的带；
      行矮下来之后那条带只剩几像素，真正的解法本来就是压行而不是撑框 */
   height: calc(var(--nagaya-fee-row-h) - 6px);
-  padding: 0 2px;
+  /* 顶上这 2px 是用来抵消底下那条 1px 下划线的。
+     box-sizing 是 border-box，下划线占掉一行内容高度，文字在剩下的 33px 里居中，
+     于是整体上浮 1px —— 实测数字比已出账那页高 1px。补 2px 顶内边距把内容区
+     的中心往下挪 1px，框和下划线都不动 */
+  padding: 2px 2px 0;
 }
 /* 灰色占位＝上次的参考，不是值。改过的才变实色 */
 .amount-input::placeholder { color: #c8c8c8; }
 .amount-input.dirty { border-bottom-color: var(--q-primary); font-weight: 600; }
 .amount-input.to-delete { color: #c10015; text-decoration: line-through; }
 /* 块尾那一行。已出账那页是同高的空占位，高度写在同一个变量里 */
-.state { font-size: 12px; margin-left: 6px; }
+.name-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* line-height 压到 1：12px 的状态字不许顶大行盒，行高交给 14px 名字的 strut 定 */
+.state { font-size: 12px; line-height: 1; margin-left: 6px; }
 .add-row {
   border-top: 1px solid rgba(0, 0, 0, 0.06);
   min-height: var(--nagaya-fee-foot-h);
