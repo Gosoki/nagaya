@@ -175,10 +175,18 @@ def split(
 # ---------------------------------------------------------------- 内部工具
 
 
+def _member_sort_key(key: str) -> tuple[int, int, str]:
+    """成员 id 按数值排，非数字的排在后面按字典序。"""
+    return (0, int(key), "") if key.lstrip("-").isdigit() else (1, 0, key)
+
+
 def _members(source: Mapping[str, int], order: Sequence[str] | None) -> list[str]:
     """确定参与人和他们的固定顺序（顺序决定平局时谁先拿到那 1 円）。"""
     if order is None:
-        return list(source)
+        # 没给顺序时，两份实现必须挑**同一个**。Python 的 dict 保持插入序，
+        # 而 JS 的 Object.keys 会把数字键升序重排 —— 同一条规则两边算出两个结果，
+        # 偏偏 523 条夹具全都带 order，这条分歧一条都测不到。统一成按成员 id 排
+        return sorted(source, key=_member_sort_key)
     members = list(order)
     if set(members) != set(source):
         missing = sorted(set(source) - set(members)) + sorted(set(members) - set(source))

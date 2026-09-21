@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.auth import current_member
+from app.core.rules import RuleError, expand
+from app.core.split import SplitError, split
 from app.db import get_session
 from app.models import Member
 from app.schemas import SettingIn, SettingOut
@@ -62,6 +64,16 @@ def update_setting(
         isinstance(value, list) and all(isinstance(v, str) for v in value)
     ):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{key} 要填字符串列表")
+    elif spec["type"] == "json":
+        # **当场试着用一下**。这一项是每笔账的兜底分摊规则，写坏了不会在这里报错，
+        # 而是等到下一次「记一笔」时才 500 —— 那时人正在记账，也看不出跟设置有关
+        if not isinstance(value, dict):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{key} 要填一个对象")
+        try:
+            ids = [m.id for m in session.exec(select(Member).order_by(Member.display_order))]
+            split(expand(value, ids), 1000, order=[str(i) for i in ids], payer=str(ids[0]) if ids else None)
+        except (RuleError, SplitError) as e:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{key} 这条规则用不了：{e}") from e
 
     settings_svc.set_(session, key, value)
     return SettingOut(

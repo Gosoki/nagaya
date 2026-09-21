@@ -206,3 +206,23 @@ def test_renaming_to_a_taken_name_is_409_like_create(client, auth, members) -> N
     me, other, *_ = members
     r = client.patch(f"/api/members/{other.id}", headers=auth, json={"name": me.name})
     assert r.status_code == 409, "重名在 POST 那边是 409，PATCH 不该是 500"
+
+
+def test_a_broken_default_rule_is_rejected_on_the_spot(client, auth, members) -> None:
+    """兜底分摊规则要**当场试着用一下**再存。
+
+    写坏了不会在设置这里报错，而是等到下一次「记一笔」才 500 —— 那时人正在记账，
+    完全看不出跟设置有关，而且这一项一坏，谁都记不了账。
+    """
+    bad = client.put("/api/settings/default_rule", headers=auth,
+                     json={"value": {"mode": "ratio", "weights": {"9999": 1}}})
+    assert bad.status_code == 400, "点名了不存在的成员，存进去就没人记得了账"
+    assert client.put("/api/settings/default_rule", headers=auth,
+                      json={"value": "不是对象"}).status_code == 400
+    assert client.put("/api/settings/default_rule", headers=auth,
+                      json={"value": {"mode": "ratio", "equal_weight": 1}}).status_code == 200
+
+    # 设置没被写坏，记账照常
+    ok = client.post("/api/entries", headers=auth,
+                     json={"kind": "expense", "date": "2026-09-10", "amount_jpy": 900, "payer_id": 1})
+    assert ok.status_code == 201

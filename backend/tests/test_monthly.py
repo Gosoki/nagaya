@@ -154,3 +154,26 @@ def test_monthly_rows_of_a_past_statement_only_lists_what_is_on_it(session, memb
 
     # 当前草稿仍然两项都列（没录的那项给灰色参考值）
     assert [r["name"] for r in monthly_rows(session)["rows"]] == ["家賃", "水道"]
+
+
+def test_archived_category_still_shows_on_old_bills(session: Session, members) -> None:
+    """归档一个固定项之后，**旧账单上它那一行还得在**。
+
+    那张单子上真有这笔钱、合计里也算着它。只按「现在还没归档」过滤的话，
+    旧账单会少一行而总额不变 —— 看上去就是「这几项加不出总数」。
+    当前草稿相反：归档就是「以后不用填了」，草稿里不该再给它留空位。
+    """
+    a, *_ = members
+    c = cats(session)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=120_000,
+                 payer_id=a.id, category_id=c["家賃"].id)
+    st = cut_statement(session, actor_id=a.id)
+
+    c["家賃"].archived = True
+    session.add(c["家賃"])
+    session.commit()
+
+    old = {r["name"] for r in monthly_rows(session, st)["rows"]}
+    assert "家賃" in old, "旧账单上那一行不能因为归档就消失"
+    draft = {r["name"] for r in monthly_rows(session)["rows"]}
+    assert "家賃" not in draft, "草稿里归档的项不该再占位置"

@@ -10,7 +10,14 @@ from sqlmodel import Session, select
 
 from app.models import Category, Entry, EntryKind, EntryShare, Member
 from app.services import settings as settings_svc
-from app.services.ledger import LedgerError, balances, create_entry, update_entry
+from app.services.ledger import (
+    LedgerError,
+    balances,
+    create_entry,
+    delete_entry,
+    restore_entry,
+    update_entry,
+)
 
 SEP = dt.date(2026, 9, 10)
 
@@ -300,3 +307,22 @@ def test_changing_category_adopts_the_new_category_rule(session: Session, member
     update_entry(session, e, actor_id=a.id, version=e.version,
                  fields={"category_id": rent.id}, category_rule=rent.default_rule_json)
     assert shares_of(session, e.id) == {a.id: 6_000, b.id: 3_000, c.id: 0}
+
+
+def test_a_deleted_entry_cannot_be_edited(session: Session, members) -> None:
+    """回收站里的账改不动 —— 那边界面上已经没有它了，这边却还在重算分摊。"""
+    a, *_ = members
+    e = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                     amount=3_000, payer_id=a.id)
+    stale_version = e.version
+    delete_entry(session, e, actor_id=a.id)
+
+    with pytest.raises(LedgerError) as caught:
+        update_entry(session, e, actor_id=a.id, version=e.version, fields={"amount_jpy": 9_000})
+    assert caught.value.code == "entry_deleted"
+
+    # 删除也推进了 version：拿着删之前那份去改，得撞乐观锁而不是悄悄写进去
+    restore_entry(session, e, actor_id=a.id)
+    with pytest.raises(LedgerError) as caught:
+        update_entry(session, e, actor_id=a.id, version=stale_version, fields={"amount_jpy": 9_000})
+    assert caught.value.code == "version_conflict"

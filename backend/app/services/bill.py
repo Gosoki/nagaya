@@ -391,13 +391,13 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
     账本里预填的数字很危险：长得跟亲手填的一模一样，某个月忘了改就带着上月的
     电费把账单发出去了，谁都看不出来。
     """
-    categories = list(
-        session.exec(
-            select(Category)
-            .where(Category.monthly == True, Category.archived == False)  # noqa: E712
-            .order_by(Category.display_order, Category.id)
-        )
-    )
+    # 翻历史账单时**连归档的也要列**：那张单子上真有这笔钱，总额里也算着它。
+    # 只按「现在还没归档」过滤的话，归档一个分类会让它名下的旧账凭空消失，
+    # 而账单合计不变 —— 一眼看去就是「这几项加不出总数」
+    stmt = select(Category).where(Category.monthly == True)  # noqa: E712
+    if statement is None:
+        stmt = stmt.where(Category.archived == False)  # noqa: E712
+    categories = list(session.exec(stmt.order_by(Category.display_order, Category.id)))
     # 同一个分类在这张草稿里可能有不止一笔（两个人同时填、或者填完重试了一次）。
     # 面板一行只显示得下一笔，**但账单是全都算的** —— 不把重复说出来的话，
     # 用户看到「家賃 170,000」，完全不知道还有一笔 120,000 也在总额里。

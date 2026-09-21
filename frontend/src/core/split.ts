@@ -70,8 +70,21 @@ function requireInt(value: unknown, field: string, member: string): number {
   return value
 }
 
+/** 成员 id 按数值排，非数字的排在后面按字典序 —— 和 Python 那边一模一样 */
+function memberSortKey(key: string): [number, number, string] {
+  return /^-?\d+$/.test(key) ? [0, Number(key), ''] : [1, 0, key]
+}
+
+function byMemberId(x: string, y: string): number {
+  const a = memberSortKey(x)
+  const b = memberSortKey(y)
+  return a[0] - b[0] || a[1] - b[1] || (a[2] < b[2] ? -1 : a[2] > b[2] ? 1 : 0)
+}
+
 function resolveMembers(source: Record<string, number>, order?: string[]): string[] {
-  if (!order) return Object.keys(source)
+  // 没给顺序时两边必须挑同一个：Object.keys 会把数字键升序重排，而 Python 的
+  // dict 保持插入序。夹具全都带 order，这条分歧一条都测不到 —— 明确排一次
+  if (!order) return Object.keys(source).sort(byMemberId)
   const a = [...order].sort()
   const b = Object.keys(source).sort()
   if (a.length !== b.length || a.some((k, i) => k !== b[i])) {

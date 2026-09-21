@@ -272,6 +272,11 @@ def update_entry(
     version 是乐观锁：两个人同时改同一笔时，后提交的那个会被挡下来，
     而不是悄悄覆盖掉对方的修改。
     """
+    if entry.deleted_at is not None:
+        # 回收站里的账不许改。原来改得动而且返回 200：那边界面上已经删掉了，
+        # 这边却在给它重算分摊、写审计日志，谁也不知道这笔账到底是什么状态
+        raise LedgerError("entry_deleted", "这笔账已经删掉了，先撤销删除再改")
+
     # 乐观锁必须是**一条语句**。原来是「先读出来比一比，再写回去」：
     # 两个人同时改同一笔，两边都读到 version=1、都觉得没冲突，然后各写各的；
     # 而写 entry 和写 entry_share 又是分开两步，交错之后能留下
@@ -362,6 +367,9 @@ def delete_entry(session: Session, entry: Entry, *, actor_id: int | None) -> Non
     """软删，进回收站。分摊快照留着 —— 但余额不再算它。"""
     before = _snapshot(session, entry)
     entry.deleted_at = now_utc()
+    # version 也要推进：别人手里那份就此过期。不推的话，另一台手机拿着删除前的
+    # version 去改，乐观锁还以为没人动过
+    entry.version += 1
     session.add(entry)
     _audit(session, actor_id, "delete", "entry", entry.id, before, None)
     session.commit()
@@ -370,6 +378,7 @@ def delete_entry(session: Session, entry: Entry, *, actor_id: int | None) -> Non
 def restore_entry(session: Session, entry: Entry, *, actor_id: int | None) -> None:
     """从回收站捞回来。"""
     entry.deleted_at = None
+    entry.version += 1
     session.add(entry)
     _audit(session, actor_id, "restore", "entry", entry.id, None, _snapshot(session, entry))
     session.commit()
