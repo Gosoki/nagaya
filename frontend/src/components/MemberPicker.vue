@@ -6,7 +6,7 @@
       :key="m.id"
       class="pick"
       :class="{ on: modelValue === m.id }"
-      :style="modelValue === m.id ? { background: m.color, borderColor: m.color } : {}"
+      :style="modelValue === m.id ? { background: m.color } : {}"
       @click="emit('update:modelValue', m.id)"
     >
       {{ short(m.display_name) }}
@@ -30,8 +30,8 @@ const short = (name: string) => (name.length <= 4 ? name : name.slice(0, 3))
   height: 42px;                 /* 34 太小了，一排三个挨着，拇指容易点到旁边那个 */
   padding: 0 14px;
   border-radius: 21px;
-  border: 1px solid rgba(0, 0, 0, 0.16);
-  background: #fff;
+  border: none;
+  background: #f2f2f5;
   color: #555;
   font-size: 15px;
   cursor: pointer;

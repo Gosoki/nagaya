@@ -65,6 +65,8 @@ def main() -> None:
         settings_svc.set_(s, "settle_due_day", 10)
 
         cats = {c.name: c for c in s.exec(select(Category))}
+        # 没点分类但写了备注时记到哪儿。名字不写死在代码里，放设置
+        settings_svc.set_(s, "fallback_category_id", cats["その他"].id)
         # 家賃按房间大小分（D12）：45,000 / 40,000 / 35,000。
         # 写成「同权 + 调整额」而不是固定金额 —— 均分是 40,000，Go 多担 5,000、
         # Zen 少担 5,000，加回去正好是那三个数。界面上已经没有固定金额模式了。

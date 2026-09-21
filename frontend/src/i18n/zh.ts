@@ -20,6 +20,8 @@ export default {
     emptyAmount: '先填金额',
     dateLocked: '{date} 之前已经出过账，选不了。要补记就写在备注里',
     editTitle: '改这一笔',
+    needLabel: '这笔是什么？',
+    needLabelHint: '写句备注就记成「その他」；想归到某个分类，取消回去点一下就行。',
     editBilled: '这笔在「{label}」上。改完差额会进下一张账单的「上期结转」，不用重新出账',
     deleteConfirm: '删掉这一笔？余额跟着变，差额进下一张账单。',
   },

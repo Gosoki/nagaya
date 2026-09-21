@@ -54,6 +54,13 @@ SETTINGS_SPEC: dict[str, dict[str, Any]] = {
         "note_ja": "精算時に「最小送金プラン」を計算するか（3 人なら最大 2 件）。"
                    "オフにすると元の債権どおりに清算します。",
     },
+    "fallback_category_id": {
+        "type": "int_or_null",
+        "default": None,
+        "note_zh": "兜底分类。记支出时没点分类、但写了备注，就记到这个分类下"
+                   "（默认是「その他」）。留空则每次都会弹框问。",
+        "note_ja": "既定カテゴリ。カテゴリ未選択でも備考があればここに記帳します（既定は「その他」）。",
+    },
     "monthly_gap_days": {
         "type": "int",
         "default": 20,

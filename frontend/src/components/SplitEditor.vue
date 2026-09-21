@@ -310,16 +310,16 @@ defineExpose({
 .weight-pill {
   width: 48px;
   min-height: 44px;                    /* 拇指的底线 */
-  border: 1px solid rgba(0, 0, 0, 0.14);
+  border: none;
   border-radius: 8px;
-  background: #fff;
+  background: #f2f2f5;
   color: #222;
   font-size: 16px;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
 .weight-pill.off {
-  border-color: rgba(0, 0, 0, 0.1);
+  background: #fafafa;
   color: #bdbdbd;
 }
 .weight-pick {

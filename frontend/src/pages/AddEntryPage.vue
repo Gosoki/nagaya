@@ -69,7 +69,7 @@
         :key="c.id"
         class="cat"
         :class="{ on: categoryId === c.id }"
-        :style="categoryId === c.id ? { background: c.color, borderColor: c.color } : {}"
+        :style="categoryId === c.id ? { background: c.color } : {}"
         @click="pickCategory(c.id)"
       >
         <q-icon :name="c.icon" size="22px" :color="categoryId === c.id ? 'white' : undefined" />
@@ -237,10 +237,8 @@ const canSave = computed(
     amount.value > 0 &&
     payerId.value !== null &&
     splitValid.value &&
-    // 支出必须选分类。不选的话后端拿不到分类默认规则，会悄悄掉回「全员均分」——
-    // 一笔本该 1:1:0 的账就变成 1:1:1，而界面上没有任何提示。
-    // 收入没有分类：返现、給付金这些套不上「日用品/食費」，写在备注里更清楚。
-    (kind.value !== 'expense' || categoryId.value !== null) &&
+    // 分类不再是硬门槛：没选但写了备注就记「その他」，两个都没有时按保存会弹框问。
+    // 收入本来就没有分类（返现、給付金套不上「日用品/食費」，写备注更清楚）。
     (kind.value !== 'settlement' || (toMemberId.value !== null && toMemberId.value !== payerId.value)),
 )
 
@@ -287,6 +285,7 @@ function goBack() {
 
 async function saveEdit() {
   if (!canSave.value || payerId.value === null || editingId.value === null) return
+  if (!(await ensureCategory())) return
   busy.value = true
   try {
     await ledger.update(editingId.value, version.value, {
@@ -343,8 +342,39 @@ function onSplitChange(next: Record<string, unknown> | null, valid: boolean, dif
   splitDiff.value = diff
 }
 
+/** 兜底分类（默认「その他」）。哪一个由设置说了算，代码里不写死名字 */
+const fallbackCategoryId = computed(() => meta.setting<number | null>('fallback_category_id', null))
+
+/**
+ * 支出没选分类时怎么办。
+ *
+ * 写了备注就记进「その他」—— 备注已经说清这笔是什么了，再逼人点一下分类是多余的。
+ * 两样都没有就弹框问：这种账过三个月自己都认不出来，不该让它这么进库。
+ * 弹框里填了备注就直接存，想选分类就取消回去点。
+ */
+async function ensureCategory(): Promise<boolean> {
+  if (kind.value !== 'expense' || categoryId.value !== null) return true
+  if (!title.value.trim()) {
+    const typed = await new Promise<string | null>((resolve) => {
+      $q.dialog({
+        title: t('entry.needLabel'),
+        message: t('entry.needLabelHint'),
+        prompt: { model: '', type: 'text', maxlength: 40 },
+        cancel: true,
+      })
+        .onOk((v: string) => resolve(v))
+        .onCancel(() => resolve(null))
+    })
+    if (typed === null || !typed.trim()) return false
+    title.value = typed.trim()
+  }
+  categoryId.value = fallbackCategoryId.value
+  return categoryId.value !== null
+}
+
 async function save(keepGoing: boolean) {
   if (!canSave.value || payerId.value === null) return
+  if (!(await ensureCategory())) return
   busy.value = true
   const payload = {
       kind: kind.value,
@@ -442,9 +472,11 @@ function reset(keepGoing: boolean) {
   justify-content: center;
   gap: 4px;
   min-height: 64px;                      /* 大色块，一点即中，不用瞄 */
-  border: 1px solid rgba(0, 0, 0, 0.12);
+  /* 这一排不描边也不铺底：未选中就是干干净净的图标+名字，
+     选中的那块是实心分类色 —— 对比已经足够强，再加个灰底反而像三个空盒子 */
+  border: none;
   border-radius: 10px;
-  background: #fff;
+  background: transparent;
   color: #444;
   font-size: 12px;
   cursor: pointer;

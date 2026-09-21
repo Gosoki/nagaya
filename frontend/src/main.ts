@@ -6,11 +6,17 @@ import '@quasar/extras/material-icons/material-icons.css'
 import 'quasar/src/css/index.sass'
 
 import App from './App.vue'
-import { i18n } from './i18n'
+import { detectLang, i18n, quasarLang } from './i18n'
 import { router } from './router'
 
 createApp(App)
-  .use(Quasar, { plugins: { Notify, Dialog }, config: { notify: { position: 'top' } } })
+  // 不给 lang 的话所有弹框的按钮都是英文的 CANCEL / OK，
+  // 夹在一屏中文里格外扎眼。切日语时 setLang() 会跟着换
+  .use(Quasar, {
+    plugins: { Notify, Dialog },
+    lang: quasarLang(detectLang()),
+    config: { notify: { position: 'top' } },
+  })
   .use(createPinia())
   .use(i18n)
   .use(router)

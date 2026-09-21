@@ -674,3 +674,36 @@ test('自己排第一位：谁付的默认选自己，分摊里自己也在最�
   const h = await page.locator('.pick').first().evaluate((el) => el.getBoundingClientRect().height)
   expect(h, '谁付的按钮太小了').toBeGreaterThanOrEqual(40)
 })
+
+test('没选分类：写了备注就记成兜底分类，两样都没有才弹框问', async ({ page }) => {
+  await login(page)
+  const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
+  const cats = await (await page.request.get('/api/categories', { headers })).json()
+
+  // ① 有备注、没点分类 → 直接存，落到兜底分类上（设置里指定，默认 その他）
+  await page.locator('input.amount').fill('1234')
+  await page.getByPlaceholder('备注（选填）').fill('E2E没选分类')
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.locator('.q-notification')).toContainText('已记下')
+  let rows = await (await page.request.get('/api/entries?limit=5', { headers })).json()
+  const a = rows.find((e: { title: string }) => e.title === 'E2E没选分类')
+  expect(a.category_id, '备注写了就该落到兜底分类，不能留空').not.toBeNull()
+  expect(cats.find((c: { id: number }) => c.id === a.category_id).name).toBe('その他')
+
+  // ② 备注和分类都没有 → 不许直接进库，弹框问清楚这笔是什么
+  await page.goto('/')
+  await page.locator('input.amount').fill('999')
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.locator('.q-dialog')).toContainText('这笔是什么')
+  // 顺带验一下 Quasar 自带的按钮也是中文的（默认是英文 CANCEL / OK）
+  await expect(page.locator('.q-dialog')).toContainText('取消')
+  await page.locator('.q-dialog input').fill('E2E弹框补的')
+  await page.getByRole('button', { name: '确定' }).click()
+  await expect(page.locator('.q-dialog')).toHaveCount(0)
+  await expect(page.locator('.q-notification')).toContainText('已记下')
+
+  rows = await (await page.request.get('/api/entries?limit=5', { headers })).json()
+  const bEntry = rows.find((e: { title: string }) => e.title === 'E2E弹框补的')
+  expect(bEntry.amount_jpy).toBe(999)
+  expect(bEntry.category_id).toBe(a.category_id)
+})
