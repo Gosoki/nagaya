@@ -134,6 +134,14 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
         o = opening.get(m.id, 0)
         c = o + (paid.get(m.id, 0) - owed.get(m.id, 0)) + (out_.get(m.id, 0) - in_.get(m.id, 0))
         closing[m.id] = c
+        # 搬走的人：**还有账就留着，全零就不占位**。
+        # 欠着钱走的必须一直挂在账单上直到结清（这也是「退出不删人」的意义）；
+        # 但结清了还天天占一行 0，往后每张账单都得带着前室友的名字
+        moved_out_and_clear = not m.is_active() and not (
+            o or c or owed.get(m.id) or paid.get(m.id) or out_.get(m.id) or in_.get(m.id)
+        )
+        if moved_out_and_clear:
+            continue
         rows.append(
             {
                 "member_id": m.id,

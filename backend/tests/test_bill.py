@@ -178,6 +178,29 @@ def test_empty_draft_covers_nothing(session: Session, members) -> None:
     assert draft["covers_from"] is None and draft["covers_to"] is None
 
 
+def test_moved_out_member_stays_until_settled_then_leaves_the_list(session: Session, members) -> None:
+    """搬走的人：**还欠着就一直挂在账单上，结清了才从名单里消失。**
+
+    「退出不删人」是为了历史账追溯得到人，可不该让每张新账单都顶着一排前室友的 0。
+    """
+    a, b, c = members
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=3_000, payer_id=a.id)
+    c.left_on = SEP
+    session.add(c)
+    session.commit()
+
+    # 还欠着 1,000：照样在名单里
+    draft = build_bill(session, None)
+    assert row_of(draft, c.id)["closing"] == -1_000
+
+    # 把账平掉（他把钱转给了 a），下一张单子上就不该再有他
+    create_entry(session, actor_id=a.id, kind=EntryKind.settlement, on=SEP,
+                 amount=1_000, payer_id=c.id, to_member_id=a.id)
+    cut_statement(session, actor_id=a.id)
+    nxt = build_bill(session, None)
+    assert [r["member_id"] for r in nxt["members"]] == [a.id, b.id]
+
+
 def test_settled_when_every_planned_transfer_is_recorded(session: Session, members) -> None:
     """「转账按钮都点过了就显示结清」。"""
     a, b, c = members
