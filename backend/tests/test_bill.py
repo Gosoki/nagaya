@@ -13,7 +13,7 @@ import datetime as dt
 import pytest
 from sqlmodel import Session, select
 
-from app.models import EntryKind, Statement, now_utc
+from app.models import Category, EntryKind, Statement, now_utc
 from app.services import settings as settings_svc
 from app.services.bill import BillError, build_bill, cut_statement, entries_of
 from app.services.ledger import balances, create_entry, update_entry
@@ -371,3 +371,55 @@ def test_overpayment_comes_back_in_the_next_bill(session: Session, members) -> N
         (a.id, c.id, 4_000),
     ]
     assert sum(balances(session).values()) == 0
+
+
+def test_cut_stamps_monthly_entries_with_the_cut_date(session: Session, members) -> None:
+    """固定费的日期在出账那一刻统一盖成出账日。
+
+    家賃这种根本没有「填入日」—— 它不是某天发生的事，就是这张账单的一项。
+    日常开销不动：几号买的日用品是真事。
+    """
+    a, *_ = members
+    rent, daily = Category(name="家賃", monthly=True), Category(name="日用品", monthly=False)
+    session.add(rent)
+    session.add(daily)
+    session.commit()
+    session.refresh(rent)
+    session.refresh(daily)
+
+    fixed = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                         amount=120_000, payer_id=a.id, category_id=rent.id)
+    shopping = create_entry(session, actor_id=a.id, kind=EntryKind.expense,
+                            on=dt.date(2026, 9, 14), amount=1_980, payer_id=a.id,
+                            category_id=daily.id)
+
+    cut_day = dt.date(2026, 9, 30)
+    st = cut_statement(session, actor_id=a.id, on=cut_day)
+
+    session.refresh(fixed)
+    session.refresh(shopping)
+    assert fixed.date == cut_day                      # 固定费盖成出账日
+    assert shopping.date == dt.date(2026, 9, 14)      # 日常开销原样不动
+    assert st.covers_to == cut_day
+    assert st.label == "9/30 出账"
+
+
+def test_cut_without_monthly_leaves_their_dates_alone(session: Session, members) -> None:
+    """不勾「包括固定费」时固定费留在草稿里，日期当然也不该被盖。"""
+    a, *_ = members
+    rent, daily = Category(name="家賃", monthly=True), Category(name="日用品", monthly=False)
+    session.add(rent)
+    session.add(daily)
+    session.commit()
+    session.refresh(rent)
+    session.refresh(daily)
+
+    fixed = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                         amount=120_000, payer_id=a.id, category_id=rent.id)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                 amount=1_980, payer_id=a.id, category_id=daily.id)
+
+    cut_statement(session, actor_id=a.id, on=dt.date(2026, 9, 30), include_monthly=False)
+    session.refresh(fixed)
+    assert fixed.date == SEP
+    assert fixed.statement_id is None

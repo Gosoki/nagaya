@@ -270,24 +270,35 @@ def cut_statement(
     actor_id: int | None,
     label: str | None = None,
     include_monthly: bool = True,
+    on: dt.date | None = None,
 ) -> Statement:
     """出账单：把这一刻之前没出账的账目归到一张单子上，并冻结快照。
 
     `include_monthly=False` 时**把固定费留在草稿里**，只出日常那部分 ——
     月中想把日用品先结一轮、又不想等水电煤账单的时候用。
+
+    `on` 只给种子/测试用来铺时间线，正常就是今天（JST）。
     """
     entries = unbilled(session)
+    monthly_ids = {
+        c.id
+        for c in session.exec(select(Category).where(Category.monthly == True))  # noqa: E712
+    }
     if not include_monthly:
-        monthly_ids = {
-            c.id
-            for c in session.exec(select(Category).where(Category.monthly == True))  # noqa: E712
-        }
         entries = [e for e in entries if e.category_id not in monthly_ids]
     if not entries:
         raise BillError("nothing_to_cut", "现在没有待出账的账目")
 
+    today = on or today_jst()
+    # 固定费不按「哪天填的」记 —— 家賃这种根本没有填入日，它就是这张账单的一项。
+    # 出账那一刻统一盖成出账日：账目里一张账单的固定费并成一块，不再散在整个月。
+    # 日常开销不动，几号买的日用品是真事。
+    for e in entries:
+        if e.category_id in monthly_ids:
+            e.date = today
+            session.add(e)
+
     dates = [e.date for e in entries]
-    today = today_jst()
     statement = Statement(
         label=label or f"{today.month}/{today.day} 出账",
         cut_at=now_utc(),

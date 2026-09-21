@@ -94,7 +94,7 @@ def main() -> None:
         add(EntryKind.expense, d(7, 1), 120_000, "家賃", "", go.id)
         add(EntryKind.expense, d(7, 10), 1_380, "日用品", "トイレットペーパー", zen.id)
         add(EntryKind.expense, d(7, 18), 6_400, "食費", "焼肉", kan.id)
-        add(EntryKind.expense, d(7, 28), 9_200, "電気", "", go.id)
+        add(EntryKind.expense, d(7, 28), 9_200, "電気", "", go.id)   # 日期会被出账日盖掉
         add(EntryKind.expense, d(7, 28), 3_800, "ガス", "", go.id)
         add(EntryKind.expense, d(7, 28), 5_500, "ネット", "", kan.id)
         add(EntryKind.expense, d(8, 2), 2_180, "日用品", "洗剤とゴミ袋", go.id)
@@ -135,8 +135,11 @@ def main() -> None:
 
 
 def finish_cut(s: Session, actor_id: int, label: str, at: dt.datetime):
-    """出账，然后把出账时刻改成想要的那天 —— 种子要铺出一条像样的时间线。"""
-    st = cut_statement(s, actor_id=actor_id, label=label)
+    """出账，然后把出账时刻改成想要的那天 —— 种子要铺出一条像样的时间线。
+
+    on 传出账那天：固定费的日期由它盖，账单的覆盖范围也跟着对。
+    """
+    st = cut_statement(s, actor_id=actor_id, label=label, on=at.date())
     st.cut_at = at
     if st.snapshot_json:
         snap = dict(st.snapshot_json)

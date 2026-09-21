@@ -40,8 +40,6 @@ export default {
     willDelete: '削除されます',
     hintFrom: '{label} 参考',
     noHint: '記録なし',
-    recordedOn: '記帳日 {date}（{label} に計上）',
-    dateOutside: 'この日付は {label} に計上され、この請求書には載りません',
     coversPeriod: '請求対象期間',
     detail: '分担 / 請求対象期間',
     addItem: '固定費を追加',

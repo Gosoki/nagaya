@@ -40,8 +40,6 @@ export default {
     willDelete: '将删除',
     hintFrom: '参考 {label}',
     noHint: '没录过',
-    recordedOn: '记入日 {date}（算进 {label}）',
-    dateOutside: '这个日期会算进 {label}，不在这张账单上',
     coversPeriod: '计费期间',
     detail: '分摊 / 计费期间',
     addItem: '加一项固定费',
