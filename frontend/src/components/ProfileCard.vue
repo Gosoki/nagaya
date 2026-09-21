@@ -11,7 +11,8 @@
     </q-item>
 
     <q-list separator>
-      <!-- 点头像换图片；没设图片时，下面那排颜色就是头像 -->
+      <!-- 点头像换图片。**颜色那一排永远留着** —— 它不只是「没照片时的替身」：
+           「谁付的」那排按钮选中时用的就是这个颜色，换了照片照样在用 -->
       <q-item class="profile-row">
         <q-item-section avatar>
           <button class="avatar-btn" :aria-label="t('profile.pickPhoto')" @click="pickFile">
@@ -29,7 +30,7 @@
         </q-item-section>
         <q-item-section>
           <q-item-label class="row items-center no-wrap">
-            <div class="col">{{ auth.me.avatar ? t('profile.photo') : t('profile.color') }}</div>
+            <div class="col">{{ t('profile.photo') }}</div>
             <q-btn
               v-if="auth.me.avatar"
               dense flat no-caps size="sm" color="grey-7"
@@ -38,7 +39,8 @@
             />
           </q-item-label>
           <q-item-label caption>{{ t('profile.photoHint') }}</q-item-label>
-          <div v-if="!auth.me.avatar" class="swatches q-mt-xs">
+          <q-item-label caption class="q-mt-sm">{{ t('profile.color') }}</q-item-label>
+          <div class="swatches q-mt-xs">
             <button
               v-for="c in COLORS"
               :key="c"

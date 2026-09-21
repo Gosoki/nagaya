@@ -1033,6 +1033,8 @@ test('换头像：传一张照片，全站跟着换；撤掉就回色圆', async
 
   await page.locator('input[type="file"]').setInputFiles('e2e/fixtures/avatar.jpg')
   await expect(page.locator('.avatar-btn img')).toHaveCount(1)
+  // 颜色那一排不能因为设了照片就消失 —— 它还管着「谁付的」按钮的底色
+  await expect(page.locator('.swatch')).not.toHaveCount(0)
 
   // 后端得压到几 KB —— 原图一点七 MB，原样存进库里迟早把备份撑爆
   const after = await me()

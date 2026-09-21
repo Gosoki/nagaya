@@ -100,8 +100,8 @@ export default {
   },
   profile: {
     title: '个人',
-    photo: '头像', pickPhoto: '换张照片', removePhoto: '用回色圆', photoHint: '点头像换照片，最大 5MB；不设照片就用下面的颜色', tooBig: '图片不能超过 5MB',
-    color: '头像颜色', displayName: '昵称', loginName: '登录名', lang: '语言',
+    photo: '头像', pickPhoto: '换张照片', removePhoto: '用回色圆', photoHint: '点头像换照片，最大 5MB。下面的颜色用在「谁付的」按钮上，没设照片时也是头像', tooBig: '图片不能超过 5MB',
+    color: '颜色', displayName: '昵称', loginName: '登录名', lang: '语言',
     displayNameHint: '账单和分摊里显示的名字，头像上取第一个字',
     loginNameHint: '登录用的名字，只有自己看得到',
     password: '密码', change: '修改',
