@@ -16,22 +16,22 @@
   <div>
     <!-- 列头：比例 / 调整 / 应担 三件事摆在一排，一眼看得出它们的关系。
          调整额原来藏在下面一个折叠里，看不见它是加在比例结果之上的 -->
-    <div class="row items-center head-row text-caption text-grey-6">
-      <div class="col name-col" />
-      <div class="col-auto weight-col text-center">{{ t('split.weight') }}</div>
-      <div class="col-auto adj-col text-right">{{ t('split.adjustment') }}</div>
-      <div class="col-auto share-col text-right">{{ t('split.share') }}</div>
+    <div class="head-row text-caption text-grey-6">
+      <div />
+      <div class="text-right">{{ t('split.weight') }}</div>
+      <div class="text-right">{{ t('split.adjustment') }}</div>
+      <div class="text-right">{{ t('split.share') }}</div>
     </div>
 
-    <div v-for="m in members" :key="m.id" class="row items-center member-row">
-      <div class="col name-col row items-center no-wrap">
+    <div v-for="m in members" :key="m.id" class="member-row">
+      <div class="name-col row items-center no-wrap">
         <q-avatar size="30px" :style="{ background: m.color }" text-color="white" class="q-mr-sm">
           {{ m.display_name.slice(0, 1) }}
         </q-avatar>
         <div class="name ellipsis">{{ m.display_name }}</div>
       </div>
 
-      <div class="col-auto weight-col">
+      <div class="weight-col">
         <input
           class="num-input weight-input"
             type="number"
@@ -42,7 +42,7 @@
             @input="onWeightInput(m.id, $event)"
           />
         </div>
-        <div class="col-auto adj-col">
+        <div class="adj-col">
           <input
             class="num-input"
             type="text"
@@ -54,7 +54,7 @@
         </div>
 
       <div
-        class="col-auto share-col"
+        class="share-col"
         :class="{ 'text-grey-5': (preview?.[String(m.id)] ?? 0) === 0 }"
       >
         {{ formatYen(preview?.[String(m.id)] ?? 0) }}
@@ -252,8 +252,15 @@ defineExpose({
 
 <style scoped>
 
-/* 375px 下的列宽预算：左右各 16 padding → 343 可用。
-   比例改成数字框之后不用再塞两个 40px 的按钮，省出来的宽度给调整列。 */
+/* 名字 / 比例 / 调整 / 应担 四等分。原来是「名字自适应 + 50/92/78」四个不同宽度，
+   数字落在各不相同的位置上，看着就是歪的。表头和下面的值共用同一套列，天然对齐。 */
+.head-row,
+.member-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  align-items: center;
+  column-gap: 6px;
+}
 .head-row {
   padding-bottom: 4px;
   margin-bottom: 2px;
@@ -262,17 +269,13 @@ defineExpose({
   letter-spacing: 0.04em;
 }
 .name-col { min-width: 0; }
-.weight-col { width: 62px; padding-right: 12px; }
-.adj-col { width: 92px; }
-.share-col { width: 78px; text-align: right; font-variant-numeric: tabular-nums; font-size: 15px; }
+.share-col { text-align: right; font-variant-numeric: tabular-nums; font-size: 15px; }
 
 .member-row { min-height: 48px; }
 .name { font-size: 15px; }
 /* 数字框本身要够高：44px 说的是**可点区域**，输入框太矮拇指点不准 */
-.weight-input {
-  text-align: center;
-  padding-right: 0;
-}
+/* 三个数字列一律右对齐（.num-input 里定的），比例也不例外 —— 钱的表就该这么读 */
+.weight-input { padding-right: 0; }
 .weight-input::-webkit-outer-spin-button,
 .weight-input::-webkit-inner-spin-button {
   opacity: 1;                 /* 桌面上把上下箭头显出来，手机上本来就没有 */
