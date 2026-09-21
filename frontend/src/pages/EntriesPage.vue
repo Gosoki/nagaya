@@ -21,9 +21,12 @@
         </q-menu>
       </button>
       <q-space />
-      <!-- 筛完不给合计等于只筛了一半：「伙食这三个月花了多少」才是要问的 -->
+      <!-- 筛完不给合计等于只筛了一半：「伙食这三个月花了多少」才是要问的。
+           但一次只拉得到最近 500 笔，更早的没在手里 —— 那就把话说明白，
+           绝不能让人以为这个合计是全部 -->
       <div v-if="anyFilter" class="text-caption text-grey-7 no-wrap">
         {{ t('filter.sum') }} {{ formatYen(filteredTotal) }}
+        <span v-if="ledger.truncated" class="text-warning">{{ t('filter.partial') }}</span>
       </div>
       <q-btn
         v-if="anyFilter"

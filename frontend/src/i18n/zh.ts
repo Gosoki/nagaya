@@ -87,6 +87,7 @@ export default {
     noPeriod: '还没有账目',
   },
   filter: {
+    partial: '（只算了最近 500 笔）',
     kind: '类型', category: '分类', payer: '谁付的',
     all: '不限', sum: '合计', empty: '没有符合的账目',
   },

@@ -87,6 +87,7 @@ export default {
     noPeriod: 'まだ明細がありません',
   },
   filter: {
+    partial: '（直近 500 件のみ）',
     kind: '種別', category: 'カテゴリ', payer: '支払者',
     all: 'すべて', sum: '合計', empty: '該当する明細がありません',
   },

@@ -12,17 +12,25 @@ export const useLedger = defineStore('ledger', () => {
   /** 上一张出过的账单是什么时候切的。用来挡住把日期选回已出账的范围里 */
   const prevCutAt = ref<string | null>(null)
   const prevLabel = ref<string | null>(null)
+  /**
+   * 账目是一次性拉这么多笔。筛选和合计都在前端算，所以**拉少了就筛不全**。
+   * 三个人按种子数据的速率大约每年一百笔，500 笔够五年 —— 到那天不能让合计
+   * 悄悄少算，得先说出来。truncated 就是「还有更早的没拉到」
+   */
+  const LIMIT = 500
+  const truncated = ref(false)
 
   async function refresh() {
     loading.value = true
     try {
       const [e, b, bill] = await Promise.all([
         // 筛选在前端做，拉少了就筛不全
-        api.get<Entry[]>('/api/entries?limit=500'),
+        api.get<Entry[]>(`/api/entries?limit=${LIMIT}`),
         api.get<{ balances: Record<string, number> }>('/api/balances'),
         api.get<{ prev_cut_at: string | null; prev_label: string | null }>('/api/bill'),
       ])
       entries.value = e
+      truncated.value = e.length >= LIMIT
       balances.value = b.balances
       prevCutAt.value = bill.prev_cut_at
       prevLabel.value = bill.prev_label
@@ -61,5 +69,8 @@ export const useLedger = defineStore('ledger', () => {
     useBills().refreshCached()
   }
 
-  return { entries, balances, loading, prevCutAt, prevLabel, refresh, create, update, remove }
+  return {
+    entries, balances, loading, truncated, prevCutAt, prevLabel,
+    refresh, create, update, remove,
+  }
 })
