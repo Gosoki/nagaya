@@ -56,7 +56,7 @@
                而「挑某个月」才是常态、「逐张翻」很少 —— 并进来之后
                这一屏永远是一张账单，形状不再变来变去 -->
           <button v-if="!bill.is_draft" class="pick text-subtitle1 text-weight-medium">
-            {{ bill.label }}
+            {{ statementLabel(bill) }}
             <q-icon name="expand_more" size="20px" class="text-grey-6" />
             <q-menu anchor="bottom left" self="top left" max-height="60vh">
               <q-list separator style="min-width: 260px">
@@ -69,7 +69,7 @@
                   @click="pickStatement(st.id)"
                 >
                   <q-item-section>
-                    <q-item-label>{{ st.label }}</q-item-label>
+                    <q-item-label>{{ statementLabel(st) }}</q-item-label>
                     <q-item-label caption>
                       {{ t('bill.coversRange', { from: st.covers_from, to: st.covers_to }) }}
                     </q-item-label>
@@ -103,8 +103,8 @@
           <!-- 这一格就是「这张单子现在什么状态」：草稿报笔数，出过的账单
                结清了给绿标、没结清给橙字。原来绿标另起一行占着一整行 -->
           <div v-if="bill.is_draft">
-            <span v-if="bill.prev_label" class="q-mr-sm">
-              {{ t('bill.lastCut', { label: bill.prev_label }) }}
+            <span v-if="bill.prev_cut_at" class="q-mr-sm">
+              {{ t('bill.lastCut', { label: statementLabel({ label: bill.prev_label, cut_at: bill.prev_cut_at }) }) }}
             </span>
             {{ t('bill.entryCount', { n: bill.entry_count }) }}
           </div>
@@ -419,6 +419,7 @@ import MemberAvatar from 'src/components/MemberAvatar.vue'
 import MonthlyFixed from 'src/components/MonthlyFixed.vue'
 import { todayJst } from 'src/date'
 import { tint } from 'src/color'
+import { statementLabel } from 'src/statement'
 import { formatYen } from 'src/i18n'
 import { useAuth } from 'src/stores/auth'
 import { type BillKey, useBills } from 'src/stores/bills'
@@ -707,7 +708,7 @@ const billText = computed(() => {
   const b = bill.value
   if (!b) return ''
   const lines: string[] = []
-  const head = b.is_draft ? t('bill.draft') : (b.label ?? '')
+  const head = b.is_draft ? t('bill.draft') : statementLabel(b)
   lines.push(`【${head}】 ${t('bill.total')} ${formatYen(b.total_expense)}`)
   if (b.covers_from) lines.push(t('bill.coversRange', { from: b.covers_from, to: b.covers_to }))
   if (!b.is_draft) lines.push(b.settled ? t('bill.settledBadge') : t('bill.unsettled'))

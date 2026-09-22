@@ -14,6 +14,7 @@ export default {
   nav: { add: '記帳', bill: '請求書', entries: 'その他' },
   kind: { expense: '支出', income: '収入', settlement: '精算' },
   entry: {
+    fixedCostHint: '家賃・光熱費・ネットは「請求書」タブで入力',
     payer: '支払者', receiver: '受取者',
     to: '送金先', title: 'メモ（任意）',
     saved: '記帳しました',
@@ -99,6 +100,7 @@ export default {
     monthlyOffHintToday: '本日すでに請求書を作成しているため、固定費は既定で含めません。含める場合はチェックしてください。',
     cutBlankFixed: '{names} が未入力です —— このまま作成すると 0 円として締められます',
     draft: '現在の請求書',
+    cutLabel: '{m}/{d} 締め',
     cut: '請求書を作成',
     cutConfirm: 'この時点までの明細をこの請求書にまとめます。以降の記帳は次回分になります。', issued: '発行済み',
     tabDraft: '未請求', tabOpen: '請求済み',

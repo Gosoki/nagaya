@@ -134,8 +134,10 @@ test('记一笔：默认页就是它，且主操作在拇指区', async ({ page 
   // 不写死个数（加个「外食」就得改测试没意义），钉的是真正的规矩：
   // 固定费一个都不许出现，而且总数一行放得下 —— 这一屏的价值就在于按钮少。
   await expect(page.getByRole('button', { name: '日用品' })).toBeVisible()
+  // 钉的是**分类网格里**没有固定费。整页搜名字会误伤 —— 网格底下那句
+  // 「房租 / 水电煤网在「账单」那页填」正是要把人指过去的，它当然会提到这些词
   for (const monthly of ['房租', '电费', '燃气', '水费', '网费']) {
-    await expect(page.getByRole('button', { name: monthly })).toHaveCount(0)
+    await expect(page.locator('.cat-grid').getByRole('button', { name: monthly })).toHaveCount(0)
   }
   expect(await page.locator('.cat').count(), '日常分类超过一行了').toBeLessThanOrEqual(4)
 

@@ -21,6 +21,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { api } from 'src/api/client'
 import type { Statement } from 'src/api/types'
 import MonthlyFixed from 'src/components/MonthlyFixed.vue'
+import { statementLabel } from 'src/statement'
 
 const route = useRoute()
 const router = useRouter()
@@ -33,7 +34,7 @@ const label = ref('')
 onMounted(async () => {
   if (statementId.value === null) return
   const sts = await api.get<Statement[]>('/api/statements')
-  label.value = sts.find((s) => s.id === statementId.value)?.label ?? ''
+  label.value = statementLabel(sts.find((s) => s.id === statementId.value))
 })
 
 function goBack() {

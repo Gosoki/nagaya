@@ -61,7 +61,7 @@
               </q-avatar>
             </q-item-section>
             <q-item-section>
-              <q-item-label>{{ t('bill.statementItem') }} · {{ st.label }}</q-item-label>
+              <q-item-label>{{ t('bill.statementItem') }} · {{ statementLabel(st) }}</q-item-label>
               <q-item-label caption>{{ st.covers_from }} 〜 {{ st.covers_to }}</q-item-label>
             </q-item-section>
             <q-item-section side>
@@ -115,6 +115,7 @@ import { useLedger } from 'src/stores/ledger'
 import { useMemos } from 'src/stores/memos'
 import { KIND_COLOR } from 'src/theme'
 import { useMeta } from 'src/stores/meta'
+import { statementLabel } from 'src/statement'
 
 const { t } = useI18n()
 const $q = useQuasar()

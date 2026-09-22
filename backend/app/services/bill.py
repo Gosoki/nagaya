@@ -483,7 +483,10 @@ def cut_statement(
     # 起始日跟 build_bill 一个口径：上一次出账那天。头一张才从第一笔算起
     prev = session.exec(select(Statement).order_by(Statement.cut_at.desc())).first()
     statement = Statement(
-        label=label or f"{today.month}/{today.day} 出账",
+        # **不在这儿拼展示文案。** 拼出来的是简体中文，而它会被写进库里 ——
+        # 日文界面上那张账单的标题从此永远是「8/30 出账」，改代码也救不回来。
+        # 留空，前端按 cut_at 用 i18n 渲染（src/statement.ts）
+        label=label or "",
         cut_at=now_utc(),
         covers_from=dt.date.fromisoformat(_covers_from(prev, dates) or min(dates).isoformat()),
         covers_to=max(dates),

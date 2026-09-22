@@ -81,6 +81,15 @@
       </button>
     </div>
 
+    <!-- **指个路。** 这一屏只放日常分类（房租水电煤网有自己那一屏），
+         可屏幕上从来没说过这件事 —— 照着任务走一遍的那一路，第一步
+         「这个月电费填进去」就在这儿愣住了，最自然的结果是记成「其他」，
+         而那笔钱既进不了固定费面板，下个月还会照着灰色占位再填一次 -->
+    <button v-if="kind === 'expense'" class="fixed-hint" type="button" @click="goFixed">
+      {{ t('entry.fixedCostHint') }}
+      <q-icon name="chevron_right" size="16px" />
+    </button>
+
     <div class="q-px-md">
       <!-- 谁付的 / 转给谁 / 备注 三行统一行高，中间拉细分隔线 ——
            原来它们各自飘着，看上去像三段无关的文字，不像一个表单 -->
@@ -221,6 +230,9 @@ const catStyle = (c: Swatch) =>
     ? { background: c.color, color: inkOn(c.color) }
     : { background: tint(c.color) }
 const catIcon = (c: Swatch) => (categoryId.value === c.id ? inkOn(c.color) : c.color)
+
+/** 去固定费那一屏。带上「从哪儿来的」不需要 —— 那屏自己会回到账单页 */
+const goFixed = () => router.push({ name: 'monthly' })
 
 const amountEl = ref<InstanceType<typeof AmountInput> | null>(null)
 const splitEl = ref<InstanceType<typeof SplitEditor> | null>(null)
@@ -604,6 +616,21 @@ function reset() {
 }
 /* 选中态的字色由 catStyle() 给（深色分类配白字、浅色配黑字） */
 
+
+/* 指路那一行：看着像条链接，不抢分类格子的戏 */
+.fixed-hint {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 8px auto 0;
+  padding: 8px 12px;
+  min-height: 44px;
+  border: none;
+  background: transparent;
+  color: var(--nagaya-ink-2);
+  font-size: var(--nagaya-fs-meta);
+  cursor: pointer;
+}
 
 .actions :deep(.q-btn) { min-height: 44px; }
 .date-hint { max-width: 290px; border-top: 1px solid rgba(0, 0, 0, 0.08); }

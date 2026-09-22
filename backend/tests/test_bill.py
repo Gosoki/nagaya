@@ -166,7 +166,12 @@ def test_statements_are_ordered_and_labelled(session: Session, members) -> None:
     # 它管的是上次出账之后的一切
     assert second.covers_from == jst_date(first.cut_at)
     assert second.covers_to == OCT
-    assert "出账" in first.label
+    # 名字留空：后端不拼展示文案（拼出来的中文会被写进库，日文界面上救不回来），
+    # 前端按 cut_at 用 i18n 渲染。自己起的名字才存
+    assert first.label == ""
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=OCT, amount=300, payer_id=a.id)
+    named = cut_statement(session, actor_id=a.id, label="搬家那次")
+    assert named.label == "搬家那次"
 
 
 def test_editing_an_earlier_bill_flags_the_later_ones_too(session: Session, members) -> None:
@@ -458,7 +463,7 @@ def test_cut_stamps_monthly_entries_with_the_cut_date(session: Session, members)
     assert fixed.date == cut_day                      # 固定费盖成出账日
     assert shopping.date == dt.date(2026, 9, 14)      # 日常开销原样不动
     assert st.covers_to == cut_day
-    assert st.label == "9/30 出账"
+    assert st.label == "", "后端不再拼「9/30 出账」这种展示文案，前端按日期渲染"
 
 
 def test_cut_without_monthly_leaves_their_dates_alone(session: Session, members) -> None:

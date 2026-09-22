@@ -23,7 +23,9 @@ DEFAULT_CATEGORIES = [
     ("网费", "wifi", "#26a69a", True),
     ("日用品", "shopping_basket", "#8d6e63", False),
     ("伙食", "restaurant", "#66bb6a", False),
-    ("其他", "more_horiz", "#78909c", False),
+    # 不用 more_horiz（•••）：那个符号在一排分类里读作「还有更多分类」，
+    # 而点下去只是选中了一个叫「其他」的分类 —— 实测有人照着它把电费记成了「其他」
+    ("其他", "category", "#78909c", False),
 ]
 
 

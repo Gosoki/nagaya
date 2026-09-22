@@ -14,6 +14,7 @@ export default {
   nav: { add: '记一笔', bill: '账单', entries: '更多' },
   kind: { expense: '支出', income: '收入', settlement: '转账' },
   entry: {
+    fixedCostHint: '房租 / 水电煤网在「账单」那页填',
     payer: '谁付的', receiver: '谁收的',
     to: '转给谁', title: '备注（选填）',
     saved: '已记下',
@@ -99,6 +100,7 @@ export default {
     monthlyOffHintToday: '今天已经出过一张了，固定费默认不含 —— 要一起结就自己勾上。',
     cutBlankFixed: '{names} 还空着 —— 出账后这几项按 0 结算',
     draft: '当前账单',
+    cutLabel: '{m}/{d} 出账',
     cut: '出账单',
     cutConfirm: '把这一刻之前记的账全部归到这张账单上。之后再记的会进下一张。', issued: '已出账',
     tabDraft: '未出账', tabOpen: '已出账',
