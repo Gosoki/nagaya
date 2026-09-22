@@ -828,6 +828,8 @@ function reset() {
   min-height: 52px;                       /* 三行一样高，拇指点哪一行都一样 */
   border-bottom: 1px solid var(--nagaya-line);
 }
+/* 转账没有分摊区，「转给谁」就是卡片的最后一行 —— 底下那条线挂空了 */
+.fields:last-child .field:last-child { border-bottom: none; }
 .split-panel { padding: 4px 0 12px; }
 
 .cat-grid {
