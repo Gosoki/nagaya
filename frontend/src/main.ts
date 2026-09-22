@@ -18,7 +18,9 @@ createApp(App)
   .use(Quasar, {
     plugins: { Notify, Dialog },
     lang: quasarLang(detectLang()),
-    config: { notify: { position: 'top' } },
+    // 提示走屏幕下方：顶上那条会被刘海/灵动岛切掉半截，而「记好了」这种话
+    // 看不全等于没提示。具体离底边多高由 CSS 定（要躲开底栏和固定操作条）
+    config: { notify: { position: 'bottom' } },
   })
   .use(createPinia())
   .use(i18n)

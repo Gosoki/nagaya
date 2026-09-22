@@ -715,7 +715,18 @@ function reset() {
    会让它底下白出一大块 */
 .page { padding-bottom: var(--nagaya-footer-h); }
 .form-pane { padding-bottom: 90px; }
-.kind-toggle { border-bottom: 1px solid rgba(0, 0, 0, 0.08); }
+/* 顶上这条钉住：往下翻分摊、翻备忘的时候，「我在记什么」和回表单的路
+   都得一直在。吸在顶栏下沿 —— --nagaya-header-h 是量出来的，刘海机上
+   含安全区，非刘海机上是 0。
+   **底色必须不透明**：这条里没选中的那几格本身是透明的，不铺底的话
+   滚过去的内容会从字底下透出来 */
+.kind-toggle {
+  position: sticky;
+  top: var(--nagaya-header-h);
+  z-index: 3;
+  background: var(--nagaya-bg);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
 /* 顶到屏幕边缘的东西不做圆角：首尾两段默认带 3px，贴着边看就是两个豁口。
    高度对齐底部 Tab 那一栏（57px）—— 默认的 37px 上轻下重，不像个 app */
 .kind-toggle :deep(.q-btn) {
