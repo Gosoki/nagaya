@@ -18,13 +18,26 @@
     </div>
     <!-- 位置和高度跟账单那页的页签一致，但选中的是**实心色块**不是下划线：
          选错记账类型的代价比选错账单页签大得多，值得给更硬的提示 -->
-    <q-btn-toggle
-      v-model="pane"
-      spread no-caps unelevated
-      :toggle-color="showMemo ? 'grey-7' : kindPalette"
-      class="kind-toggle"
-      :options="paneOptions"
-    />
+    <!--
+      这条搬进**顶栏**里画（Teleport），不留在页面里。
+
+      原来是 position: sticky 吸在顶栏下沿：Safari 标签页里好使，
+      装成主屏 app（standalone）之后就不吸了。而顶栏本身是 position: fixed，
+      两种模式下都钉得死，安全区也由它统一让 —— 与其跟 sticky 较劲，
+      不如让这条本来就是顶栏的一部分，和账单那两页的页签一个待遇。
+
+      改一笔已有的账时不搬：那一屏顶上站着「返回 + 这笔在哪张账单上」，
+      再挤一条进去就乱了。
+    -->
+    <Teleport to=".q-header" :disabled="editingId !== null">
+      <q-btn-toggle
+        v-model="pane"
+        spread no-caps unelevated
+        :toggle-color="showMemo ? 'grey-7' : kindPalette"
+        class="kind-toggle"
+        :options="paneOptions"
+      />
+    </Teleport>
 
     <!-- 备忘和「支出/收入/转账」同一级：不随某一笔账走的事（水费隔月收、
          备用钥匙在哪）写在这儿。它不是一种账，所以选中时是中性灰，
@@ -716,15 +729,13 @@ function reset() {
    而且这份留白只属于表单那一面：备忘那面没有操作条，挂在 q-page 上
    会让它底下也白出一块 */
 .form-pane { padding-bottom: 70px; }
-/* 顶上这条钉住：往下翻分摊、翻备忘的时候，「我在记什么」和回表单的路
-   都得一直在。吸在顶栏下沿 —— --nagaya-header-h 是量出来的，刘海机上
-   含安全区，非刘海机上是 0。
-   **底色必须不透明**：这条里没选中的那几格本身是透明的，不铺底的话
-   滚过去的内容会从字底下透出来 */
+/* 这条画在顶栏里（见上面的 Teleport）。
+   **底色必须不透明**：里头没选中的那几格本身是透明的，不铺底的话
+   滚过去的内容会从字底下透出来。
+   宽屏上跟着页面收窄居中，和「未出账/已出账」那排页签一个规矩 */
 .kind-toggle {
-  position: sticky;
-  top: var(--nagaya-header-h);
-  z-index: 3;
+  max-width: var(--nagaya-max-w);
+  margin: 0 auto;
   background: var(--nagaya-bg);
   border-bottom: 1px solid rgba(0, 0, 0, 0.08);
 }
