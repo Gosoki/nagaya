@@ -122,7 +122,7 @@
         <div
           v-if="mine"
           class="mine q-mt-md"
-          :class="[mine.closing < 0 ? 'owe' : 'owed', { done: !bill.is_draft && myLeft === 0 }]"
+          :class="[minePart.tone, { done: !bill.is_draft && myLeft === 0 }]"
         >
           <div v-if="minePart.label" class="mine-label">{{ minePart.label }}</div>
           <div class="mine-figure num">{{ minePart.figure }}</div>
@@ -582,10 +582,22 @@ const mineText = computed(() => {
  * 最显眼那行字，拆成「标签 + 数字」两段。
  * 多笔要转时没法拆（是一串「给谁多少、给谁多少」），那就整句照旧，只是小一号。
  */
-const minePart = computed<{ label: string; figure: string }>(() => {
+/**
+ * 屏幕上最重要的那两行：一行标签，一行结论。
+ *
+ * **三档都必须有标签行。** 「已结清」那一档原来只有结论没有标签，于是这一块
+ * 比别的档矮 20px —— 在未出账和已出账之间来回切，下面整块跟着上下跳。
+ * tone 也在这儿定：结清了是中性色，不能沿用「欠钱」那个红。
+ */
+const minePart = computed<{ label: string; figure: string; tone: 'owe' | 'owed' | 'settled' }>(() => {
   const row = mine.value
   const b = bill.value
-  if (!row || !b) return { label: '', figure: '' }
+  const settled = {
+    label: t('bill.youSettledLabel'),
+    figure: t('bill.youSettled'),
+    tone: 'settled' as const,
+  }
+  if (!row || !b) return { label: '', figure: '', tone: 'settled' }
   const me = row.member_id
   const rows = b.transfers
     .map((tr, i) => ({ tr, left: leftOf(tr, i) }))
@@ -597,25 +609,28 @@ const minePart = computed<{ label: string; figure: string }>(() => {
     return {
       label: t('bill.youPayLabel', { to: nameOf(only.tr.to_id) }),
       figure: formatYen(only.left),
+      tone: 'owe',
     }
   }
   if (inc.length && !out.length) {
     return {
       label: t('bill.youReceiveLabel'),
       figure: formatYen(inc.reduce((n, x) => n + x.left, 0)),
+      tone: 'owed',
     }
   }
   if (!out.length && !inc.length && b.transfers.some((tr) => tr.from_id === me || tr.to_id === me)) {
-    return { label: '', figure: t('bill.youSettled') }
+    return settled
   }
   if (!b.transfers.some((tr) => tr.from_id === me || tr.to_id === me)) {
-    if (row.closing === 0) return { label: '', figure: t('bill.youSettled') }
+    if (row.closing === 0) return settled
     return {
       label: row.closing > 0 ? t('bill.youReceiveLabel') : t('bill.youOweLabel'),
       figure: formatYen(Math.abs(row.closing)),
+      tone: row.closing > 0 ? 'owed' : 'owe',
     }
   }
-  return { label: '', figure: mineText.value }
+  return { label: '', figure: mineText.value, tone: row.closing < 0 ? 'owe' : 'owed' }
 })
 
 /** 改完数据强制重取这一张。进页面用的是 ensure（缓存先上屏） */
@@ -940,6 +955,10 @@ function doCut() {
 }
 .mine.owe { color: var(--nagaya-neg); }
 .mine.owed { color: var(--nagaya-pos); }
+/* 结清了是中性色：红＝还欠着，绿＝还有人欠你，而这一档两样都不是 ——
+   「已结清」印成红的，等于用报警色说「没事了」 */
+.mine.settled { color: var(--nagaya-ink-2); }
+.mine.settled.done { text-decoration: none; }
 /* 结清了的那张：数字划掉。颜色留着 —— 还看得出当初是应收还是应付 */
 .mine.done { text-decoration: line-through; }
 

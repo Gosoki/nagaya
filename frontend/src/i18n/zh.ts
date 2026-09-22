@@ -82,7 +82,7 @@ export default {
     youPayList: '你要转：{list}',
     youOwe: '你应付 {amount}',
     youReceive: '你应收 {amount}',
-    youSettled: '你已结清',
+    youSettled: '已结清', youSettledLabel: '你这期',
     youPayLabel: '你要给 {to}',
     youReceiveLabel: '你应收',
     youOweLabel: '你应付',

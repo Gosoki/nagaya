@@ -82,7 +82,7 @@ export default {
     youPayList: '送金：{list}',
     youOwe: '支払い {amount}',
     youReceive: '受取 {amount}',
-    youSettled: '精算済み',
+    youSettled: '精算済み', youSettledLabel: '今期',
     youPayLabel: '{to} に支払う',
     youReceiveLabel: '受け取る',
     youOweLabel: '支払う',
