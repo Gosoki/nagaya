@@ -577,7 +577,6 @@ async function ensureCategory(): Promise<boolean> {
     const typed = await new Promise<string | null>((resolve) => {
       $q.dialog({
         title: t('entry.needLabel'),
-        message: t('entry.needLabelHint'),
         prompt: { model: '', type: 'text', maxlength: 40 },
         cancel: true,
       })
