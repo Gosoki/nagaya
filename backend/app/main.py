@@ -161,8 +161,27 @@ if DIST.is_dir():
         <title> 一并换掉：页签、历史记录、分享出去的链接标题都用它。
         """
         html = (DIST / "index.html").read_text(encoding="utf-8")
+        # **清单也得在 HTML 里就指对地方。** Safari 是在页面加载时读 manifest 的，
+        # 打包产物里指的是那份写死的静态清单（「長屋 nagaya」），等前端 JS 把
+        # link 改指到 /api 那份，名字早被读走了 —— 加到主屏于是永远叫長屋
+        html = html.replace(
+            'href="/manifest.webmanifest"',
+            'href="/api/appearance/manifest.webmanifest"',
+        )
         with Session(engine) as session:
             name = (settings_svc.get(session, "app_name") or "").strip()
+            version = int(settings_svc.get(session, "app_icon_version") or 0)
+        if version:
+            # 主屏图标 iOS 只认 apple-touch-icon（优先于清单里的 icons），
+            # 而这两行也是打包时写死的静态路径。带上版本号绕开手机的死缓存
+            html = html.replace(
+                'href="/icons/apple-touch-icon.png"',
+                f'href="/api/appearance/icon/180.png?v={version}"',
+            )
+            html = html.replace(
+                'href="/icons/favicon.png"',
+                f'href="/api/appearance/icon/32.png?v={version}"',
+            )
         if name:
             safe = escape(name)
             html = html.replace(
@@ -198,6 +217,11 @@ if DIST.is_dir():
             # 拿到一坨 HTML 去 JSON.parse，报出去的错完全指不到问题上
             # 这两处 404 是 HTTP 管道，不是给人看的话，所以不配错误码
             raise HTTPException(status.HTTP_404_NOT_FOUND, "no such API")
+
+        # index.html 不许走「原样吐文件」那一支：service worker 预缓存的就是它，
+        # 吐原件等于把写死的「長屋」和静态清单缓存进手机，之后怎么改都刷不出来
+        if full_path in ("index.html", "/index.html"):
+            return _index()
 
         candidate = (DIST / full_path).resolve()
         # resolve 之后再比对根目录，挡住 ../ 穿越
