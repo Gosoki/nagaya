@@ -4,9 +4,7 @@
   验收标准（SPEC §7.4）：常见场景 ≤ 3 次点击 + 1 次输入。
   金额 → 分类 → 保存，付款人和分摊默认折叠着，不展开也能存。
 
-  顶上那条有四格：支出 / 收入 / 转账 / 备忘。前三个产生一笔账，第四个不产生 ——
-  但站在这一屏上它们是同一个问题的四个答案：「我现在要往家里记点什么」。
-  所以选中备忘时是**中性灰**，不借用任何一种记账类型的颜色。
+  顶上那条四格（支出 / 收入 / 转账 / 备忘）由布局画在固定顶栏里，见 AddTabs.vue。
 -->
 <template>
   <q-page class="page">
@@ -16,28 +14,16 @@
       <q-btn dense flat round icon="arrow_back" @click="goBack" />
       <div class="col text-weight-medium">{{ t('entry.editTitle') }}</div>
     </div>
-    <!-- 位置和高度跟账单那页的页签一致，但选中的是**实心色块**不是下划线：
-         选错记账类型的代价比选错账单页签大得多，值得给更硬的提示 -->
-    <!--
-      这条搬进**顶栏**里画（Teleport），不留在页面里。
-
-      原来是 position: sticky 吸在顶栏下沿：Safari 标签页里好使，
-      装成主屏 app（standalone）之后就不吸了。而顶栏本身是 position: fixed，
-      两种模式下都钉得死，安全区也由它统一让 —— 与其跟 sticky 较劲，
-      不如让这条本来就是顶栏的一部分，和账单那两页的页签一个待遇。
-
-      改一笔已有的账时不搬：那一屏顶上站着「返回 + 这笔在哪张账单上」，
-      再挤一条进去就乱了。
-    -->
-    <Teleport to=".q-header" :disabled="editingId !== null">
-      <q-btn-toggle
-        v-model="pane"
-        spread no-caps unelevated
-        :toggle-color="showMemo ? 'grey-7' : kindPalette"
-        class="kind-toggle"
-        :options="paneOptions"
-      />
-    </Teleport>
+    <!-- 记新账时这条在固定顶栏里（布局画的，见 AddTabs）。改一笔已有的账时
+         顶栏不画它 —— 那一屏顶上站着返回条，类型就在这儿选，没有备忘那一格 -->
+    <q-btn-toggle
+      v-if="editingId !== null"
+      v-model="kind"
+      spread no-caps unelevated
+      :toggle-color="kindPalette"
+      class="kind-toggle"
+      :options="kindOptions"
+    />
 
     <!-- 备忘和「支出/收入/转账」同一级：不随某一笔账走的事（水费隔月收、
          备用钥匙在哪）写在这儿。它不是一种账，所以选中时是中性灰，
@@ -231,6 +217,17 @@
   </q-page>
 </template>
 
+<script lang="ts">
+/** 这次页面加载以来，记一笔是不是还没挂载过（＝冷启动落在这一屏） */
+let firstMount = true
+/** 触屏设备、而且是冷启动那一下。每次挂载问一次：问过就不再是冷启动了 */
+function coldTouchLaunch(): boolean {
+  const cold = firstMount
+  firstMount = false
+  return cold && window.matchMedia('(pointer: coarse)').matches
+}
+</script>
+
 <script setup lang="ts">
 import { useQuasar } from 'quasar'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
@@ -262,7 +259,8 @@ const ledger = useLedger()
 const memos = useMemos()
 const drafts = useDrafts()
 
-const kind = ref<EntryKind>('expense')
+/** 改一笔已有的账时，类型是那笔账自己的 —— 不能去动记新账那边存着的选择 */
+const editKind = ref<EntryKind>('expense')
 const amount = ref(0)
 const categoryId = ref<number | null>(null)
 const payerId = ref<number | null>(null)
@@ -274,27 +272,21 @@ const busy = ref(false)
 /** 路由带了 id ＝ 在改一笔已经记下的账（已出账的也算）。空 ＝ 记新的一笔 */
 const editingId = computed(() => (route.params.id ? Number(route.params.id) : null))
 /**
- * 「支出 / 收入 / 转账 / 备忘」这条的选中值。
- *
- * 前三个是记一笔账的类型，第四个不是账 —— 但站在这一屏上，它们是同一个问题的
- * 四个答案：「我现在要往家里记点什么」。所以并成一条，而不是再摞一排页签。
- *
- * **改一笔已有的账时没有备忘这一格**：那时候这条的意思是「这笔是什么类型」。
+ * 这一笔的类型。记新账时读写 store（顶栏那条 AddTabs 看的是同一份），
+ * 改已有的账时读写自己的 editKind。
  */
-const pane = computed({
-  get: () => (showMemo.value ? 'memo' : kind.value),
-  set: (v: string) => {
-    // 编辑模式没有第四格，也就不该去动另一屏的备忘状态
-    if (editingId.value === null) memos.addTab = v === 'memo' ? 'memo' : 'add'
-    if (v !== 'memo') kind.value = v as EntryKind
+const kind = computed<EntryKind>({
+  get: () => (editingId.value === null ? memos.addKind : editKind.value),
+  set: (v) => {
+    if (editingId.value === null) memos.addKind = v
+    else editKind.value = v
   },
 })
 const showMemo = computed(() => editingId.value === null && memos.addTab === 'memo')
-const paneOptions = computed(() => [
+const kindOptions = computed(() => [
   { label: t('kind.expense'), value: 'expense' },
   { label: t('kind.income'), value: 'income' },
   { label: t('kind.settlement'), value: 'settlement' },
-  ...(editingId.value === null ? [{ label: t('entries.tabMemo'), value: 'memo' }] : []),
 ])
 const version = ref(0)
 const billedLabel = ref<string | null>(null)
@@ -478,11 +470,13 @@ const selectedCategoryRule = computed(
 )
 
 /**
- * 「进这一屏，光标就在金额上」（D16）—— **所有设备一视同仁**。
+ * 「进这一屏，光标就在金额上」（D16）。
  *
- * 试过只在真键盘的设备上放（手机上 iOS 没有用户手势不会弹键盘，只剩一个
- * 闪着的插入符），但这一屏的默认动作就是输金额：光标在那儿，人一伸手点
- * 键盘就起来，比先找框再点少一步。插入符是这一步的代价，认了。
+ * **唯独触屏设备冷启动那一下不聚焦。** iOS 没有用户手势本来就不弹键盘，
+ * 这时聚焦换来的只是一个闪着的插入符 —— 而主屏 app 刚启动、视口还在往全屏
+ * 长的那几拍里去聚焦一个输入框，WebKit 会按「键盘要来了」重摆一次视口，
+ * 底栏就悬在半空（只有冷启动落在记一笔上才出现，落在账单上从来没有）。
+ * 从别的页点回来、记完一笔、从备忘翻回来，照旧聚焦。
  */
 function focusAmountIfTypable() {
   amountEl.value?.focus()
@@ -500,24 +494,16 @@ watch(showMemo, (hidden) => {
   })
 })
 
-// 底栏点了「记一笔」：类型拨回支出。记的绝大多数是支出，而上次那次转账
-// 不该一直挂在那儿等着人发现。改一笔已有的账时不管 —— 那时类型是这笔账自己的
-watch(
-  () => memos.addHome,
-  () => {
-    if (editingId.value === null) kind.value = 'expense'
-  },
-)
-
 onMounted(async () => {
+  const cold = coldTouchLaunch()
   if (editingId.value !== null) {
     await loadForEdit(editingId.value)
     return
   }
   payerId.value = meta.setting<number | null>('default_payer_id', null) ?? auth.me?.id ?? null
   // 「PWA 一打开就是记一笔，启动即光标就位」（router 里那条 D16）——
-  // 只在有真键盘的设备上放，理由见 focusAmountIfTypable
-  focusAmountIfTypable()
+  // 触屏设备冷启动那一下除外，理由见 focusAmountIfTypable
+  if (!cold) focusAmountIfTypable()
 })
 
 /** 正在编辑的那一笔的原样。删除要用它 —— ledger.remove 靠它决定刷哪几份缓存 */
@@ -527,7 +513,7 @@ async function loadForEdit(id: number) {
   try {
     const e = await api.get<Entry>(`/api/entries/${id}`)
     loaded.value = e
-    kind.value = e.kind
+    editKind.value = e.kind
     amount.value = Math.abs(e.amount_jpy)
     categoryId.value = e.category_id
     payerId.value = e.payer_id
@@ -740,23 +726,6 @@ function reset() {
 }
 /* 下边距一份都不用留：操作条已经画在底栏里，而 Quasar 会把底栏的总高
    （导航 + 操作条）算进 q-page-container 的 padding-bottom */
-/* 这条画在顶栏里（见上面的 Teleport）。
-   **底色必须不透明**：里头没选中的那几格本身是透明的，不铺底的话
-   滚过去的内容会从字底下透出来。
-   宽屏上跟着页面收窄居中，和「未出账/已出账」那排页签一个规矩 */
-.kind-toggle {
-  max-width: var(--nagaya-max-w);
-  margin: 0 auto;
-  background: var(--nagaya-bg);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-}
-/* 顶到屏幕边缘的东西不做圆角：首尾两段默认带 3px，贴着边看就是两个豁口。
-   高度对齐底部 Tab 那一栏（57px）—— 默认的 37px 上轻下重，不像个 app */
-.kind-toggle :deep(.q-btn) {
-  border-radius: 0;
-  min-height: var(--nagaya-head-h);
-  font-size: 16px;
-}
 .label { font-size: 14px; }
 
 .fields { border-top: 1px solid rgba(0, 0, 0, 0.06); }

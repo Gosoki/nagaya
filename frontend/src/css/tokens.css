@@ -100,6 +100,23 @@
 .bill-tabs .q-tabs__content { width: 100%; }
 .bill-tabs .q-tab { flex: 1 1 0; }
 
+/* 记一笔那条「支出/收入/转账/备忘」。记新账时画在顶栏里（AddTabs），
+   改一笔已有的账时画在页面里 —— 两处共用这一份。
+   **底色必须不透明**：没选中的那几格本身是透明的，不铺底的话滚过去的内容
+   会从字底下透出来。宽屏上跟着页面收窄居中，和上面那排页签一个规矩 */
+.kind-toggle {
+  max-width: var(--nagaya-max-w);
+  margin: 0 auto;
+  background: var(--nagaya-bg);
+  border-bottom: 1px solid var(--nagaya-line);
+}
+/* 顶到屏幕边缘的东西不做圆角：首尾两段默认带 3px，贴着边看就是两个豁口 */
+.kind-toggle .q-btn {
+  border-radius: 0;
+  min-height: var(--nagaya-head-h);
+  font-size: 16px;
+}
+
 /*
   **输入框一律 ≥16px。** iOS 的规矩：聚焦一个字号小于 16px 的输入框，
   Safari 会把整页放大一点点（然后停在那个放大位上）。Quasar 自己的

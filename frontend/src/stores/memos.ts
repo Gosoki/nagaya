@@ -15,7 +15,7 @@ import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 
 import { api } from 'src/api/client'
-import type { Memo } from 'src/api/types'
+import type { EntryKind, Memo } from 'src/api/types'
 
 export type EntriesTab = 'ledger' | 'settings'
 export type AddTab = 'add' | 'memo'
@@ -35,19 +35,21 @@ export const useMemos = defineStore('memos', () => {
   // 备忘在「记一笔」那屏。**不记进 sessionStorage**：记一笔是 PWA 的
   // 落地页，上次停在备忘上、下次打开就不是「打开即记账」了
   const addTab = ref<AddTab>('add')
+  /**
+   * 记新账时选的类型（支出/收入/转账）。和 addTab 一样放在这儿：顶上那条
+   * 由布局画在固定顶栏里（AddTabs），表单在页面里，两边得看同一份。
+   * 改一笔已有的账时不用它 —— 那时类型是那笔账自己的（见 AddEntryPage）
+   */
+  const addKind = ref<EntryKind>('expense')
 
   /**
-   * 「回记一笔那一屏」按了几次。底栏那一格点一下就 +1。
-   *
-   * **为什么要个计数器**：人已经站在这一屏上时，底栏那一下不会触发路由跳转，
-   * 组件也就不重建，上次选的「转账」会一直留着。而底栏那一格的意思是
-   * 「我要记一笔」，记的绝大多数是支出 —— 点一下就该回到支出。
-   * 页面盯着这个数，+1 就把类型拨回去。
+   * 底栏点了「记一笔」：回到这一屏的起点 —— 表单那一面、类型是支出。
+   * 人已经站在这一屏上时，底栏那一下不会触发路由跳转，上次选的「转账」
+   * 会一直留着；而底栏那一格的意思是「我要记一笔」，记的绝大多数是支出
    */
-  const addHome = ref(0)
   function goAddHome() {
     addTab.value = 'add'
-    addHome.value++
+    addKind.value = 'expense'
   }
   watch(tab, (v) => {
     try {
@@ -82,5 +84,5 @@ export const useMemos = defineStore('memos', () => {
     items.value = items.value.filter((m) => m.id !== id)
   }
 
-  return { tab, addTab, addHome, goAddHome, items, loaded, load, create, update, remove }
+  return { tab, addTab, addKind, goAddHome, items, loaded, load, create, update, remove }
 })

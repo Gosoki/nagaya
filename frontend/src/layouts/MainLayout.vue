@@ -22,6 +22,9 @@
         <div class="col ellipsis">{{ t('common.staleData') }}</div>
         <button class="stale-retry" type="button" @click="refetch">{{ t('common.retry') }}</button>
       </div>
+      <!-- 三个分区顶上那一条**都由布局在这儿画**，页面自己不往顶栏里塞东西 ——
+           原来记一笔那条是页面 Teleport 进来的，顶栏要等页面挂载那一拍才长高 -->
+      <AddTabs v-if="route.name === 'add'" />
       <BillTabs v-if="onBillTabs" />
       <EntriesTabs v-if="route.name === 'entries'" />
     </q-header>
@@ -85,6 +88,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { applyAppearance } from 'src/appearance'
 import { useOnline } from 'src/composables/online'
 import { useMemos } from 'src/stores/memos'
+import AddTabs from 'src/components/AddTabs.vue'
 import BillTabs from 'src/components/BillTabs.vue'
 import LayoutProbe from 'src/components/LayoutProbe.vue'
 import EntriesTabs from 'src/components/EntriesTabs.vue'
@@ -283,6 +287,10 @@ function onViewport() {
  * 画出一帧；位置本来就对的设备上，这是一次看不见的空操作。
  */
 function remeasure() {
+  // Quasar 的 $q.screen.height 只在 visualViewport 抛 resize 时才重读，
+  // 而冷启动时视口长到全屏那一下 iOS 不一定抛 —— 布局的 min-height 就按
+  // 网页那会儿的矮高度钉住了。替它抛一次，让它重读 innerHeight
+  window.visualViewport?.dispatchEvent(new Event('resize'))
   for (const el of [headEl.value?.$el, footEl.value?.$el]) {
     if (!el) continue
     el.style.position = 'absolute'
@@ -455,6 +463,14 @@ onBeforeUnmount(() => document.removeEventListener('visibilitychange', onVisible
 }
 /* 刘海屏/灵动岛：顶栏往下让出安全区 */
 .q-header { padding-top: env(safe-area-inset-top); }
+/*
+  **整个布局至少一屏高，由 CSS 说了算，不看 JS 量的数。**
+  QLayout 把 min-height 写成行内的 `$q.screen.height px`，那个数是启动时量的
+  innerHeight —— 主屏 app 冷启动时它还是网页那会儿的矮高度。记一笔那屏内容
+  不满一屏，文档就比屏幕矮一截，底栏跟着文档底边悬在半空；账单页内容长，
+  撑过了一屏，所以从来没事。100dvh 由 WebKit 自己按当前视口算
+*/
+.q-layout--standard { min-height: 100vh !important; min-height: 100dvh !important; }
 /*
   **聚焦时滚到哪儿为止。** iOS 弹键盘会把聚焦的框滚进可视区，默认一直滚到
   页面最顶 —— 那儿正是固定顶栏和状态栏，金额那个大数字被切掉一截。
