@@ -156,6 +156,7 @@ import { useI18n } from 'vue-i18n'
 
 import type { Member } from 'src/api/types'
 import MemberAvatar from 'src/components/MemberAvatar.vue'
+import { inkOn } from 'src/color'
 import { SplitError, split } from 'src/core/split'
 import { formatYen } from 'src/i18n'
 import { useMeta } from 'src/stores/meta'
@@ -396,20 +397,6 @@ const pctNum = (v: number) => (segTotal.value ? (v / segTotal.value) * 100 : 0)
 const pctOf = (v: number) => `${pctNum(v)}%`
 const colorOf = (id: number) => meta.byId[id]?.color ?? '#90a4ae'
 
-/**
- * 这块底色上该用白字还是黑字。
- *
- * 成员颜色是用户自己挑的，浅到 #ffd54f 也完全可能 —— 一律白字的话对比度
- * 掉到 1.5:1，拖动过程中根本看不清自己在动谁。按亮度挑一次，两边都够读。
- */
-function inkOn(hex: string): string {
-  const h = hex.replace('#', '')
-  const n = h.length === 3 ? h.split('').map((c) => c + c).join('') : h
-  const [r, g, b] = [0, 2, 4].map((i) => parseInt(n.slice(i, i + 2), 16) / 255)
-  const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
-  const L = 0.2126 * lin(r ?? 0) + 0.7152 * lin(g ?? 0) + 0.0722 * lin(b ?? 0)
-  return (L + 0.05) / 0.05 > 1.05 / (L + 0.05) ? '#1a1a1a' : '#ffffff'
-}
 
 const handles = computed(() => {
   const out: { i: number; left: string }[] = []

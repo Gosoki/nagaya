@@ -4,8 +4,20 @@
   <q-layout view="hHh lpR fFf">
     <!-- 顶栏固定在布局上，不放进页面里：账单三页之间切换时它不该跟着卸载重建，
          切页只换中间那块内容，上下两条都不动 -->
-    <q-header v-if="drafts.count || onBillTabs || route.name === 'entries'" class="bg-white text-dark">
+    <q-header
+      v-if="drafts.count || stale || onBillTabs || route.name === 'entries'"
+      class="bg-white text-dark"
+    >
       <DraftBanner v-if="drafts.count" />
+      <!-- **断网时屏幕上的数字是旧的，这件事必须说出来。**
+           账单页就是三个人掏手机转账前盯的那一屏；室友刚填了水费、刚点了
+           「确认已完成」，这边一无所知，照着旧数字转钱，转错了才发现。
+           一条细带子，不挡内容，但一眼看得见 -->
+      <div v-if="stale" class="stale-bar row items-center no-wrap">
+        <q-icon name="cloud_off" size="16px" class="q-mr-xs" />
+        <div class="col ellipsis">{{ t('common.staleData') }}</div>
+        <button class="stale-retry" type="button" @click="refetch">{{ t('common.retry') }}</button>
+      </div>
       <BillTabs v-if="onBillTabs" />
       <EntriesTabs v-if="route.name === 'entries'" />
     </q-header>
@@ -54,6 +66,7 @@ import { useI18n } from 'vue-i18n'
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import { useOnline } from 'src/composables/online'
 import BillTabs from 'src/components/BillTabs.vue'
 import EntriesTabs from 'src/components/EntriesTabs.vue'
 import DraftBanner from 'src/components/DraftBanner.vue'
@@ -115,6 +128,15 @@ async function boot() {
   }
 }
 
+const online = useOnline()
+/** 屏幕上的数字靠不靠得住：断网，或者最近一次取数失败了 */
+const stale = computed(() => !online.value || Boolean(bills.lastError))
+function refetch() {
+  bills.reload(bills.tab === 'draft' ? 'draft' : 'current').catch(() => {})
+  void meta.load().catch(() => {})
+  void ledger.refresh().catch(() => {})
+}
+
 onMounted(boot)
 </script>
 
@@ -149,6 +171,24 @@ onMounted(boot)
    块与块之间用 8px 的灰带断开 —— 1px 细线在手机上分不出「同一块里的两行」
    和「两块之间」，整页会糊成一长条 */
 .bill-section { border-bottom: 8px solid #f2f2f2; }
+/* 离线细带。颜色用 warning 一路：这不是错误，是「你看到的可能不是最新的」 */
+.stale-bar {
+  min-height: 32px;
+  padding: 4px 12px;
+  background: #fff4e0;
+  color: #8a5a00;
+  font-size: 12px;
+}
+.stale-retry {
+  border: none;
+  background: transparent;
+  color: #8a5a00;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: underline;
+  padding: 6px 4px;
+  cursor: pointer;
+}
 /* 每一块的标题条。未出账和已出账两页、四个块共用这一份，免得又各写各的。
    高度写死 44：只有「本期固定费」那条右边带着 16px 的合计，撑出 44 高，
    别的标题条只有 14px 的字、自然高度 41 —— 不钉死的话同一页上四条不齐 */

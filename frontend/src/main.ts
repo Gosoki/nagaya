@@ -4,6 +4,9 @@ import { createApp } from 'vue'
 
 import '@quasar/extras/material-icons/material-icons.css'
 import 'quasar/src/css/index.sass'
+// **必须排在 quasar 之后**：里面有几条覆盖 Quasar 灰阶工具类的规则，
+// 两边都带 !important，靠 import 顺序决胜
+import './css/tokens.css'
 
 import App from './App.vue'
 import { detectLang, i18n, quasarLang } from './i18n'

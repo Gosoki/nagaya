@@ -23,6 +23,30 @@
       </div>
     </div>
 
+    <!-- **慢网下别给整屏白。** 地铁里 3 秒一跳很常见，实测 6.2 秒纯白 ——
+         人会以为卡死了或者这家还没出过账，于是反复点页签，每点一次又重发一轮，
+         越点越慢。骨架按真实块高摆，数据到了内容是「填进去」而不是「砸出来」 -->
+    <div v-if="!bill && bills.pending" class="skel">
+      <div class="q-pa-md">
+        <q-skeleton type="text" width="45%" height="26px" />
+        <q-skeleton type="text" width="60%" height="16px" class="q-mt-xs" />
+        <q-skeleton type="text" width="35%" height="22px" class="q-mt-sm" />
+      </div>
+      <div class="bill-section q-px-md q-pb-md">
+        <q-skeleton type="text" width="30%" height="18px" class="q-mb-sm" />
+        <q-skeleton
+          v-for="n in 5"
+          :key="n"
+          type="rect"
+          :height="'var(--nagaya-fee-row-h)'"
+          class="q-mb-xs"
+        />
+      </div>
+      <div class="q-px-md q-py-md">
+        <q-skeleton v-for="n in 3" :key="n" type="rect" height="56px" class="q-mb-sm" />
+      </div>
+    </div>
+
     <!-- 用 v-if 而不是 v-else：上面那句多了个「还在加载」的条件，
          两个都不成立时（冷启动的头几十毫秒）这一页就该是干净的 -->
     <template v-if="bill">
@@ -66,8 +90,10 @@
           </button>
           <div v-else class="text-subtitle1 text-weight-medium">{{ t('bill.draft') }}</div>
           <q-space />
+          <!-- 「这一期一共花了多少」降级：它谁也不用去做什么。
+               真正要做的那件事（我要给谁多少）挪到下面用 28px 印 -->
           <div class="text-caption text-grey-6 q-mr-xs">{{ t('bill.total') }}</div>
-          <div class="text-h6">{{ formatYen(bill.total_expense) }}</div>
+          <div class="text-subtitle1 text-weight-medium num">{{ formatYen(bill.total_expense) }}</div>
         </div>
         <div class="row items-baseline text-caption text-grey-6">
           <div v-if="bill.covers_from">
@@ -90,12 +116,16 @@
              埋在半屏之下的话，他先看到的全是别人的录入框。
              **结清了就划掉**：钱早就转过了，一个亮着的「你应收 ¥84,106」
              会让人以为现在还欠着 -->
+        <!-- **一句话里也要分层。** 原来整句 17px 红字印成一行，人得读完
+             「你要给 Zen ¥53,047」才拿到那个数；而这是全屏第一重要的数字，
+             旁边「合计」反倒用了更大的字。现在标签归标签、数字归数字 -->
         <div
           v-if="mine"
-          class="mine q-mt-sm"
+          class="mine q-mt-md"
           :class="[mine.closing < 0 ? 'owe' : 'owed', { done: !bill.is_draft && myLeft === 0 }]"
         >
-          {{ mineText }}
+          <div v-if="minePart.label" class="mine-label">{{ minePart.label }}</div>
+          <div class="mine-figure num">{{ minePart.figure }}</div>
         </div>
 
         <!-- 不锁历史，但改动必须可见：否则下一张的「上期结转」没人解释得清。
@@ -180,12 +210,22 @@
         <q-item dense class="section-head">
           <q-item-section>{{ t('bill.perMember') }}</q-item-section>
         </q-item>
-        <q-list separator>
+        <!-- 「谁欠谁」原来只能靠读三行各 4 个灰数字算出来。
+             这条背景填充**不占一个新像素**（它在背景层），长度就是旁边已经
+             印出来的那个数，左边是要付、右边是要收，中轴贯穿三行 ——
+             于是「谁欠得最多」变成一眼看形状的事，而那 12 个数字一个不删 -->
+        <div class="axis-hint text-grey-6">
+          <span>{{ t('bill.axisPay') }}</span>
+          <span>{{ t('bill.axisReceive') }}</span>
+        </div>
+        <q-list separator class="axis-list">
         <q-item
           v-for="row in bill.members"
           :key="row.member_id"
+          class="axis-row"
           :class="{ 'bg-blue-1': row.member_id === auth.me?.id }"
         >
+          <div class="axis-fill" :style="fillStyle(row)" />
           <q-item-section avatar>
             <MemberAvatar :member-id="row.member_id" />
           </q-item-section>
@@ -374,10 +414,11 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 
 import { ApiError, api } from 'src/api/client'
-import type { Bill, BillTransfer, Entry, Statement } from 'src/api/types'
+import type { Bill, BillTransfer, Entry, Statement, BillRow } from 'src/api/types'
 import MemberAvatar from 'src/components/MemberAvatar.vue'
 import MonthlyFixed from 'src/components/MonthlyFixed.vue'
 import { todayJst } from 'src/date'
+import { tint } from 'src/color'
 import { formatYen } from 'src/i18n'
 import { useAuth } from 'src/stores/auth'
 import { type BillKey, useBills } from 'src/stores/bills'
@@ -538,6 +579,66 @@ const mineText = computed(() => {
   if (row.closing > 0) return t('bill.youReceive', { amount: formatYen(row.closing) })
   return t('bill.youOwe', { amount: formatYen(Math.abs(row.closing)) })
 })
+
+/**
+ * 最显眼那行字，拆成「标签 + 数字」两段。
+ * 多笔要转时没法拆（是一串「给谁多少、给谁多少」），那就整句照旧，只是小一号。
+ */
+const minePart = computed<{ label: string; figure: string }>(() => {
+  const row = mine.value
+  const b = bill.value
+  if (!row || !b) return { label: '', figure: '' }
+  const me = row.member_id
+  const rows = b.transfers
+    .map((tr, i) => ({ tr, left: leftOf(tr, i) }))
+    .filter((x) => (x.tr.from_id === me || x.tr.to_id === me) && x.left > 0)
+  const out = rows.filter((x) => x.tr.from_id === me)
+  const inc = rows.filter((x) => x.tr.to_id === me)
+  if (out.length === 1 && !inc.length) {
+    const only = out[0]!
+    return {
+      label: t('bill.youPayLabel', { to: nameOf(only.tr.to_id) }),
+      figure: formatYen(only.left),
+    }
+  }
+  if (inc.length && !out.length) {
+    return {
+      label: t('bill.youReceiveLabel'),
+      figure: formatYen(inc.reduce((n, x) => n + x.left, 0)),
+    }
+  }
+  if (!out.length && !inc.length && b.transfers.some((tr) => tr.from_id === me || tr.to_id === me)) {
+    return { label: '', figure: t('bill.youSettled') }
+  }
+  if (!b.transfers.some((tr) => tr.from_id === me || tr.to_id === me)) {
+    if (row.closing === 0) return { label: '', figure: t('bill.youSettled') }
+    return {
+      label: row.closing > 0 ? t('bill.youReceiveLabel') : t('bill.youOweLabel'),
+      figure: formatYen(Math.abs(row.closing)),
+    }
+  }
+  return { label: '', figure: mineText.value }
+})
+
+/**
+ * 每人那一行背景上那条发散填充。
+ *
+ * 长度按「和这一屏欠得最多的那个人比」算，不是按金额绝对值 —— 这一屏要回答的
+ * 是「谁欠得最多、差多少」，而不是「这些钱在全世界算多还是少」。
+ * 中轴固定在 50%：要付往左长，要收往右长，三行共用同一条轴才比得出来。
+ */
+const maxAbs = computed(() =>
+  Math.max(1, ...(bill.value?.members ?? []).map((r) => Math.abs(r.closing))),
+)
+function fillStyle(row: BillRow): Record<string, string> {
+  const w = `${(Math.abs(row.closing) / maxAbs.value) * 50}%`
+  // 用**这个人自己的颜色**：头像、分配条、账单每人行三处同一个色，
+  // 「这条是谁的」不用再回头看左边那个圆点
+  const bg = tint(meta.byId[row.member_id]?.color ?? '#90a4ae', 0.32)
+  return row.closing < 0
+    ? { right: '50%', width: w, background: bg }
+    : { left: '50%', width: w, background: bg }
+}
 
 /** 改完数据强制重取这一张。进页面用的是 ensure（缓存先上屏） */
 const load = () => bills.reload(viewKey.value)
@@ -831,11 +932,54 @@ function doCut() {
   font-variant-numeric: tabular-nums;
 }
 /* 自己那笔：这一屏最该一眼看到的东西 */
-.mine { font-size: 17px; font-weight: 600; }
-.mine.owe { color: #c10015; }
-.mine.owed { color: #21ba45; }
+.mine { font-weight: 600; }
+.mine-label {
+  font-size: var(--nagaya-fs-label);
+  font-weight: 400;
+  color: var(--nagaya-ink-2);
+}
+.mine-figure {
+  font-size: var(--nagaya-fs-figure);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+.mine.owe { color: var(--nagaya-neg); }
+.mine.owed { color: var(--nagaya-pos); }
 /* 结清了的那张：数字划掉。颜色留着 —— 还看得出当初是应收还是应付 */
 .mine.done { text-decoration: line-through; }
+
+/* ---------------------------------------------------- 每人那块的发散条 */
+.axis-hint {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 16px 4px;
+  font-size: 11px;
+}
+.axis-list { position: relative; }
+/* 贯穿三行的零轴。画在列表上而不是每行上，三行才是同一条线 */
+.axis-list::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: var(--nagaya-line-2);
+  pointer-events: none;
+}
+.axis-row { position: relative; overflow: hidden; }
+/* **一条细横杠，不是一块底色。** 铺满整行高的填充会被读成「这一行被选中了」
+   或者「进度 70%」；压成 6px 贴在行底、配上贯穿三行的那条中轴，
+   它就只能被读成一张图：左边是要付，右边是要收，谁长谁欠得多 */
+.axis-fill {
+  position: absolute;
+  bottom: 6px;
+  height: 6px;
+  border-radius: 3px;
+  pointer-events: none;
+}
+/* 内容得压在填充之上 */
+.axis-row > .q-item__section { position: relative; }
 
 /* 主操作条：压在底部 Tab 之上 */
 .actions :deep(.q-btn) { min-height: 44px; }

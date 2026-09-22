@@ -73,10 +73,10 @@
         type="button"
         :aria-pressed="categoryId === c.id"
         :class="{ on: categoryId === c.id }"
-        :style="categoryId === c.id ? { background: c.color } : {}"
+        :style="catStyle(c)"
         @click="pickCategory(c.id)"
       >
-        <q-icon :name="c.icon" size="22px" :color="categoryId === c.id ? 'white' : undefined" />
+        <q-icon :name="c.icon" size="22px" :style="{ color: catIcon(c) }" />
         <span>{{ c.name }}</span>
       </button>
     </div>
@@ -158,6 +158,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
 import { ApiError, api } from 'src/api/client'
+import { inkOn, tint } from 'src/color'
 import { jstDateOf, todayJst } from 'src/date'
 import { formatYen } from 'src/i18n'
 import type { Entry, EntryKind } from 'src/api/types'
@@ -205,6 +206,22 @@ const loadedKind = ref<EntryKind | null>(null)
 const rule = ref<Record<string, unknown> | null>(null)
 const splitValid = ref(true)
 const splitDiff = ref(0)
+/**
+ * 分类格子的配色。
+ *
+ * 未选中给**它自己颜色的淡底**，不是灰底也不是全透明：
+ *   * 全透明（原来那样）＝ 看不出能点。三个方向的评审、以及照着任务走一遍的
+ *     那一路，全都在这儿卡住过 —— 屏幕上那就是三行说明文字。
+ *   * 灰底 ＝ 一排空盒子（这也是原来那条注释拒绝铺底的理由，它没说错）。
+ * 淡底既说得出是哪一类，又看得出能点，而且和选中态是同一形状的两级。
+ */
+type Swatch = { id: number; color: string }
+const catStyle = (c: Swatch) =>
+  categoryId.value === c.id
+    ? { background: c.color, color: inkOn(c.color) }
+    : { background: tint(c.color) }
+const catIcon = (c: Swatch) => (categoryId.value === c.id ? inkOn(c.color) : c.color)
+
 const amountEl = ref<InstanceType<typeof AmountInput> | null>(null)
 const splitEl = ref<InstanceType<typeof SplitEditor> | null>(null)
 
@@ -310,6 +327,10 @@ onMounted(async () => {
     return
   }
   payerId.value = meta.setting<number | null>('default_payer_id', null) ?? auth.me?.id ?? null
+  // 「PWA 一打开就是记一笔，启动即光标就位」（router 里那条 D16）——
+  // 这句规矩一直写在注释里，但从来没落地过：focus() 只在保存后的 reset 里调过。
+  // iOS 上没有用户手势时不会真的弹键盘，所以这一下只是把光标放好，不挡屏幕
+  amountEl.value?.focus()
 })
 
 /** 正在编辑的那一笔的原样。删除要用它 —— ledger.remove 靠它决定刷哪几份缓存 */
@@ -571,17 +592,17 @@ function reset() {
   justify-content: center;
   gap: 4px;
   min-height: 64px;                      /* 大色块，一点即中，不用瞄 */
-  /* 这一排不描边也不铺底：未选中就是干干净净的图标+名字，
-     选中的那块是实心分类色 —— 对比已经足够强，再加个灰底反而像三个空盒子 */
+  /* 底色由 catStyle() 按分类色算：未选中是它自己的淡底，选中是实心。
+     不铺**灰**底那条老规矩仍然成立（一排灰盒子确实难看），但「什么都不铺」
+     的代价更大 —— 未选中的格子看不出能点 */
   border: none;
-  border-radius: 10px;
-  background: transparent;
-  color: #444;
-  font-size: 12px;
+  border-radius: var(--nagaya-r-md);
+  color: var(--nagaya-ink);
+  font-size: var(--nagaya-fs-meta);
   cursor: pointer;
   transition: background 0.12s, color 0.12s;
 }
-.cat.on { color: #fff; }
+/* 选中态的字色由 catStyle() 给（深色分类配白字、浅色配黑字） */
 
 
 .actions :deep(.q-btn) { min-height: 44px; }
