@@ -89,10 +89,10 @@ async function deleteLatestEntry(page: import('@playwright/test').Page) {
  * 真机 iOS 上输入框会弹出数字键盘挡半屏，为一个只在 0/1 之间变的值不值当。
  */
 async function setWeight(page: import('@playwright/test').Page, index: number, value: number) {
-  await page.locator('.weight-pill').nth(index).click()
-  await page.locator('.roller .tick').filter({ hasText: String(value) }).first().click()
-  // 等弹层真的关掉再往下走：它的遮罩会吃掉下一次点击，而报错跟「找不到元素」长得一样
-  await expect(page.locator('.roller')).toHaveCount(0)
+  // 比例就在行内那个小轮子上拨，没有弹层了。点一下那一格等于拨到它
+  const wheel = page.locator('.wheel').nth(index)
+  await wheel.locator('.tick').filter({ hasText: String(value) }).first().click()
+  await expect(wheel).toHaveAttribute('aria-valuenow', String(value))
 }
 
 /**
@@ -201,7 +201,7 @@ test('权重全填 0：把缺口报出来，而且存不了', async ({ page }) =
 
   // 比例模式几乎永远自动配平 —— 调整额再怎么填都会从基数里扣回来。
   // 唯一的例外就是所有人权重都 0：这笔钱没人担，整笔悬空，必须当场说清缺多少
-  const n = await page.locator('.weight-pill').count()
+  const n = await page.locator('.wheel').count()
   for (let i = 0; i < n; i++) await setWeight(page, i, 0)
   // 比例那一列不许再有输入框：有的话手机上就会弹数字键盘
   await expect(page.locator('.weight-col input')).toHaveCount(0)
@@ -1356,8 +1356,11 @@ test('点头像把人排除出这笔，再点恢复（原来是几就还回几�
   await page.locator('input.amount').fill('9000')
   await page.getByRole('button', { name: '日用品' }).click()
 
+  // 轮子上十个数字都在 DOM 里，读 textContent 没意义 —— 读它报出来的当前值
   const weights = () =>
-    page.locator('.weight-pill').allTextContents().then((t) => t.map((x) => x.trim()).join('/'))
+    page.locator('.wheel').evaluateAll((els) =>
+      els.map((e) => e.getAttribute('aria-valuenow')).join('/'),
+    )
   const shares = () =>
     page.locator('.member-row .share-col').allTextContents()
       .then((t) => t.map((x) => Number(x.replace(/[^\d]/g, ''))))
@@ -1371,8 +1374,7 @@ test('点头像把人排除出这笔，再点恢复（原来是几就还回几�
   expect(await weights(), '再点一下恢复').toBe('1/1/1')
 
   // 原来不是 1 的人，恢复时要还回原来那个数，不能一律变成 1
-  await page.locator('.weight-pill').first().click()
-  await page.locator('.roller .tick').filter({ hasText: '2' }).first().click()
+  await setWeight(page, 0, 2)
   expect(await weights()).toBe('2/1/1')
   await page.locator('.name-col').first().click()
   expect(await weights()).toBe('0/1/1')

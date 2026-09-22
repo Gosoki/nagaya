@@ -49,43 +49,41 @@
         </div>
       </button>
 
-      <!-- 比例不用输入框：真机 iOS 上 type=number 没有上下箭头，
-           改个 0/1 得弹出数字键盘挡半屏。点一下直接选，全程不碰键盘 -->
+      <!--
+        比例就在**原地左右拨**，不弹层。
+
+        弹层的毛病是「盖住了你正在看的那一行」：拨的是比例，而要盯的是右边
+        那个应担数字 —— 一个浮层正好压在它们中间。行内轮子拨的时候三行应担
+        当场跟着变，看得见因果。
+
+        不用输入框：真机 iOS 上 type=number 没有上下箭头，改个 0/1 得弹出
+        数字键盘挡半屏。这样全程不碰键盘。
+      -->
       <div class="weight-col">
-        <button class="weight-pill" type="button" :class="{ off: weightOf(m.id) === 0 }">
-          <!-- 那个小三角用 CSS 画（见 .weight-pill::after），不用 q-icon：
-               material-icons 是**连字字体**，图标名会实打实留在 textContent 里 ——
-               药丸的文字就成了「1arrow_drop_down」，读屏会照着念出来 -->
-          {{ weightOf(m.id) }}
-          <!-- 左右拨的滚轮：像调时间那样，按住往两边推，数字从中间那道框下面
-               滑过去，拨到哪个就是哪个。原来是一排按钮 —— 四个还摆得下，
-               可它天生装不了更多，而「谁算两个人」这种事偶尔真会用到 4、5。
-               滚轮不用扫视，推过去就行，多几档也不挑花眼 -->
-          <q-popup-proxy cover transition-show="jump-down" @show="onRollerShow(m.id)">
-            <div class="roller">
-              <div
-                :ref="(el) => setTrack(m.id, el)"
-                class="roller-track"
-                @scroll="onRoll(m.id, $event)"
-              >
-                <button
-                  v-for="n in WEIGHT_CHOICES"
-                  :key="n"
-                  v-close-popup
-                  type="button"
-                  class="tick"
-                  :class="{ on: weightOf(m.id) === n }"
-                  @click="setWeight(m.id, n)"
-                >
-                  {{ n }}
-                </button>
-              </div>
-              <!-- 中间那道框。拨过去的数字停在它下面 —— 没有它就看不出
-                   「哪个算数」，滚轮会退化成一条可以乱滚的数字带 -->
-              <div class="roller-mark" aria-hidden="true" />
-            </div>
-          </q-popup-proxy>
-        </button>
+        <!-- 中间那个凹槽。它标的是「哪一格算数」，画在轮子底下 -->
+        <div class="wheel-slot" aria-hidden="true" />
+        <div
+          :ref="(el) => setTrack(m.id, el)"
+          class="wheel"
+          :class="{ off: weightOf(m.id) === 0 }"
+          role="spinbutton"
+          :aria-label="m.display_name"
+          :aria-valuenow="weightOf(m.id)"
+          :aria-valuemin="WEIGHT_CHOICES[0]"
+          :aria-valuemax="WEIGHT_CHOICES[WEIGHT_CHOICES.length - 1]"
+          @scroll="onRoll(m.id, $event)"
+        >
+          <button
+            v-for="n in WEIGHT_CHOICES"
+            :key="n"
+            type="button"
+            class="tick"
+            :class="{ on: weightOf(m.id) === n }"
+            @click="setWeight(m.id, n)"
+          >
+            {{ n }}
+          </button>
+        </div>
       </div>
         <div class="adj-col">
           <input
@@ -347,24 +345,40 @@ watch(
  * 某人长住某人偶尔来，这些都可能落在 4、5 上。
  */
 const WEIGHT_CHOICES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-/** 一格多宽。**必须和样式里的 .tick 一致** —— 滚到第几格是拿它除出来的 */
-const TICK_W = 56
+/** 一格多宽。**必须和样式里的 .tick 一致** —— 停在第几格是拿它除出来的 */
+const TICK_W = 36
 
-/** 每一行自己的滚轮轨道。行会重建（成员变动），所以用函数式 ref 存 */
+/** 每一行自己的轮子。行会重建（成员变动），所以用函数式 ref 存 */
 const tracks = new Map<number, HTMLElement>()
 function setTrack(id: number, el: unknown) {
-  if (el instanceof HTMLElement) tracks.set(id, el)
-  else tracks.delete(id)
+  if (el instanceof HTMLElement) {
+    tracks.set(id, el)
+    syncWheels()          // 新挂上来的那一行也要对到当前值
+  } else {
+    tracks.delete(id)
+  }
 }
 
-/** 打开时先把当前值滚到中间 —— 拨轮当然要从「你现在是几」开始拨 */
-function onRollerShow(id: number) {
+/**
+ * 把轮子对到当前值上。
+ *
+ * 不只是首屏：`toggleOut`（点头像＝不参与）、换分类重置、参与人变动，
+ * 都会从外面改掉这个值 —— 轮子不跟着走的话，屏幕上那一格显示的就是旧数。
+ *
+ * 和 onRoll 不会打架：只有「轮子停的位置」和「当前值」对不上时才写 scrollLeft，
+ * 而 onRoll 也只有在对不上时才改值，两边各自收敛。
+ */
+function syncWheels() {
   void nextTick(() => {
-    const el = tracks.get(id)
-    if (!el) return
-    el.scrollLeft = Math.max(0, WEIGHT_CHOICES.indexOf(weightOf(id))) * TICK_W
+    for (const m of props.members) {
+      const el = tracks.get(m.id)
+      if (!el) continue
+      const want = Math.max(0, WEIGHT_CHOICES.indexOf(weightOf(m.id)))
+      if (Math.round(el.scrollLeft / TICK_W) !== want) el.scrollLeft = want * TICK_W
+    }
   })
 }
+watch([weights, () => props.members.length], syncWheels, { immediate: true, deep: true })
 
 /** 拨到哪一格就是哪一格，松手之前也一路跟着变（和调时间一个手感） */
 function onRoll(id: number, e: Event) {
@@ -441,7 +455,7 @@ defineExpose({
 .head-row,
 .member-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) 56px minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 108px minmax(0, 0.9fr) minmax(0, 1fr);
   align-items: center;
   column-gap: 6px;
 }
@@ -479,87 +493,62 @@ defineExpose({
 }
 /* 数字框本身要够高：44px 说的是**可点区域**，输入框太矮拇指点不准 */
 /* 比例那颗药丸：44px 是可点区域的底线，拇指点得准 */
-.weight-col { display: flex; justify-content: center; }
-/* 药丸只占 48px 宽（44 高仍然够拇指点）。撑满整列的话是个大盒子，
-   右边又紧贴着调整的下划线，两种输入样式挤在一起看着就乱 */
-.weight-pill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 54px;
-  min-height: 44px;                    /* 拇指的底线 */
+.weight-col { position: relative; display: flex; justify-content: center; }
+/* 行内的小轮子。窗口 108px ＝ 三格：中间那格算数，两边各露一格说明「还有」 */
+.wheel {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  width: 108px;
+  height: 44px;                 /* 拇指的底线 */
+  overflow-x: auto;
+  /* 一格一停。没有 snap 它会停在两格之间，「到底算几」就说不清了 */
+  scroll-snap-type: x mandatory;
+  /* 首尾两格也要停得到中间：(108 − 36) / 2 */
+  padding: 0 36px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  /* **只接管横向手势**。不写的话手指在这一格上竖着划，页面不动，
+     人会以为卡住了 —— 而这一格正好在屏幕中间，最容易被当成滚动区 */
+  touch-action: pan-x;
+  /* 两端渐隐，看着是个轮子而不是被裁断的数字带 */
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 30%, #000 70%, transparent);
+  mask-image: linear-gradient(to right, transparent, #000 30%, #000 70%, transparent);
+}
+.wheel::-webkit-scrollbar { display: none; }
+.tick {
+  /* **flex-shrink 必须是 0**：默认会被压扁成一格 3px，整条轮子就不滚了 */
+  flex: 0 0 36px;
+  width: 36px;
+  height: 44px;
+  padding: 0;
+  scroll-snap-align: center;
   border: none;
-  border-radius: var(--nagaya-r-sm);
-  background: var(--nagaya-fill);
-  color: var(--nagaya-ink);
+  background: transparent;
+  color: var(--nagaya-ink-4);
   font-size: 16px;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
-/* 小三角。没有它，这颗灰底药丸和旁边「调整」那个输入框长得太像，
-   看上去像个填不进去的框，而它其实点一下就弹出 0/1/2/3 */
-.weight-pill::after {
-  content: '';
-  margin-left: 5px;
-  border: 4px solid transparent;
-  border-top-color: var(--nagaya-ink-3);
-  transform: translateY(2px);
-}
-.weight-pill.off {
-  background: transparent;
-  box-shadow: inset 0 0 0 1px var(--nagaya-line);
-  color: var(--nagaya-ink-4);
-}
-/* 滚轮。宽度写死 4 格：中间那格是当前值，两边各留一格半当「还有」的暗示 */
-.roller {
-  position: relative;
-  width: 224px;                 /* 4 × 56 */
-  padding: 6px 0;
-  /* 自己带底。q-popup-proxy 的浮层是透明的，不铺底的话数字会和底下那行
-     表头叠在一起，看着像渲染坏了 */
-  background: var(--nagaya-bg);
-  border-radius: var(--nagaya-r-md);
-  box-shadow: 0 2px 8px rgba(22, 24, 29, 0.12), 0 10px 28px rgba(22, 24, 29, 0.1);
-}
-.roller-track {
-  display: flex;
-  overflow-x: auto;
-  /* 一格一停。没有 snap 的话它会停在两格之间，「到底算几」就说不清了 */
-  scroll-snap-type: x mandatory;
-  /* 首尾两格也要滚得到中间：(224 − 56) / 2 */
-  padding: 0 84px;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
-  /* 两端渐隐。硬切出来像一条被裁断的数字带，淡出去才像个轮子 ——
-     而且它顺带说明了「两边还有」 */
-  -webkit-mask-image: linear-gradient(to right, transparent, #000 22%, #000 78%, transparent);
-  mask-image: linear-gradient(to right, transparent, #000 22%, #000 78%, transparent);
-}
-.roller-track::-webkit-scrollbar { display: none; }
-.tick {
-  flex: 0 0 56px;
-  height: 56px;
-  scroll-snap-align: center;
-  border: none;
-  background: transparent;
-  color: var(--nagaya-ink-3);
-  font-size: 20px;
-  font-variant-numeric: tabular-nums;
-  cursor: pointer;
-}
 .tick.on { color: var(--nagaya-ink); font-weight: 600; }
-.roller-mark {
+/* 凹槽：中间那一格的底。轮子是透明的，它从底下透出来 */
+.wheel-slot {
   position: absolute;
-  top: 6px;
-  bottom: 6px;
+  top: 0;
   left: 50%;
-  width: 56px;
-  margin-left: -28px;
+  width: 36px;
+  height: 44px;
+  margin-left: -18px;
   border-radius: var(--nagaya-r-sm);
-  background: var(--nagaya-accent-bg);
-  box-shadow: inset 0 0 0 1.5px var(--nagaya-accent);
+  background: var(--nagaya-fill);
   pointer-events: none;
 }
+/* 不参与那一行：凹槽收成一圈细线，别让一个空槽看着像还填着东西 */
+.member-row.out .wheel-slot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--nagaya-line);
+}
+
 .weight-input::-webkit-outer-spin-button,
 .weight-input::-webkit-inner-spin-button {
   opacity: 1;                 /* 桌面上把上下箭头显出来，手机上本来就没有 */
