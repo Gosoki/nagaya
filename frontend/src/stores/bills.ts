@@ -78,6 +78,16 @@ export const useBills = defineStore('bills', () => {
    * 强制重取时旧的那一发照样会回来，回来之后不许再往缓存里写。
    */
   const seq = new Map<string, number>()
+  /**
+   * 全局单调递增的票号，和「每份缓存最后是被哪一票写的」。
+   *
+   * 光有 seq 盖不住一个口子：`'current'` 和 `'st:N'` 是**两个槽**，写的却是
+   * 同一份缓存。改完数据 reload('st:N') 之后，一个在改动之前就发出去的
+   * `'current'` 回来照样会把旧数据盖上 —— 正是 seq 本来要防的那件事，
+   * 只是跨了槽。票号是全局的，所以跨槽也认得出谁更旧。
+   */
+  let ticket = 0
+  const written = new Map<string, number>()
 
   /**
    * 路由 key → 缓存 key。
@@ -124,6 +134,9 @@ export const useBills = defineStore('bills', () => {
     // 我不是这个槽位上最新的那一发了 —— 别把旧数据盖回去。
     // 少了这一句，reload 发出的新请求先回、写对了，随后旧的那发才回来又盖成旧值
     if (seq.get(slot) !== my) return
+    // 这份缓存已经被一张更新的票写过了（多半来自另一个槽）—— 同样不许盖
+    if ((written.get(ck) ?? 0) > my) return
+    written.set(ck, my)
     views.value = { ...views.value, [ck]: { bill, entries } }
   }
 
@@ -143,7 +156,7 @@ export const useBills = defineStore('bills', () => {
     // 写进缓存之后就再也没有人纠正了 —— 连填五项固定费时，最后一项的钱
     // 会从账单合计里永久少掉，而那份数字正是要复制进群里的
     if (already && !force) return already
-    const my = (seq.get(slot) ?? 0) + 1
+    const my = (ticket += 1)
     seq.set(slot, my)
     pending.value += 1
     const task = fetchView(key, slot, my).finally(() => {
@@ -196,6 +209,7 @@ export const useBills = defineStore('bills', () => {
    */
   function invalidate(): void {
     views.value = {}
+    written.clear()          // 缓存都丢了，「谁写过它」的记录也跟着作废
     monthly.value = {}
     statements.value = null
     detail.value = null
