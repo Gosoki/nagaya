@@ -159,7 +159,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
 import { ApiError, api } from 'src/api/client'
-import { inkOn, tint } from 'src/color'
+import { inkOn } from 'src/color'
 import { jstDateOf, todayJst } from 'src/date'
 import { formatYen } from 'src/i18n'
 import type { Entry, EntryKind } from 'src/api/types'
@@ -210,17 +210,14 @@ const splitDiff = ref(0)
 /**
  * 分类格子的配色。
  *
- * 未选中给**它自己颜色的淡底**，不是灰底也不是全透明：
- *   * 全透明（原来那样）＝ 看不出能点。三个方向的评审、以及照着任务走一遍的
- *     那一路，全都在这儿卡住过 —— 屏幕上那就是三行说明文字。
- *   * 灰底 ＝ 一排空盒子（这也是原来那条注释拒绝铺底的理由，它没说错）。
- * 淡底既说得出是哪一类，又看得出能点，而且和选中态是同一形状的两级。
+ * **未选中不铺底**（你定的）：这一排就是干干净净的图标 + 名字，选中的那块
+ * 才是实心分类色 —— 两态落差本身就够强。
+ * 图标保留分类色：不占面积，但「哪一格是哪一类」一眼认得出，
+ * 不至于退回一排全黑的图标。
  */
 type Swatch = { id: number; color: string }
 const catStyle = (c: Swatch) =>
-  categoryId.value === c.id
-    ? { background: c.color, color: inkOn(c.color) }
-    : { background: tint(c.color) }
+  categoryId.value === c.id ? { background: c.color, color: inkOn(c.color) } : {}
 const catIcon = (c: Swatch) => (categoryId.value === c.id ? inkOn(c.color) : c.color)
 
 const amountEl = ref<InstanceType<typeof AmountInput> | null>(null)
@@ -593,10 +590,10 @@ function reset() {
   justify-content: center;
   gap: 4px;
   min-height: 64px;                      /* 大色块，一点即中，不用瞄 */
-  /* 底色由 catStyle() 按分类色算：未选中是它自己的淡底，选中是实心。
-     不铺**灰**底那条老规矩仍然成立（一排灰盒子确实难看），但「什么都不铺」
-     的代价更大 —— 未选中的格子看不出能点 */
+  /* 底色只有选中那一格有（由 catStyle() 给实心分类色）。
+     未选中既不描边也不铺底 —— 一排灰盒子难看，淡底也不要 */
   border: none;
+  background: transparent;
   border-radius: var(--nagaya-r-md);
   color: var(--nagaya-ink);
   font-size: var(--nagaya-fs-meta);
