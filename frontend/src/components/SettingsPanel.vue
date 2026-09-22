@@ -10,7 +10,6 @@
     <ProfileCard />
     <AppearanceCard />
     <FixedCostSettings />
-    <BackupCard />
     <!-- 系统设置默认收起来：这些是「定一次就不再动」的规矩，
          而这一页天天要来的是上面的个人设置。摊开着只会把它挤到屏幕外 -->
     <div class="bill-section">
@@ -154,6 +153,9 @@
         </q-item>
       </q-list>
     </div>
+
+    <!-- 备份放最后：它是「设一次就不再动」的东西，天天要来的是上面几块 -->
+    <BackupCard />
   </div>
 </template>
 

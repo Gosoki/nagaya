@@ -15,7 +15,7 @@ export default {
   kind: { expense: '支出', income: '収入', settlement: '精算' },
   entry: {
     payer: '支払者', receiver: '受取者',
-    to: '送金先', title: 'メモ（任意）',
+    to: '送金先', title: '備考（任意）',
     saved: '記帳しました',
     splitEven: '均等', splitEvenAmong: '{names} で均等',
     record: '記帳する', save: '保存',

@@ -551,6 +551,15 @@ defineExpose({
     touched.value = false
     resetWeights()
   },
+  /**
+   * 轮子重新对准当前比例。
+   *
+   * **给「挂载时整棵树是 display:none」那条路用的**：那种时候元素没有滚动盒，
+   * 写 scrollLeft 会被浏览器静默丢掉，等显示出来轮子停在第一格（写着 0），
+   * 而右边的应担仍是正常三等分 —— 屏幕上两个数字互相打脸。
+   * 之后既不改比例也不增减人，那个 watch 不会再响，只能由父组件补这一刀。
+   */
+  sync: syncWheels,
 })
 </script>
 

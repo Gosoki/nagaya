@@ -4,8 +4,7 @@
      要删就点进那一笔，编辑页上有删除按钮（带确认）。 -->
 <template>
   <q-page class="q-pb-xl">
-    <MemoPanel v-if="memos.tab === 'memo'" />
-    <SettingsPanel v-else-if="memos.tab === 'settings'" />
+    <SettingsPanel v-if="memos.tab === 'settings'" />
     <template v-else>
     <!-- 筛选条吸顶：列表很长，翻到一半想换个筛法不该先滚回去 -->
     <div class="filter-bar row items-center no-wrap q-gutter-xs q-px-md q-py-sm">
@@ -110,7 +109,6 @@ import type { Entry, EntryKind, Statement } from 'src/api/types'
 import { jstDateOf } from 'src/date'
 import { formatYen } from 'src/i18n'
 import { FALLBACK } from 'src/palette'
-import MemoPanel from 'src/components/MemoPanel.vue'
 import SettingsPanel from 'src/components/SettingsPanel.vue'
 import { useLedger } from 'src/stores/ledger'
 import { useMemos } from 'src/stores/memos'
@@ -131,7 +129,7 @@ const route = useRoute()
 onMounted(async () => {
   // 带着 ?category= 进来的（固定费面板上「本期有 N 笔」点进来）：直接筛好。
   // **页签也要拨回流水**：这一屏显示哪块由 memos.tab 决定，而它记在 sessionStorage 里 ——
-  // 只要这次会话去过「更多 → 备忘/设置」，这个链接就把人送到备忘面板上，
+  // 只要这次会话去过「更多 → 设置」，这个链接就把人送到设置面板上，
   // 一笔账都看不到。而固定费项目的增删改就在设置那一屏，停在 settings 是常态
   const wanted = Number(route.query.category)
   if (wanted) {

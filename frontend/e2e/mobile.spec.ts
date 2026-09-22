@@ -103,9 +103,16 @@ async function setWeight(page: import('@playwright/test').Page, index: number, v
  * 入口在「更多 → 设置」里，不在账单那页的面板上 —— 面板只管这一期填多少钱，
  * 有哪几项是配置，两件事分开。
  */
+/** 固定费项目默认收起来（设置页天天要来的是上面几块），点开它 */
+async function openFixedCosts(page: import('@playwright/test').Page) {
+  await page.locator('.bill-section').filter({ hasText: '固定费项目' }).locator('.section-head').click()
+  await expect(page.locator('.add-row .new-name')).toBeVisible()
+}
+
 async function addFixedCost(page: import('@playwright/test').Page, name: string) {
   await page.goto('/entries')
   await page.getByRole('tab', { name: '设置' }).click()
+  await openFixedCosts(page)
   await page.locator('.add-row .new-name').fill(name)
   await page.getByRole('button', { name: '加一项固定费' }).click()
   await expect(page.locator(`.fixed-row[data-name="${name}"]`)).toBeVisible()
@@ -771,20 +778,21 @@ test('金额没填也点得动「记入账」：当场补金额和备注', async
   await page.request.delete(`/api/entries/${latest.id}`, { headers })
 })
 
-test('支出 / 收入 / 转账 三等分，选中的是实心色块且三种颜色各不相同', async ({ page }) => {
+test('支出 / 收入 / 转账 / 备忘 四等分，选中的是实心色块且三种颜色各不相同', async ({ page }) => {
   await login(page)
   const segs = page.locator('.kind-toggle .q-btn')
-  await expect(segs).toHaveCount(3)
+  // 第四格是备忘 —— 不产生账，但也是「往家里记点什么」，和前三个同一级
+  await expect(segs).toHaveCount(4)
   const widths = await segs.evaluateAll((els) =>
     els.map((e) => Math.round(e.getBoundingClientRect().width)),
   )
-  expect(new Set(widths).size, '三段宽度应当一样').toBe(1)
+  expect(new Set(widths).size, '四段宽度应当一样').toBe(1)
 
   // 顶到屏幕边缘，不许有圆角
   const radii = await segs.evaluateAll((els) =>
     els.map((e) => getComputedStyle(e).borderRadius),
   )
-  expect([...new Set(radii)], '顶部三段不该有圆角').toEqual(['0px'])
+  expect([...new Set(radii)], '顶部四段不该有圆角').toEqual(['0px'])
 
   // 量的是**选中那一段的背景色** —— 量金额的颜色没用，那是另一条线，
   // 把 toggle-color 写死也照样能绿。
@@ -964,6 +972,7 @@ test('固定费项目在设置里管：加、删、和上期一样', async ({ pa
 
   await page.getByRole('tab', { name: '更多' }).click()
   await page.getByRole('tab', { name: '设置' }).click()
+  await openFixedCosts(page)
   await expect(page.locator('.fixed-row[data-name="房租"]')).toBeVisible()
 
   // 加一项
@@ -1169,14 +1178,14 @@ test('结清了的账单：绿标就占状态那一格，自己那笔划掉', as
   await expect(page.locator('.mine')).toHaveCSS('text-decoration-line', 'none')
 })
 
-test('备忘：固定费那几项常驻，自己也能加；两页共用一个地址', async ({ page }) => {
+test('备忘：固定费那几项常驻，自己也能加；就在「记一笔」第四格', async ({ page }) => {
   await login(page)
-  await page.getByRole('tab', { name: '更多' }).click()
-  await expect(page.locator('.bill-tabs .q-tab')).toHaveText(['流水', '备忘', '设置'])
-  await expect(page).toHaveURL(/\/entries$/)
-
-  await page.getByRole('tab', { name: '备忘' }).click()
-  await expect(page).toHaveURL(/\/entries$/, { timeout: 3000 })
+  // 备忘和「支出/收入/转账」同一级：它不产生一笔账，但站在这一屏上，
+  // 它们是同一个问题的四个答案 —— 我现在要往家里记点什么
+  await expect(page.locator('.kind-toggle .q-btn')).toHaveText(['支出', '收入', '转账', '备忘'])
+  await page.getByRole('button', { name: '备忘', exact: true }).click()
+  // 不走路由：地址一个字都不动
+  await expect(page).toHaveURL(/\/$/)
   // 固定费那几项是现成的清单，不用自己抄一遍
   await expect(page.getByText('房租', { exact: true })).toBeVisible()
   await expect(page.locator('.memo-row').first()).toBeVisible()
@@ -1186,6 +1195,10 @@ test('备忘：固定费那几项常驻，自己也能加；两页共用一个�
   await rentNote.fill('E2E房东自动扣')
   await rentNote.blur()
   await page.reload()
+  // 刷新之后落在记账那一面 —— 停在哪一格**故意不进 sessionStorage**：
+  // 记一笔是 PWA 的落地页，「打开即记账」不许被上次停在备忘上改写
+  await expect(page.locator('input.amount')).toBeVisible()
+  await page.getByRole('button', { name: '备忘', exact: true }).click()
   await expect(page.locator('.memo-row').filter({ hasText: '房租' }).locator('.note'))
     .toHaveValue('E2E房东自动扣')
 
@@ -1199,6 +1212,7 @@ test('备忘：固定费那几项常驻，自己也能加；两页共用一个�
   await mine.locator('.note').fill('鞋柜第二层')
   await mine.locator('.note').blur()
   await page.reload()
+  await page.getByRole('button', { name: '备忘', exact: true }).click()
   await expect(rowOf('E2E备用钥匙').locator('.note')).toHaveValue('鞋柜第二层')
 
   // 删掉
@@ -1206,10 +1220,20 @@ test('备忘：固定费那几项常驻，自己也能加；两页共用一个�
   await page.getByRole('button', { name: '确定' }).click()
   await expect(rowOf('E2E备用钥匙')).toHaveCount(0)
 
-  // 切回流水，地址照样不动
-  await page.getByRole('tab', { name: '流水' }).click()
-  await expect(page.locator('.filter-bar')).toBeVisible()
-  await expect(page).toHaveURL(/\/entries$/)
+  // 切回支出：还是同一个地址，表单原样在
+  await page.getByRole('button', { name: '支出', exact: true }).click()
+  await expect(page.locator('input.amount')).toBeVisible()
+  await expect(page).toHaveURL(/\/$/)
+
+  // 站在备忘上点底栏「记一笔」＝回去记账，不是原地不动（底栏不许是死键）
+  await page.getByRole('button', { name: '备忘', exact: true }).click()
+  await expect(page.locator('.memo-row').first()).toBeVisible()
+  await page.getByRole('tab', { name: '记一笔' }).click()
+  await expect(page.locator('input.amount')).toBeVisible()
+
+  // 备忘搬走之后，「更多」那排只剩两个
+  await page.getByRole('tab', { name: '更多' }).click()
+  await expect(page.locator('.bill-tabs .q-tab')).toHaveText(['流水', '设置'])
 })
 
 test('应用名字和图标：改完页签标题和清单当场跟着变', async ({ page }) => {
@@ -1219,7 +1243,7 @@ test('应用名字和图标：改完页签标题和清单当场跟着变', async
   await page.request.put('/api/settings/app_name', { headers, data: { value: '' } })
 
   await page.goto('/entries')
-  await page.locator('.bill-tabs .q-tab').nth(2).click()
+  await page.getByRole('tab', { name: '设置' }).click()
   const card = page.locator('.bill-section').filter({ hasText: '应用' })
   await expect(card).toBeVisible()
   const before = await page.title()

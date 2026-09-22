@@ -6,14 +6,19 @@
 -->
 <template>
   <div class="bill-section">
-    <q-item dense class="section-head">
+    <!-- 默认收起来：这份清单定好之后几乎不动，而设置页天天要来的是上面几块。
+         摊开着有五六行，把下面的东西全挤到屏幕外 -->
+    <q-item clickable dense class="section-head" @click="open = !open">
       <q-item-section>{{ t('monthly.settingsTitle') }}</q-item-section>
       <q-item-section side class="text-caption text-grey-6">
         {{ t('settings.count', { n: items.length }) }}
       </q-item-section>
+      <q-item-section side>
+        <q-icon :name="open ? 'expand_less' : 'expand_more'" color="grey-5" size="20px" />
+      </q-item-section>
     </q-item>
 
-    <q-list separator>
+    <q-list v-if="open" separator>
       <q-item v-for="c in items" :key="c.id" class="fixed-row" :data-name="c.name">
         <q-item-section avatar>
           <!-- 点图标就能换。图标和颜色摆在一个弹层里：这一格显示的就是它俩合起来的样子，
@@ -101,7 +106,7 @@
       </q-item>
     </q-list>
 
-    <div class="row items-center q-px-md q-py-sm add-row">
+    <div v-if="open" class="row items-center q-px-md q-py-sm add-row">
       <q-icon name="add" size="18px" class="text-grey-6 q-mr-sm" />
       <input
         v-model="newName"
@@ -149,6 +154,7 @@ const newName = ref('')
 const adding = ref(false)
 
 const items = computed(() => meta.monthlyCategories)
+const open = ref(false)
 const payerLabel = (c: Category) =>
   c.default_payer_id === null
     ? t('settings.none')

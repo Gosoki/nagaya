@@ -53,7 +53,7 @@
         <q-tab name="bill" icon="receipt" :label="t('nav.bill')" @click="go('bill')" />
         <!-- 不能再用 receipt_long：和旁边「账单」的 receipt 长得几乎一样，
              三格底栏里两格一个样，只能靠位置认；而这一格底下装的是
-             流水＋备忘＋设置，跟「小票」也不是一回事 -->
+             流水＋设置，跟「小票」也不是一回事 -->
         <q-tab name="entries" icon="format_list_bulleted" :label="t('nav.entries')" @click="go('entries')" />
       </q-tabs>
     </q-footer>
@@ -68,6 +68,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { applyAppearance } from 'src/appearance'
 import { useOnline } from 'src/composables/online'
+import { useMemos } from 'src/stores/memos'
 import BillTabs from 'src/components/BillTabs.vue'
 import EntriesTabs from 'src/components/EntriesTabs.vue'
 import DraftBanner from 'src/components/DraftBanner.vue'
@@ -83,6 +84,7 @@ const auth = useAuth()
 const bills = useBills()
 const ledger = useLedger()
 const drafts = useDrafts()
+const memos = useMemos()
 const route = useRoute()
 const router = useRouter()
 
@@ -104,6 +106,9 @@ function go(name: string) {
   // 账单那一节没有「首页路由」可回 —— 它两页共用一个地址。
   // 点底栏的账单＝回到最近那张，而不是停在上次翻开的某张旧账单上
   if (name === 'bill') bills.detail = null
+  // 同理：点底栏的「记一笔」＝回去记账，不是回到上次停着的备忘那一面。
+  // 不拨的话，人站在备忘上点这一格，路由没变、屏幕也没变 —— 底栏成了死键
+  if (name === 'add') memos.addTab = 'add'
   if (route.name !== name) void router.push({ name })
 }
 

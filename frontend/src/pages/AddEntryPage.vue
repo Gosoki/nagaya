@@ -3,6 +3,10 @@
 
   验收标准（SPEC §7.4）：常见场景 ≤ 3 次点击 + 1 次输入。
   金额 → 分类 → 保存，付款人和分摊默认折叠着，不展开也能存。
+
+  顶上那条有四格：支出 / 收入 / 转账 / 备忘。前三个产生一笔账，第四个不产生 ——
+  但站在这一屏上它们是同一个问题的四个答案：「我现在要往家里记点什么」。
+  所以选中备忘时是**中性灰**，不借用任何一种记账类型的颜色。
 -->
 <template>
   <q-page class="page">
@@ -15,16 +19,21 @@
     <!-- 位置和高度跟账单那页的页签一致，但选中的是**实心色块**不是下划线：
          选错记账类型的代价比选错账单页签大得多，值得给更硬的提示 -->
     <q-btn-toggle
-      v-model="kind"
+      v-model="pane"
       spread no-caps unelevated
-      :toggle-color="kindPalette"
+      :toggle-color="showMemo ? 'grey-7' : kindPalette"
       class="kind-toggle"
-      :options="[
-        { label: t('kind.expense'), value: 'expense' },
-        { label: t('kind.income'), value: 'income' },
-        { label: t('kind.settlement'), value: 'settlement' },
-      ]"
+      :options="paneOptions"
     />
+
+    <!-- 备忘和「支出/收入/转账」同一级：不随某一笔账走的事（水费隔月收、
+         备用钥匙在哪）写在这儿。它不是一种账，所以选中时是中性灰，
+         不借用任何一种记账类型的颜色 -->
+    <MemoPanel v-if="showMemo" />
+    <!-- 表单用 v-show 不用 v-if：**v-if 会把 SplitEditor 整个卸载**，
+         它内部的比例和调整额跟着没了 —— 去备忘看一眼「水费隔月收」再回来，
+         刚调好的「Zen 少担 500」会悄悄变回均分，屏幕上一个字都不说 -->
+    <div v-show="!showMemo" class="form-pane">
 
     <!-- 备注和日期摆在最上面：它们是「这笔是什么、哪天的」，
          先交代清楚再填钱，比夹在中间容易被忽略强 -->
@@ -194,6 +203,7 @@
       />
       </div>
     </div>
+    </div>
   </q-page>
 </template>
 
@@ -209,11 +219,13 @@ import { formatYen } from 'src/i18n'
 import type { Entry, EntryKind } from 'src/api/types'
 import AmountInput from 'src/components/AmountInput.vue'
 import MemberPicker from 'src/components/MemberPicker.vue'
+import MemoPanel from 'src/components/MemoPanel.vue'
 import SplitEditor from 'src/components/SplitEditor.vue'
 import { useAuth } from 'src/stores/auth'
 import { KIND_COLOR, KIND_PALETTE } from 'src/theme'
 import { useDrafts } from 'src/stores/drafts'
 import { useLedger } from 'src/stores/ledger'
+import { useMemos } from 'src/stores/memos'
 import { useMeta } from 'src/stores/meta'
 
 const { t } = useI18n()
@@ -223,6 +235,7 @@ const router = useRouter()
 const meta = useMeta()
 const auth = useAuth()
 const ledger = useLedger()
+const memos = useMemos()
 const drafts = useDrafts()
 
 const kind = ref<EntryKind>('expense')
@@ -236,6 +249,29 @@ const busy = ref(false)
 
 /** 路由带了 id ＝ 在改一笔已经记下的账（已出账的也算）。空 ＝ 记新的一笔 */
 const editingId = computed(() => (route.params.id ? Number(route.params.id) : null))
+/**
+ * 「支出 / 收入 / 转账 / 备忘」这条的选中值。
+ *
+ * 前三个是记一笔账的类型，第四个不是账 —— 但站在这一屏上，它们是同一个问题的
+ * 四个答案：「我现在要往家里记点什么」。所以并成一条，而不是再摞一排页签。
+ *
+ * **改一笔已有的账时没有备忘这一格**：那时候这条的意思是「这笔是什么类型」。
+ */
+const pane = computed({
+  get: () => (showMemo.value ? 'memo' : kind.value),
+  set: (v: string) => {
+    // 编辑模式没有第四格，也就不该去动另一屏的备忘状态
+    if (editingId.value === null) memos.addTab = v === 'memo' ? 'memo' : 'add'
+    if (v !== 'memo') kind.value = v as EntryKind
+  },
+})
+const showMemo = computed(() => editingId.value === null && memos.addTab === 'memo')
+const paneOptions = computed(() => [
+  { label: t('kind.expense'), value: 'expense' },
+  { label: t('kind.income'), value: 'income' },
+  { label: t('kind.settlement'), value: 'settlement' },
+  ...(editingId.value === null ? [{ label: t('entries.tabMemo'), value: 'memo' }] : []),
+])
 const version = ref(0)
 const billedLabel = ref<string | null>(null)
 /** 改的时候分摊要从**这笔自己的规则**起步，不是分类默认值 —— 否则一打开就被改回默认 */
@@ -416,6 +452,18 @@ const selectedCategoryRule = computed(
       | null
       | undefined) ?? null,
 )
+
+/**
+ * 从备忘翻回表单：补两件 display:none 期间做不了的事 ——
+ * 比例轮子重对（隐藏时写 scrollLeft 会被丢掉），光标回到金额上（D16）。
+ */
+watch(showMemo, (hidden) => {
+  if (hidden) return
+  void nextTick(() => {
+    splitEl.value?.sync()
+    amountEl.value?.focus()
+  })
+})
 
 onMounted(async () => {
   if (editingId.value !== null) {
@@ -647,11 +695,12 @@ function reset() {
   font-size: 12px;
   line-height: 1.5;
 }
-.page {
-  /* 底部有两层：固定操作栏（约 64px）压在底部 Tab（50px）之上。
-     留够位置，否则最后一个人那一行会被操作栏盖住。 */
-  padding-bottom: calc(var(--nagaya-footer-h) + 90px);
-}
+/* 底部有两层：固定操作栏（约 64px）压在底部 Tab（50px）之上。
+   留够位置，否则最后一个人那一行会被操作栏盖住。
+   **这段留白只属于表单那一面** —— 备忘那面没有操作栏，挂在 q-page 上
+   会让它底下白出一大块 */
+.page { padding-bottom: var(--nagaya-footer-h); }
+.form-pane { padding-bottom: 90px; }
 .kind-toggle { border-bottom: 1px solid rgba(0, 0, 0, 0.08); }
 /* 顶到屏幕边缘的东西不做圆角：首尾两段默认带 3px，贴着边看就是两个豁口。
    高度对齐底部 Tab 那一栏（57px）—— 默认的 37px 上轻下重，不像个 app */

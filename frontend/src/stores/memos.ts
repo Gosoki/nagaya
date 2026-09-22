@@ -17,13 +17,13 @@ import { ref, watch } from 'vue'
 import { api } from 'src/api/client'
 import type { Memo } from 'src/api/types'
 
-export type EntriesTab = 'ledger' | 'memo' | 'settings'
+export type EntriesTab = 'ledger' | 'settings'
+export type AddTab = 'add' | 'memo'
 const TAB_KEY = 'nagaya.entriesTab'
 
 function savedTab(): EntriesTab {
   try {
-    const v = sessionStorage.getItem(TAB_KEY)
-    if (v === 'memo' || v === 'settings') return v
+    if (sessionStorage.getItem(TAB_KEY) === 'settings') return 'settings'
   } catch {
     /* 隐私模式下读不了 */
   }
@@ -32,6 +32,9 @@ function savedTab(): EntriesTab {
 
 export const useMemos = defineStore('memos', () => {
   const tab = ref<EntriesTab>(savedTab())
+  // 【试验中】备忘在「记一笔」那屏。**不记进 sessionStorage**：记一笔是 PWA 的
+  // 落地页，上次停在备忘上、下次打开就不是「打开即记账」了
+  const addTab = ref<AddTab>('add')
   watch(tab, (v) => {
     try {
       sessionStorage.setItem(TAB_KEY, v)
@@ -65,5 +68,5 @@ export const useMemos = defineStore('memos', () => {
     items.value = items.value.filter((m) => m.id !== id)
   }
 
-  return { tab, items, loaded, load, create, update, remove }
+  return { tab, addTab, items, loaded, load, create, update, remove }
 })
