@@ -249,9 +249,23 @@ function onViewport() {
   })
 }
 
-onMounted(() => {
+/** 上下两条一起重量。两处的兜底都可能和真值差一截（安全区、图标字体） */
+function remeasure() {
   measureFooter()
   measureHeader()
+}
+
+onMounted(() => {
+  remeasure()
+  // **多量几次。** 首帧量到的常常不是最终高度：字体（图标字体尤其）是异步到的，
+  // 安全区在 standalone 下也可能晚一拍才生效 —— 量早了就把小一号的值写死在那儿。
+  // ResizeObserver 只在元素自己变了才响，而「字体到了」这种变化它有时赶不上
+  void (document as Document & { fonts?: FontFaceSet }).fonts?.ready.then(remeasure)
+  window.addEventListener('load', remeasure)
+  window.addEventListener('resize', remeasure)
+  window.addEventListener('orientationchange', remeasure)
+  setTimeout(remeasure, 300)
+
   window.visualViewport?.addEventListener('scroll', onViewport)
   window.visualViewport?.addEventListener('resize', onViewport)
   document.addEventListener('touchstart', onTouchStart, { passive: true })
@@ -269,6 +283,9 @@ onMounted(() => {
 onBeforeUnmount(() => {
   footWatch?.disconnect()
   headWatch?.disconnect()
+  window.removeEventListener('load', remeasure)
+  window.removeEventListener('resize', remeasure)
+  window.removeEventListener('orientationchange', remeasure)
   window.visualViewport?.removeEventListener('scroll', onViewport)
   window.visualViewport?.removeEventListener('resize', onViewport)
   document.removeEventListener('touchstart', onTouchStart)
@@ -318,9 +335,12 @@ onBeforeUnmount(() => document.removeEventListener('visibilitychange', onVisible
      于是主操作按钮和 Tab 只隔 1px，拇指偏一点就点错。 -->
 <style>
 :root {
-  /* 底栏真实高度（**含安全区**）。这里的 57 只是首帧的兜底，
-     挂载后由 MainLayout 量一次写回来 —— 见下面 measureFooter() */
-  --nagaya-footer-h: 57px;
+  /* 底栏真实高度（**含安全区**）。挂载后由 measureFooter() 量出真值写回来，
+     这里是**首帧的兜底**。
+     兜底值必须自己把安全区算进去：写死 57 的话，首帧那一下固定操作条会按
+     57 摆，而带 home indicator 的机器上底栏是 57+34 —— 操作条整条沉到底栏
+     底下，只露出一条边。「第一次进应用下面凸起来」就是它 */
+  --nagaya-footer-h: calc(57px + env(safe-area-inset-bottom));
   /* 手机是主场。平板/电脑上不收一下的话，列表会被拉成「名字贴最左、
      数字贴最右」中间一片空白 —— 收到一个手机宽度居中，全站一致 */
   --nagaya-max-w: 480px;
