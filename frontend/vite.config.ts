@@ -69,9 +69,22 @@ export default defineConfig({
               cacheName: 'nagaya-nav',
               cacheableResponse: { statuses: [-1] },
               networkTimeoutSeconds: 3,      // 服务器不在就别干等
-              // 网络不通或超时：退回预缓存里**同一版**的壳，而不是一张浏览器的断网页。
+              // 网络不通：退回预缓存里**同一版**的壳，而不是一张浏览器的断网页。
               // 离线草稿那条路靠的就是能打开
               precacheFallback: { fallbackURL: 'index.html' },
+              // **超时**那一支走的是「查缓存」，而这个缓存永远是空的 —— 查不到的话
+              // NetworkFirst 会接着干等网络，3 秒的超时形同虚设。查不到就交出预缓存里
+              // 同一版的 index.html（这个函数会被原样写进 sw.js，跑在 SW 里）
+              plugins: [
+                {
+                  cachedResponseWillBeUsed: async ({ cachedResponse }) => {
+                    if (cachedResponse) return cachedResponse
+                    const scope = (self as unknown as { registration: { scope: string } }).registration.scope
+                    const cache = await caches.open(`workbox-precache-v2-${scope}`)
+                    return (await cache.match(new URL('index.html', scope).href, { ignoreSearch: true })) ?? null
+                  },
+                },
+              ],
             },
           },
         ],

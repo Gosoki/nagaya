@@ -34,6 +34,16 @@ export type BillKey = 'draft' | 'current' | `st:${number}`
 export type BillTab = 'draft' | 'current'
 const TAB_STORE_KEY = 'nagaya.billTab'
 
+const DETAIL_KEY = 'nagaya.billDetail'
+function savedDetail(): number | null {
+  try {
+    const v = Number(sessionStorage.getItem(DETAIL_KEY))
+    return Number.isInteger(v) && v > 0 ? v : null
+  } catch {
+    return null
+  }
+}
+
 function savedTab(): BillTab {
   try {
     const v = sessionStorage.getItem(TAB_STORE_KEY)
@@ -62,9 +72,18 @@ export const useBills = defineStore('bills', () => {
   /**
    * 「已出账」当前翻到哪一张；**null ＝ 最近出的那一张**。
    * 这也是状态不是路由 —— 翻旧账单同样不改地址。
-   * 不进 sessionStorage：下次打开回到最近那张就好
+   * 记在 sessionStorage 里：换新版时的整页重载（src/update.ts）之后还在这一张上；
+   * 关掉 app 再打开就清空了，照样回到最近那张
    */
-  const detail = ref<number | null>(null)
+  const detail = ref<number | null>(savedDetail())
+  watch(detail, (v) => {
+    try {
+      if (v === null) sessionStorage.removeItem(DETAIL_KEY)
+      else sessionStorage.setItem(DETAIL_KEY, String(v))
+    } catch {
+      /* 存不了就算了 */
+    }
+  })
 
   const statements = ref<Statement[] | null>(null)
   const views = ref<Record<string, BillView>>({})

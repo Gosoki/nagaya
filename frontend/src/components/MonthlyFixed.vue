@@ -292,6 +292,9 @@ function build(d: MonthlyData) {
     }
     return reactive({
       ...r,
+      // 这期刚清空删掉的那一笔：重打金额是「改个金额」，起步规则就是它自己的，
+      // 不是服务器按上期给的那条 —— 预览和保存必须是同一条
+      rule: r.entry_id === null && held?.deleted_rule ? held.deleted_rule : r.rule,
       text: held?.dirty ? held.text : r.amount === null ? '' : formatPlain(r.amount),
       dirty: Boolean(held?.dirty),
       rule_override: held?.rule_override ?? null,
@@ -539,7 +542,8 @@ async function saveRow(row: Row) {
       // 那张单子上的账删掉 —— 409 之后走下面 version_conflict 那条路重载，
       // build() 会把被带走的那一行认出来、提示一句
       await api.del(`/api/entries/${row.entry_id}?version=${row.version}`)
-      // 留着这笔的分摊和日期：清空再重打是「改个金额」，不该顺手把分摊换掉
+      // 留着这笔的分摊和日期：清空再重打是「改个金额」，不该顺手把分摊换掉。
+      // row.rule 本来就是这笔的规则（预览的起步规则），留着不动
       row.deleted_rule = row.rule
       row.deleted_date = row.date
       row.entry_id = null
@@ -576,7 +580,7 @@ async function saveRow(row: Row) {
           // **没动过分摊也要把预览那条发上去**：没录的行是从上期那一笔（或者刚删掉的
           // 那一笔）的分摊起步的，发 null 的话后端落成分类默认 —— 屏幕上是
           // 45,000/40,000/35,000，库里是均分
-          rule: row.rule_override ?? untouchedRule(row.deleted_rule ?? row.rule),
+          rule: row.rule_override ?? untouchedRule(row.rule),
           // 和分摊预览用的是同一批人，避免预览与落库分摊到不同的人头上
           member_ids: meta.activeMembers.map((m) => m.id),
         },

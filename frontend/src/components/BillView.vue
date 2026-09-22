@@ -113,7 +113,7 @@
         <div class="head-meta row items-center no-wrap">
           <div class="ellipsis">
             <template v-if="bill.covers_from">
-              {{ t('bill.coversRange', { from: shortDay(bill.covers_from), to: shortDay(bill.covers_to) }) }}
+              {{ shortRange(bill.covers_from, bill.covers_to) }}
             </template>
           </div>
           <q-space />
@@ -501,8 +501,15 @@ const nameOf = (id: number) => meta.byId[id]?.display_name ?? String(id)
 
 /** 头卡片上的日期：今年的省掉年份（8/30），窄屏和日文下第二行才放得下两头 */
 const thisYear = todayJst().slice(0, 4)
-const shortDay = (d: string | null) =>
-  !d ? '' : d.slice(0, 4) === thisYear ? `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}` : d
+const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`
+/** 两头同一年的旧账单：年份只写一次（2025/8/30 〜 9/23）；跨年的照写全 */
+function shortRange(from: string, to: string | null): string {
+  const end = to ?? from
+  const sameYear = from.slice(0, 4) === end.slice(0, 4)
+  const head = from.slice(0, 4) === thisYear && sameYear ? md(from) : sameYear ? `${from.slice(0, 4)}/${md(from)}` : from
+  const tail = sameYear ? md(end) : end
+  return t('bill.coversRange', { from: head, to: tail })
+}
 
 /** 自己在这张账单上的那一行 */
 const showCutResult = computed({
@@ -693,6 +700,14 @@ const minePart = computed<MinePart>(() => {
   // 要转给好几个人：**得全列出来**（原来只取第一条、却把欠款总额安在那个人头上）。
   // 收成一行、字小一号 —— 整句 28px 会折成两行，把这一块撑高
   const pay = rows.filter((x) => x.tr.from_id === me)
+  if (pay.length === 1) {
+    // 只转给一个人（同时还有人要转给我）：照单笔那一档印，字不缩
+    return {
+      label: t('bill.youPayLabel', { to: nameOf(pay[0]!.tr.to_id) }),
+      figure: formatYen(pay[0]!.left),
+      tone: 'owe',
+    }
+  }
   if (pay.length) {
     return {
       label: t('bill.youPayListLabel'),
@@ -1155,7 +1170,7 @@ function doCut() {
 .tr-amount { font-size: var(--nagaya-fs-figure-s); font-weight: 600; line-height: 1.3; white-space: nowrap; }
 /* 窄屏（或者日文）：头像对收起来 —— 名字那行已经写着 A → B，
    留着它的话金额会被「确认已完成」压住，要转多少读不出来 */
-@media (max-width: 399px) {
+@media (max-width: 429px) {
   .transfer .pair { display: none; }
 }
 

@@ -51,21 +51,17 @@ export function watchForUpdate(): void {
  * 不是 reload 当前地址：/bill/7 进来之后页面会把地址收回 /bill，reload 的话
  * 刚点开的那张旧账单就丢了。
  *
- * 写请求没落地就**不换**，留到下一次切页再试 —— 原来最多等 5 秒就强制重载，
- * 信号不好时会把一笔还在路上的「记入账」掐断，连草稿都不留
+ * 写请求没落地就**不换**，留到下一次切页再试 —— 强制重载会把一笔还在路上的
+ * 「记入账」掐断，连草稿都不留
  */
 export function applyUpdateIfReady(path: string): void {
   if (!ready) return
   ready = false
-  const start = Date.now()
-  const tick = () => {
-    if (pendingWrites() > 0) {
-      if (Date.now() - start < 5000) setTimeout(tick, 100)
-      else ready = true                       // 下次切页再说
-      return
-    }
-    location.replace(path)
-  }
-  // 让刚切走的那一页先卸载完（它的 onBeforeUnmount 可能正要补存）
-  setTimeout(tick, 50)
+  // 让刚切走的那一页先卸载完（它的 onBeforeUnmount 可能正要补存），然后只看一眼：
+  // 还有写请求在路上就留到下一次切页 —— 不轮询等它：等上几秒再重载，
+  // 人已经在新页面上开始操作了，那一下会把他正在做的打断
+  setTimeout(() => {
+    if (pendingWrites() > 0) ready = true
+    else location.replace(path)
+  }, 50)
 }
