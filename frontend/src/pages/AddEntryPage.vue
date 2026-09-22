@@ -553,7 +553,7 @@ function reset() {
 .page {
   /* 底部有两层：固定操作栏（约 64px）压在底部 Tab（50px）之上。
      留够位置，否则最后一个人那一行会被操作栏盖住。 */
-  padding-bottom: calc(var(--nagaya-footer-h) + 90px + env(safe-area-inset-bottom));
+  padding-bottom: calc(var(--nagaya-footer-h) + 90px);
 }
 .kind-toggle { border-bottom: 1px solid rgba(0, 0, 0, 0.08); }
 /* 顶到屏幕边缘的东西不做圆角：首尾两段默认带 3px，贴着边看就是两个豁口。
@@ -610,7 +610,14 @@ function reset() {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: calc(var(--nagaya-footer-h) + env(safe-area-inset-bottom));   /* 压在底部 Tab 之上 */
+  /* 正好压在底栏上沿。--nagaya-footer-h 是**量出来的**、已经含安全区，
+     这里再加一次 env() 就会把操作条顶高，两条之间露出一道缝，
+     而缝里会有正在滚的内容漏过去 */
+  bottom: var(--nagaya-footer-h);
+  /* **必须自己有图层。** 不给的话它是 z-index:auto，而行里任何一个
+     带 z-index 的东西（比如比例轮子）都会画到按钮上面 —— 屏幕上就是
+     数字从实心按钮里透出来，看着像渲染坏了 */
+  z-index: 10;
   padding: 6px 16px 8px;
   /* 不用半透明：内容从按钮底下透出来会看着像渲染坏了 */
   background: #fff;

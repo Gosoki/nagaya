@@ -36,7 +36,7 @@
       </div>
     </q-page-container>
 
-    <q-footer class="bg-white text-grey-8 footer-safe">
+    <q-footer ref="footEl" class="bg-white text-grey-8 footer-safe">
       <!-- 不用 q-route-tab：它的高亮跟着 vue-router 的 matched 链走，而
            /bill/current、/bill/past 是和 /bill 平级的路由、不是它的子路由，
            于是站在那两页上底栏三个 Tab 一个都不亮。
@@ -63,7 +63,7 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { useOnline } from 'src/composables/online'
@@ -137,6 +137,36 @@ function refetch() {
   void ledger.refresh().catch(() => {})
 }
 
+/**
+ * 底栏到底多高，**量出来，别算**。
+ *
+ * 固定操作条（记一笔的「记入账」、账单的「出账单」）要正好压在底栏上沿。
+ * 原来是 `calc(常数 57px + env(safe-area-inset-bottom))` —— 两处假设，
+ * 任何一处不成立就会在两条之间留一道缝，而缝里会有内容滚过去：
+ *   * 57 这个常数曾经写成 50，主按钮和 Tab 只隔 1px（注释里还留着这段）；
+ *   * 字体放大、或者安全区在某些机型/显示模式下没算进底栏的 padding，
+ *     两边对 env() 的理解就不一致了。
+ * 量一次就都没有了：拿到的 height 本来就含它自己的安全区内边距。
+ */
+const footEl = ref<{ $el: HTMLElement } | null>(null)
+let footWatch: ResizeObserver | null = null
+
+function measureFooter() {
+  const el = footEl.value?.$el
+  if (!el) return
+  const h = Math.round(el.getBoundingClientRect().height)
+  if (h > 0) document.documentElement.style.setProperty('--nagaya-footer-h', `${h}px`)
+}
+
+onMounted(() => {
+  measureFooter()
+  if (typeof ResizeObserver !== 'undefined' && footEl.value?.$el) {
+    footWatch = new ResizeObserver(measureFooter)
+    footWatch.observe(footEl.value.$el)
+  }
+})
+onBeforeUnmount(() => footWatch?.disconnect())
+
 onMounted(boot)
 </script>
 
@@ -145,6 +175,8 @@ onMounted(boot)
      于是主操作按钮和 Tab 只隔 1px，拇指偏一点就点错。 -->
 <style>
 :root {
+  /* 底栏真实高度（**含安全区**）。这里的 57 只是首帧的兜底，
+     挂载后由 MainLayout 量一次写回来 —— 见下面 measureFooter() */
   --nagaya-footer-h: 57px;
   /* 手机是主场。平板/电脑上不收一下的话，列表会被拉成「名字贴最左、
      数字贴最右」中间一片空白 —— 收到一个手机宽度居中，全站一致 */

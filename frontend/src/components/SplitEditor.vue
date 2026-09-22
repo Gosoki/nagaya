@@ -554,8 +554,9 @@ defineExpose({
 .weight-col { position: relative; display: flex; justify-content: center; }
 /* 行内的小轮子。窗口 108px ＝ 三格：中间那格算数，两边各露一格说明「还有」 */
 .wheel {
+  /* 不给 z-index：凹槽在 DOM 里排在它**前面**，本来就画在下面。
+     给了反而会越过固定操作条画到「记入账」按钮上面去 */
   position: relative;
-  z-index: 1;
   display: flex;
   width: 108px;
   height: 44px;                 /* 拇指的底线 */

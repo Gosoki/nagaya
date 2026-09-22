@@ -965,7 +965,8 @@ function doCut() {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: calc(var(--nagaya-footer-h) + env(safe-area-inset-bottom));
+  bottom: var(--nagaya-footer-h);
+  z-index: 10;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
@@ -977,7 +978,7 @@ function doCut() {
 }
 .page {
   /* 给固定操作条留位，否则滚到底时最后一块会被它盖住 */
-  padding-bottom: calc(var(--nagaya-footer-h) + 78px + env(safe-area-inset-bottom));
+  padding-bottom: calc(var(--nagaya-footer-h) + 78px);
 }
 .bill-text {
   white-space: pre-wrap;

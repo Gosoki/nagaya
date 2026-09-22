@@ -166,9 +166,11 @@ import { useAuth } from 'src/stores/auth'
 import { useMeta } from 'src/stores/meta'
 
 /** 头像色候选。够分得开就行 —— 三个人要一眼认出谁是谁 */
+//: 头像可选的颜色。**和后端 models.py 的 MEMBER_COLORS 是同一组**
+//  （建人时轮着发），改一边记得改另一边。
 const COLORS = [
   '#3d4785', '#26a69a', '#ef6c00', '#c62828', '#6a1b9a',
-  '#00838f', '#2e7d32', '#ad1457', '#4e342e', '#455a64',
+  '#00838f', '#2e7d32', '#ad1457', '#ec407a', '#455a64',
 ]
 
 const { t } = useI18n()
