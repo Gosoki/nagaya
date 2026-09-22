@@ -709,12 +709,13 @@ function reset() {
   font-size: 12px;
   line-height: 1.5;
 }
-/* 底部有两层：固定操作栏（约 64px）压在底部 Tab（50px）之上。
-   留够位置，否则最后一个人那一行会被操作栏盖住。
-   **这段留白只属于表单那一面** —— 备忘那面没有操作栏，挂在 q-page 上
-   会让它底下白出一大块 */
-.page { padding-bottom: var(--nagaya-footer-h); }
-.form-pane { padding-bottom: 90px; }
+/* 底部只有一层要自己让：**固定操作条**（「记入账」，实测 58 高）。
+   底栏那一层不用管 —— Quasar 的 q-page-container 已经给固定底栏留了
+   一份 padding，我们再留一份就是双份，内容底下白吊着 57px。
+
+   而且这份留白只属于表单那一面：备忘那面没有操作条，挂在 q-page 上
+   会让它底下也白出一块 */
+.form-pane { padding-bottom: 70px; }
 /* 顶上这条钉住：往下翻分摊、翻备忘的时候，「我在记什么」和回表单的路
    都得一直在。吸在顶栏下沿 —— --nagaya-header-h 是量出来的，刘海机上
    含安全区，非刘海机上是 0。

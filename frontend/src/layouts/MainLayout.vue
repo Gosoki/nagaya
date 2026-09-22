@@ -304,20 +304,17 @@ onMounted(boot)
   页面最顶 —— 那儿正是固定顶栏和状态栏，金额那个大数字被切掉一截。
   scroll-padding 是给滚动容器（这里是整页）划的「别往这儿放」的边。
 */
-html {
-  scroll-padding-top: calc(var(--nagaya-header-h) + 8px);
-  scroll-padding-bottom: calc(var(--nagaya-footer-h) + 90px);   /* 底下那条固定操作栏 */
-}
+html { scroll-padding-top: calc(var(--nagaya-header-h) + 8px); }
 /*
   **聚焦时别被顶栏和状态栏盖住。** iOS 弹键盘时会把聚焦的输入框滚到布局视口
   最顶上，而那儿正是状态栏和固定顶栏所在 —— 金额框就是这么被吃掉的。
   scroll-margin-top 告诉浏览器「滚到这儿就够了」，Safari 14.5 起支持。
 */
+/* **只管上面那头。** 下面那头原来也留了 147px（底栏 + 操作条），可它的意思是
+   「滚进视野时下面得空出这么多」—— 于是一聚焦就多往上滚一截，内容底下吊出
+   一大片空白。键盘本来就把下半屏占了，那块空白纯属白让 */
 input,
-textarea {
-  scroll-margin-top: calc(var(--nagaya-header-h) + 8px);
-  scroll-margin-bottom: calc(var(--nagaya-footer-h) + 90px);
-}
+textarea { scroll-margin-top: calc(var(--nagaya-header-h) + 8px); }
 </style>
 
 <style scoped>
