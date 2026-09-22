@@ -1256,7 +1256,10 @@ test('应用名字和图标：改完页签标题和清单当场跟着变', async
   const before = await page.title()
   expect(before, '没设名字时用打包时那个').toBe('長屋 nagaya')
 
+  // 这张卡默认收着（名字和图标是定一次就不动的东西），先点开
+  await card.locator('.section-head').click()
   const name = card.locator('input[type=text]')
+  await expect(name).toBeVisible()
   await name.fill('三丁目の家計')
   await name.blur()
   // 页签标题不是 Vue 管的 DOM，得手动贴上去 —— 这条钉的就是那一下
