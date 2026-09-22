@@ -5,7 +5,11 @@ import vue from '@vitejs/plugin-vue'
 import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
+/** 打包时刻，印在设置页最底下 —— 手机上装的到底是哪一版，不用再猜 */
+const BUILD = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Tokyo' }).slice(0, 16)
+
 export default defineConfig({
+  define: { __BUILD__: JSON.stringify(BUILD) },
   plugins: [
     vue({ template: { transformAssetUrls } }),
     quasar({ sassVariables: 'src/quasar-variables.sass' }),

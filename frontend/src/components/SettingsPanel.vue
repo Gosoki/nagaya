@@ -156,6 +156,10 @@
 
     <!-- 备份放最后：它是「设一次就不再动」的东西，天天要来的是上面几块 -->
     <BackupCard />
+
+    <!-- 装的是哪一版。手机上的 PWA 换包要等 service worker 轮换，
+         「改了怎么没生效」十次有九次是这儿对不上 —— 印出来就不用猜了 -->
+    <div class="text-center text-caption text-grey-5 q-py-md build">{{ build }}</div>
   </div>
 </template>
 
@@ -173,6 +177,8 @@ import type { Setting } from 'src/api/types'
 import { useMeta } from 'src/stores/meta'
 
 const { t, locale } = useI18n()
+/** 打包时刻（日本时间），vite.config.ts 注入 —— 印在这一屏最底下 */
+const build = __BUILD__
 const $q = useQuasar()
 const meta = useMeta()
 

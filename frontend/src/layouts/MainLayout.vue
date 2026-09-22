@@ -26,20 +26,10 @@
       <EntriesTabs v-if="route.name === 'entries'" />
     </q-header>
 
-    <q-page-container>
-      <router-view v-if="meta.members.length" />
-      <!-- 起不来就得说出来。原来只有一个转圈：拉不到基础数据时它会一直转下去，
-           人只能看着一个永远不会停的动画 —— 而这恰好是断网时的默认下场 -->
-      <div v-else-if="bootFailed" class="column flex-center q-pa-xl text-center" style="height: 60vh">
-        <q-icon name="cloud_off" size="40px" color="grey-5" />
-        <div class="text-grey-7 q-my-md">{{ t('common.offlineBoot') }}</div>
-        <q-btn outline no-caps color="primary" :label="t('common.retry')" @click="boot" />
-      </div>
-      <div v-else class="column flex-center" style="height: 60vh">
-        <q-spinner-dots size="40px" color="primary" />
-      </div>
-    </q-page-container>
-
+    <!-- **底栏排在页面容器前面。** 各页的固定操作条是 Teleport 到底栏里那个
+         插槽的，而冷启动时（meta 命中本地缓存、不必等网络）页面会和布局在
+         同一拍挂载 —— 底栏要是排在后面，那一刻插槽还不存在，Teleport 找不到
+         目标，操作条整条渲染不出来。QLayout 算偏移看的是组件自己，不看 DOM 顺序 -->
     <q-footer ref="footEl" class="bg-white text-grey-8 footer-safe">
       <!-- 各页自己的固定操作条（「记入账」「出账单」）画在这儿 —— 见各页的 Teleport。
            **不再用「量底栏高度 + fixed 定位」那一套**：量早一拍（安全区还没生效、
@@ -67,6 +57,20 @@
         <q-tab name="entries" icon="format_list_bulleted" :label="t('nav.entries')" @click="go('entries')" />
       </q-tabs>
     </q-footer>
+    <q-page-container>
+      <router-view v-if="meta.members.length" />
+      <!-- 起不来就得说出来。原来只有一个转圈：拉不到基础数据时它会一直转下去，
+           人只能看着一个永远不会停的动画 —— 而这恰好是断网时的默认下场 -->
+      <div v-else-if="bootFailed" class="column flex-center q-pa-xl text-center" style="height: 60vh">
+        <q-icon name="cloud_off" size="40px" color="grey-5" />
+        <div class="text-grey-7 q-my-md">{{ t('common.offlineBoot') }}</div>
+        <q-btn outline no-caps color="primary" :label="t('common.retry')" @click="boot" />
+      </div>
+      <div v-else class="column flex-center" style="height: 60vh">
+        <q-spinner-dots size="40px" color="primary" />
+      </div>
+    </q-page-container>
+
   </q-layout>
 </template>
 
