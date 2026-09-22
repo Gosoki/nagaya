@@ -7,6 +7,9 @@
        「我是不是填错框了」 -->
   <div class="amount-wrap" :class="{ suffix: symbolAfter }" :style="{ color: props.color }" @click="focus">
     <span v-if="!symbolAfter" class="sym">{{ symbol }}</span>
+    <!-- 替身：和输入框同一套字形，专门用来量「这串数字到底多宽」。
+         看不见、不占位、不接事件 -->
+    <span ref="ghost" class="ghost amount" aria-hidden="true">{{ display || '0' }}</span>
     <input
       ref="el"
       class="amount"
@@ -14,7 +17,7 @@
       inputmode="numeric"
       enterkeyhint="done"
       :placeholder="'0'"
-      :style="{ width: widthCh }"
+      :style="{ width: width }"
       :value="display"
       @input="onInput"
       @focus="onFocus"
@@ -24,7 +27,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{ modelValue: number; color?: string }>()
@@ -39,14 +42,27 @@ const symbolAfter = computed(() => locale.value === 'ja')
 const symbol = computed(() => t('common.currency'))
 const display = computed(() => (props.modelValue ? props.modelValue.toLocaleString('en-US') : ''))
 
-// 输入框按内容宽度伸缩，这样 ¥ 始终贴着数字，而不是被甩到屏幕最左边。
-// 逗号比数字窄，所以按逗号数折算一下，否则右边会多出一块空白。
-const widthCh = computed(() => {
-  const text = display.value || '0'
-  const commas = (text.match(/,/g) ?? []).length
-  // 末尾那 0.3ch 是**留给字形的余量**：正好按 1ch 算的话框子和「0」一样宽，
-  // 一丝不差，遇上亚像素取整就会把字边削掉一条，看着像被遮住了
-  return `${Math.max(1, text.length - commas * 0.55) + 0.3}ch`
+/**
+ * 输入框按内容宽度伸缩，这样 ¥ 始终贴着数字，而不是被甩到屏幕最左边。
+ *
+ * **量出来，不靠估。** 原来是按 ch 折算的（数字 1ch、逗号 0.55ch），
+ * 在 macOS 上就已经比真实宽度少 2px，「12,800,000」正好卡在被裁掉一条边上；
+ * 换一套系统字体（iOS）差得更多，屏幕上就是数字左右各被切掉一点。
+ * 现在拿一个同字形的替身量出真实像素，再加 2px 的字形余量。
+ */
+const ghost = ref<HTMLElement | null>(null)
+const width = ref('1ch')
+
+function measure() {
+  const w = ghost.value?.getBoundingClientRect().width
+  if (w) width.value = `${Math.ceil(w) + 2}px`
+}
+
+watch(display, () => void nextTick(measure), { immediate: true })
+onMounted(() => {
+  measure()
+  // 系统字体是异步就绪的：字一换宽度就变了，得再量一次
+  void (document as Document & { fonts?: FontFaceSet }).fonts?.ready.then(measure)
 })
 
 function onInput(e: Event) {
@@ -72,6 +88,7 @@ defineExpose({ focus })
 
 <style scoped>
 .amount-wrap {
+  position: relative;           /* 替身贴在这儿，不占位 */
   display: flex;
   align-items: baseline;
   justify-content: center;
@@ -87,6 +104,11 @@ defineExpose({ focus })
 .amount-wrap.suffix .sym { font-size: 22px; }
 .amount {
   color: inherit;
+  /* **必须写死继承**：WebKit 给表单控件配的是另一套默认字体，不写的话
+     输入框和替身（普通 span）量出来不是同一个宽度，差的那几像素正好把
+     数字的边削掉一条。顺带 padding 清零 —— input 自带左右各 2px */
+  font-family: inherit;
+  padding: 0;
   font-size: 46px;
   font-weight: 600;
   /* 1.1 在 46px 下太紧：input 会裁掉超出内容框的字形，高个儿的数字上沿就没了 */
@@ -96,9 +118,22 @@ defineExpose({ focus })
   background: transparent;
   text-align: left;
   min-width: 1ch;
-  max-width: 260px;
+  /* 只受屏幕限制，不再写死一个 260 —— 最长的「99,999,999」是 262px，
+     那个上限正好把它裁掉一条边 */
+  max-width: 100%;
   font-variant-numeric: tabular-nums;
   color: inherit;
 }
 .amount::placeholder { color: #d0d0d0; }
+/* 替身和输入框共用 .amount 的字形，只是看不见也不占地方 */
+.ghost {
+  position: absolute;
+  left: 0;
+  top: 0;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: pre;
+  width: auto;
+  max-width: none;
+}
 </style>
