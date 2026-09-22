@@ -91,6 +91,11 @@
       </div>
     </div>
     <div v-if="error" class="text-negative text-caption q-mt-xs">{{ error }}</div>
+    <!-- 这一笔的 1 円归谁，这边算不出来（依据是保存之后才有的 entry.id）。
+         不说的话屏幕上那个数字有三分之二的概率指错人，而它看起来和别的数字一样确定 -->
+    <div v-if="rotateUnknown" class="text-caption text-grey-6 q-mt-xs">
+      {{ t('split.rotateHint') }}
+    </div>
   </div>
 </template>
 
@@ -255,6 +260,34 @@ const preview = computed<Record<string, number> | null>(() => {
     // 而且旁边就写着「权重 0 ＝ 不参与」，再说一遍是噪音
     if (e instanceof SplitError && e.code !== 'weights_all_zero') error.value = e.message
     return null
+  }
+})
+
+/**
+ * 这一笔的余数**这边算不出来**。
+ *
+ * 「余数归谁 ＝ 逐笔轮转」时，后端的轮转依据是 `entry.id`（SPEC §4.1），
+ * 而新记的那一笔在保存之前还没有 id —— 这边只能拿 0 去算，实测三个人分摊时
+ * 三次里有两次会指错人（多担 1 円的那个）。改已有的账没这问题：id 是已知的，
+ * 上面已经透传进去了。
+ *
+ * 判据不靠猜「除不尽没有」：换个 seed 再算一遍，结果变了就说明这一笔的余数
+ * 确实取决于 id —— 有权重和调整额掺进来时，「除得尽除不尽」根本不是一句话说得清的。
+ *
+ * 这么做而不是改轮转依据：改了就等于改 SPEC，而且同一天记的几笔会把 1 円
+ * 都给同一个人（逐笔退化成逐日）。为 1 円动那个不值，**但也不能装作知道**。
+ */
+const rotateUnknown = computed(() => {
+  if (props.entryId != null || !props.amount) return false
+  if ((rule.value as { remainder_to?: string }).remainder_to !== 'rotate') return false
+  const opts = { order: order.value, payer: props.payerId === null ? null : String(props.payerId) }
+  try {
+    return (
+      JSON.stringify(split(rule.value as never, props.amount, { ...opts, rotateSeed: 0 })) !==
+      JSON.stringify(split(rule.value as never, props.amount, { ...opts, rotateSeed: 1 }))
+    )
+  } catch {
+    return false
   }
 })
 

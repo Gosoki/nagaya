@@ -29,6 +29,7 @@ export default {
     weight: '比率', adjustment: '調整', share: '負担額',
     total: '合計', diff: '差額',
     notBalanced: '{n} 合いません。合わないと保存できません',
+    rotateHint: '割り切れない 1 円の負担者は「持ち回り」のため、保存後に確定します',
   },
   monthly: {
     carryFailed: '次の項目は前期どおりに記帳できませんでした。分担ルールを確認してください：{list}',

@@ -29,6 +29,7 @@ export default {
     weight: '比例', adjustment: '调整', share: '应担',
     total: '合计', diff: '差额',
     notBalanced: '还差 {n}，不平不能存',
+    rotateHint: '除不尽的 1 円按「逐笔轮转」归谁，存下去才定得下来',
   },
   monthly: {
     carryFailed: '这几项按上期记不进来，去设置里看看它们的分摊规则：{list}',

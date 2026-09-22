@@ -24,9 +24,12 @@ SETTINGS_SPEC: dict[str, dict[str, Any]] = {
         "default": "payer",
         "options": ["payer", "order", "rotate"],
         "note_zh": "分摊除不尽时，多出来的 1 円归谁。"
-                   "payer＝给付款人（默认）／order＝按成员顺序／rotate＝逐笔轮转。",
+                   "payer＝给付款人（默认）／order＝按成员顺序／rotate＝逐笔轮转。"
+                   "**rotate 的轮转依据是账目序号**，所以新记一笔时要等存下去才定得下来，"
+                   "记账那屏的预览会说明这一点。",
         "note_ja": "割り切れないときの端数 1 円を誰が負担するか。"
-                   "payer＝支払者（既定）／order＝メンバー順／rotate＝持ち回り。",
+                   "payer＝支払者（既定）／order＝メンバー順／rotate＝持ち回り。"
+                   "**rotate は記録の連番で回す**ため、新規記帳では保存後に確定します。",
     },
     "default_rule": {
         "type": "json",
