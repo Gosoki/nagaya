@@ -159,7 +159,6 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
 import { ApiError, api } from 'src/api/client'
-import { inkOn } from 'src/color'
 import { jstDateOf, todayJst } from 'src/date'
 import { formatYen } from 'src/i18n'
 import type { Entry, EntryKind } from 'src/api/types'
@@ -214,11 +213,15 @@ const splitDiff = ref(0)
  * 才是实心分类色 —— 两态落差本身就够强。
  * 图标保留分类色：不占面积，但「哪一格是哪一类」一眼认得出，
  * 不至于退回一排全黑的图标。
+ *
+ * **选中一律白字**（你定的）：原来按底色亮度挑黑白，于是 伙食（浅绿）和
+ * 其他（蓝灰）出来是黑字，三格里两格一个样、一格另一个样。统一成白字整齐，
+ * 代价是这两个浅色上的对比度只有 2:1 上下 —— 认掉了。
  */
 type Swatch = { id: number; color: string }
 const catStyle = (c: Swatch) =>
-  categoryId.value === c.id ? { background: c.color, color: inkOn(c.color) } : {}
-const catIcon = (c: Swatch) => (categoryId.value === c.id ? inkOn(c.color) : c.color)
+  categoryId.value === c.id ? { background: c.color, color: '#fff' } : {}
+const catIcon = (c: Swatch) => (categoryId.value === c.id ? '#fff' : c.color)
 
 const amountEl = ref<InstanceType<typeof AmountInput> | null>(null)
 const splitEl = ref<InstanceType<typeof SplitEditor> | null>(null)

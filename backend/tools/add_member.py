@@ -23,7 +23,7 @@ from sqlmodel import Session, select
 from app.auth import hash_password
 from app.db import engine
 from app.init_db import init_db
-from app.models import MEMBER_COLORS, Member
+from app.models import Member, free_color
 
 #: 和改密码那一屏（ProfileCard 的 `newPw.length < 6`）同一条线。
 #: 后端本身不设下限 —— 这里只是别让人在服务器上给自己敲一个 1 位的密码
@@ -76,7 +76,7 @@ def main(argv: list[str]) -> None:
             name=name,
             display_name=display,
             display_order=len(rows),
-            color=MEMBER_COLORS[len(rows) % len(MEMBER_COLORS)],
+            color=free_color(m.color for m in rows),
             password_hash=hash_password(_ask(f"{display} 的密码：")),
         )
         session.add(member)

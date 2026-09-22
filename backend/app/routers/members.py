@@ -9,7 +9,7 @@ from sqlmodel import Session, select
 from app.auth import current_member, hash_password, verify_password
 from app.db import get_session
 from app.errors import AppError, not_found, reject_nulls
-from app.models import MEMBER_COLORS, Member
+from app.models import Member, free_color
 from app.routers.auth import to_member_out
 from app.schemas import MemberIn, MemberOut
 
@@ -39,9 +39,10 @@ def create_member(
         raise AppError("member_needs_password", "a new member needs an initial password")
     data = body.model_dump(exclude_none=True, exclude={"password"})
     data.setdefault("display_name", body.name)
-    # 没挑颜色就轮着给一个。都留默认灰的话，头像圆点、分配条、账单每人行
-    # 三处全靠颜色区分谁是谁，而新家没人会先去挑色板
-    data.setdefault("color", MEMBER_COLORS[len(session.exec(select(Member)).all()) % len(MEMBER_COLORS)])
+    # 没挑颜色就发一个**还没人用的**。按人数取模的老做法会撞：
+    # 删过人、或者有人自己挑过色之后，新来的很可能拿到一个已经在用的颜色 ——
+    # 而头像圆点、账单每人行全靠颜色分辨谁是谁
+    data.setdefault("color", free_color(m.color for m in session.exec(select(Member))))
     member = Member(**data)
     if body.password:
         member.password_hash = hash_password(body.password)
