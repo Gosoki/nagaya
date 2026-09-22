@@ -458,6 +458,21 @@ const selectedCategoryRule = computed(
 )
 
 /**
+ * 「进这一屏就把光标放到金额上」—— 但**只在真键盘的设备上**。
+ *
+ * 手机上这一下什么也换不来：没有用户手势，iOS 不会弹键盘，屏幕上只多出一个
+ * 闪着的插入符杵在金额那儿（从别的页切回来时尤其扎眼，像哪儿坏了）。
+ * 桌面/外接键盘不一样 —— 落地就能直接打数字，这一下是实打实省一次点击。
+ *
+ * 保存之后那一次 focus 不在此列：那一下有用户手势（他刚点了「记入账」），
+ * 键盘本来就开着，连着录第二笔正需要它留在那儿。
+ */
+function focusAmountIfTypable() {
+  if (!window.matchMedia?.('(pointer: fine)').matches) return
+  amountEl.value?.focus()
+}
+
+/**
  * 从备忘翻回表单：补两件 display:none 期间做不了的事 ——
  * 比例轮子重对（隐藏时写 scrollLeft 会被丢掉），光标回到金额上（D16）。
  */
@@ -465,7 +480,7 @@ watch(showMemo, (hidden) => {
   if (hidden) return
   void nextTick(() => {
     splitEl.value?.sync()
-    amountEl.value?.focus()
+    focusAmountIfTypable()
   })
 })
 
@@ -476,9 +491,8 @@ onMounted(async () => {
   }
   payerId.value = meta.setting<number | null>('default_payer_id', null) ?? auth.me?.id ?? null
   // 「PWA 一打开就是记一笔，启动即光标就位」（router 里那条 D16）——
-  // 这句规矩一直写在注释里，但从来没落地过：focus() 只在保存后的 reset 里调过。
-  // iOS 上没有用户手势时不会真的弹键盘，所以这一下只是把光标放好，不挡屏幕
-  amountEl.value?.focus()
+  // 只在有真键盘的设备上放，理由见 focusAmountIfTypable
+  focusAmountIfTypable()
 })
 
 /** 正在编辑的那一笔的原样。删除要用它 —— ledger.remove 靠它决定刷哪几份缓存 */
