@@ -574,12 +574,13 @@ defineExpose({
 .member-row {
   display: grid;
   /* 四列在 375 上是挤的，每一列都按它真正要装的东西给：
-       · 比例 84 ＝ 中间那格 36 ＋ 两边各露 24（轮子）
-       · 调整要装得下「-12,000」外加一个正负号按钮，所以比应担还宽一点
+       · 比例 108 ＝ 三格 × 36：中间那格算数，左右各一整格 —— 点得到，不是两条边角料
+       · 调整要装得下「12,000」外加一个正负号按钮（26），所以比应担还宽一点
+       · 应担最宽是「¥17,334」＝ 60，留一点余量就够
        · 名字那列只剩头像 + 两三个字，超了省略号 */
-  grid-template-columns: minmax(0, 0.95fr) 84px minmax(0, 1.2fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 0.62fr) 108px minmax(0, 0.92fr) minmax(0, 0.70fr);
   align-items: center;
-  column-gap: 6px;
+  column-gap: 4px;
 }
 .head-row {
   padding-bottom: 4px;
@@ -663,7 +664,7 @@ defineExpose({
      给了反而会越过固定操作条画到「记入账」按钮上面去 */
   position: relative;
   display: flex;
-  width: 84px;
+  width: 108px;                 /* 三格：中间那格算数，左右各一格整整齐齐，点得到 */
   height: 44px;                 /* 拇指的底线 */
   /* **没激活就滚不动**：默认只是个显示当前值的格子，两边的数被遮住，
      手势也不接。点一下（.live）才露出来、才开始拨 */
@@ -671,8 +672,8 @@ defineExpose({
   outline: none;
   /* 一格一停。没有 snap 它会停在两格之间，「到底算几」就说不清了 */
   scroll-snap-type: x mandatory;
-  /* 首尾两格也要停得到中间：(84 − 36) / 2 */
-  padding: 0 24px;
+  /* 首尾两格也要停得到中间：(108 − 36) / 2 */
+  padding: 0 36px;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
   /* **只接管横向手势**。不写的话手指在这一格上竖着划，页面不动，
@@ -685,9 +686,10 @@ defineExpose({
 }
 .wheel.live {
   overflow-x: auto;
-  /* 激活之后两边淡出，看着是个轮子而不是被裁断的数字带 */
-  -webkit-mask-image: linear-gradient(to right, transparent, #000 30%, #000 70%, transparent);
-  mask-image: linear-gradient(to right, transparent, #000 30%, #000 70%, transparent);
+  /* 激活之后只在最外缘淡一点点：左右那两格要**看得清也点得到**，
+     淡到 30%/70% 的话它们正好被吃掉，屏幕上还是只有一个数 */
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 13%, #000 87%, transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 13%, #000 87%, transparent 100%);
 }
 .wheel::-webkit-scrollbar { display: none; }
 .tick {
@@ -708,6 +710,20 @@ defineExpose({
   cursor: pointer;
 }
 .wheel.live .tick { pointer-events: auto; }
+
+/* **小屏（iPhone SE 一代那种 320）先保钱。**
+   那块屏连「12,000」加一个应担都排不下，三格的轮子只会把数字挤断 ——
+   而被截断的是金额，轮子少露一格只是手感差一点。360 以下退回两格半 */
+@media (max-width: 359px) {
+  .member-row,
+  .head-row {
+    grid-template-columns: minmax(0, 0.62fr) 84px minmax(0, 0.92fr) minmax(0, 0.70fr);
+  }
+  .wheel {
+    width: 84px;
+    padding: 0 24px;            /* (84 − 36) / 2 */
+  }
+}
 .tick.on { color: var(--nagaya-ink); font-weight: 600; }
 /* 凹槽：中间那一格的底。轮子是透明的，它从底下透出来 */
 .wheel-slot {
