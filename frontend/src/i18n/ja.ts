@@ -139,7 +139,7 @@ export default {
     logoutConfirm: 'ログアウトすると、次回はパスワードの入力が必要です。',
   },
   appearance: {
-    title: 'アプリ',
+    title: 'アプリ設定',
     name: '名前', namePlaceholder: '長屋 nagaya',
     icon: 'アイコン', pick: 'アイコンを変更', removeIcon: '既定に戻す',
     iconHint: 'タップして変更（最大 5MB）。ホーム画面に追加したときに表示されます',

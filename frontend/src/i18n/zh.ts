@@ -139,7 +139,7 @@ export default {
     logoutConfirm: '退出之后要重新输密码才进得来。',
   },
   appearance: {
-    title: '应用',
+    title: '应用设置',
     name: '名字', namePlaceholder: '長屋 nagaya',
     icon: '图标', pick: '换个图标', removeIcon: '用回默认',
     iconHint: '点图标换一张，最大 5MB。加到手机主屏后显示的就是它',
