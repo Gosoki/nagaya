@@ -633,7 +633,7 @@ const maxAbs = computed(() =>
 )
 function fillStyle(row: BillRow): Record<string, string> {
   const w = `${(Math.abs(row.closing) / maxAbs.value) * 50}%`
-  // 用**这个人自己的颜色**：头像、分配条、账单每人行三处同一个色，
+  // 用**这个人自己的颜色**：头像和账单每人行是同一个色，
   // 「这条是谁的」不用再回头看左边那个圆点
   const bg = tint(meta.byId[row.member_id]?.color ?? '#90a4ae', 0.32)
   return row.closing < 0

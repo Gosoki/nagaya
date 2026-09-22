@@ -90,9 +90,9 @@ async function deleteLatestEntry(page: import('@playwright/test').Page) {
  */
 async function setWeight(page: import('@playwright/test').Page, index: number, value: number) {
   await page.locator('.weight-pill').nth(index).click()
-  await page.locator('.weight-pick .pick').filter({ hasText: String(value) }).first().click()
+  await page.locator('.roller .tick').filter({ hasText: String(value) }).first().click()
   // 等弹层真的关掉再往下走：它的遮罩会吃掉下一次点击，而报错跟「找不到元素」长得一样
-  await expect(page.locator('.weight-pick')).toHaveCount(0)
+  await expect(page.locator('.roller')).toHaveCount(0)
 }
 
 /**
@@ -730,47 +730,6 @@ test('调整额输得进负数，比例点一下就能选', async ({ page }) => 
   // 比例点一下弹出 0/1/2/3
   await setWeight(page, 2, 0)
   expect((await shares()).sort((a, b) => a - b)).toEqual([0, 3750, 5250])
-})
-
-test('分配条：按住分界线一推，钱在相邻两人之间流动，合计一分不差', async ({ page }) => {
-  await login(page)
-  await page.locator('input.amount').fill('9000')
-  await page.getByRole('button', { name: '日用品' }).click()
-
-  const shares = () =>
-    page.locator('.member-row .share-col').allTextContents()
-      .then((t) => t.map((x) => Number(x.replace(/[^\d-]/g, ''))))
-  const weights = () =>
-    page.locator('.weight-pill').allTextContents().then((t) => t.map((x) => x.trim()).join('/'))
-
-  expect(await shares()).toEqual([3000, 3000, 3000])
-
-  // 条子上有两道杠（三个人），按住第一道往右推
-  const handle = page.locator('.alloc .handle').first()
-  const box = (await handle.boundingBox())!
-  expect(box, '分配条没渲染出来').toBeTruthy()
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-  await page.mouse.down()
-  await page.mouse.move(box.x + box.width / 2 + 40, box.y + box.height / 2, { steps: 10 })
-  await page.mouse.up()
-
-  const after = await shares()
-  expect(after[0]!, '第一个人该多担了').toBeGreaterThan(3000)
-  expect(after[1]!, '钱是从相邻那个人那儿来的').toBeLessThan(3000)
-  expect(after[2], '不相邻的人一分不动').toBe(3000)
-  expect(after.reduce((a, b) => a + b, 0), '合计必须还等于金额').toBe(9000)
-
-  // **写的是调整额，不是份数** —— 份数是「谁算几个人」，拖动不该把它改掉
-  expect(await weights(), '拖动不许动份数').toBe('1/1/1')
-  const adj = await page.locator('.adj-col .num-input').evaluateAll((els) =>
-    (els as HTMLInputElement[]).map((e) => Number(e.value.replace(/[^\d-]/g, '')) || 0),
-  )
-  expect(adj.reduce((a, b) => a + b, 0), '挪来挪去，调整额之和恒为 0').toBe(0)
-  expect(adj[0]! + 3000).toBe(after[0])
-
-  // 一键回到等分
-  await page.getByRole('button', { name: '恢复等分' }).click()
-  expect(await shares()).toEqual([3000, 3000, 3000])
 })
 
 test('支出 / 收入 / 转账 三等分，选中的是实心色块且三种颜色各不相同', async ({ page }) => {
@@ -1411,7 +1370,7 @@ test('点头像把人排除出这笔，再点恢复（原来是几就还回几�
 
   // 原来不是 1 的人，恢复时要还回原来那个数，不能一律变成 1
   await page.locator('.weight-pill').first().click()
-  await page.locator('.weight-pick .pick').filter({ hasText: '2' }).first().click()
+  await page.locator('.roller .tick').filter({ hasText: '2' }).first().click()
   expect(await weights()).toBe('2/1/1')
   await page.locator('.name-col').first().click()
   expect(await weights()).toBe('0/1/1')

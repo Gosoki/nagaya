@@ -14,7 +14,6 @@ export default {
   nav: { add: '記帳', bill: '請求書', entries: 'その他' },
   kind: { expense: '支出', income: '収入', settlement: '精算' },
   entry: {
-    fixedCostHint: '家賃・光熱費・ネットは「請求書」タブで入力',
     payer: '支払者', receiver: '受取者',
     to: '送金先', title: 'メモ（任意）',
     saved: '記帳しました',
@@ -31,8 +30,6 @@ export default {
   split: {
     excluded: '対象外',
     excludeHint: 'タップでこの記録から除外',
-    dragHint: '境界をドラッグして配分を調整',
-    equalize: '均等に戻す',
     weight: '比率', adjustment: '調整', share: '負担額',
     total: '合計', diff: '差額',
     notBalanced: '{n} 合いません。合わないと保存できません',

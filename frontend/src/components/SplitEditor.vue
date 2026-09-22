@@ -14,57 +14,6 @@
 -->
 <template>
   <div>
-    <!--
-      分配条 —— 按住两段之间那道杠推，钱就在相邻两个人之间流动。
-
-      「谁多谁少」本来就是个连续量，摆成一列数字要人心算；一条按人上色的条子
-      手指一推，两个数字当场对着变，是这一屏唯一不需要先弄懂「权重」这个词
-      就能用的控件。
-
-      **它写的是「调整额」，不动「份数」**：份数（1:1:2）和调整额是这套分摊的
-      两个概念，拖动只是给后者一个直接操作的入口 —— 于是份数那一列一个字不变，
-      拖出来的差额明明白白落在「调整」那一格里，能看见、能再手改、也能清零。
-    -->
-    <div v-if="barOk" class="alloc-wrap">
-      <div ref="barEl" class="alloc">
-        <div
-          v-for="(p, k) in parts"
-          :key="p.id"
-          class="seg"
-          :class="{ dragging: dragIndex === k || dragIndex === k - 1 }"
-          :style="{ width: pctOf(segs[k] ?? 0), background: colorOf(p.id) }"
-        >
-          <!-- 名字放不下时至少给个首字：这条子唯一的信息编码就是颜色，
-               而拖到某人份额很小的那一刻，恰恰是最需要确认「被压小的是谁」的时候 -->
-          <span class="seg-label" :style="{ color: inkOn(colorOf(p.id)) }">
-            {{ pctNum(segs[k] ?? 0) >= 20 ? p.display_name : p.display_name.slice(0, 1) }}
-          </span>
-        </div>
-        <!-- 手柄单独一层：段是等宽变化的，手柄要压在分界线上，而且可点区域
-             得比那道 2px 的杠宽得多（44px），否则手机上根本按不住 -->
-        <button
-          v-for="h in handles"
-          :key="h.i"
-          class="handle"
-          :class="{ on: dragIndex === h.i }"
-          :style="{ left: h.left }"
-          type="button"
-          :aria-label="t('split.dragHint')"
-          @pointerdown="grab(h.i, $event)"
-          @pointermove="move"
-          @pointerup="release"
-          @pointercancel="release"
-        />
-      </div>
-      <div class="alloc-foot text-caption">
-        <span class="text-grey-6">{{ t('split.dragHint') }}</span>
-        <q-space />
-        <button v-if="touched" class="link" type="button" @click="equalize">
-          {{ t('split.equalize') }}
-        </button>
-      </div>
-    </div>
-
     <!-- 列头：比例 / 调整 / 应担 三件事摆在一排，一眼看得出它们的关系。
          调整额原来藏在下面一个折叠里，看不见它是加在比例结果之上的 -->
     <div class="head-row text-caption text-grey-6">
@@ -108,18 +57,32 @@
                material-icons 是**连字字体**，图标名会实打实留在 textContent 里 ——
                药丸的文字就成了「1arrow_drop_down」，读屏会照着念出来 -->
           {{ weightOf(m.id) }}
-          <q-popup-proxy cover transition-show="jump-down">
-            <div class="weight-pick row no-wrap">
-              <button
-                v-for="n in WEIGHT_CHOICES"
-                :key="n"
-                v-close-popup
-                class="pick"
-                :class="{ on: weightOf(m.id) === n }"
-                @click="setWeight(m.id, n)"
+          <!-- 左右拨的滚轮：像调时间那样，按住往两边推，数字从中间那道框下面
+               滑过去，拨到哪个就是哪个。原来是一排按钮 —— 四个还摆得下，
+               可它天生装不了更多，而「谁算两个人」这种事偶尔真会用到 4、5。
+               滚轮不用扫视，推过去就行，多几档也不挑花眼 -->
+          <q-popup-proxy cover transition-show="jump-down" @show="onRollerShow(m.id)">
+            <div class="roller">
+              <div
+                :ref="(el) => setTrack(m.id, el)"
+                class="roller-track"
+                @scroll="onRoll(m.id, $event)"
               >
-                {{ n }}
-              </button>
+                <button
+                  v-for="n in WEIGHT_CHOICES"
+                  :key="n"
+                  v-close-popup
+                  type="button"
+                  class="tick"
+                  :class="{ on: weightOf(m.id) === n }"
+                  @click="setWeight(m.id, n)"
+                >
+                  {{ n }}
+                </button>
+              </div>
+              <!-- 中间那道框。拨过去的数字停在它下面 —— 没有它就看不出
+                   「哪个算数」，滚轮会退化成一条可以乱滚的数字带 -->
+              <div class="roller-mark" aria-hidden="true" />
             </div>
           </q-popup-proxy>
         </button>
@@ -166,12 +129,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import type { Member } from 'src/api/types'
 import MemberAvatar from 'src/components/MemberAvatar.vue'
-import { inkOn } from 'src/color'
 import { SplitError, split } from 'src/core/split'
 import { formatYen } from 'src/i18n'
 import { useMeta } from 'src/stores/meta'
@@ -377,147 +339,42 @@ watch(
   { immediate: true, deep: true },
 )
 
-// ------------------------------------------------------------- 分配条
-
-const barEl = ref<HTMLElement | null>(null)
-const dragIndex = ref<number | null>(null)
-
-/** 条子上有哪几段 —— 只有真正参与的人（权重 0 的不占地方，也不该被拖到钱） */
-const parts = computed(() => props.members.filter((m) => weightOf(m.id) > 0))
-/** 每段多少钱。没填金额时退回按份数画，比例照样是对的 */
-const segs = computed<number[]>(() => {
-  const p = preview.value
-  if (props.amount && p) return parts.value.map((m) => p[String(m.id)] ?? 0)
-  return parts.value.map((m) => weightOf(m.id))
-})
-const segTotal = computed(() => segs.value.reduce((a, b) => a + b, 0))
 /**
- * 什么时候不画这条子：
- *   * 有人分到负数（调整额压过头）—— 负数段画不出来；
- *   * 不参与的人却分到了钱（权重 0 但手填了调整额）—— 条子会少算一块，
- *     加起来对不上总额，那比不画更误导。
- * 这两种都罕见，退回下面那几行数字就是了。
- */
-const barOk = computed(() => {
-  if (parts.value.length < 2 || segTotal.value <= 0) return false
-  if (segs.value.some((v) => v < 0)) return false
-  const p = preview.value
-  if (props.amount && p) {
-    return props.members.every((m) => weightOf(m.id) > 0 || (p[String(m.id)] ?? 0) === 0)
-  }
-  return true
-})
-
-const pctNum = (v: number) => (segTotal.value ? (v / segTotal.value) * 100 : 0)
-const pctOf = (v: number) => `${pctNum(v)}%`
-const colorOf = (id: number) => meta.byId[id]?.color ?? '#90a4ae'
-
-
-const handles = computed(() => {
-  const out: { i: number; left: string }[] = []
-  let acc = 0
-  for (let i = 0; i < segs.value.length - 1; i += 1) {
-    acc += pctNum(segs.value[i] ?? 0)
-    out.push({ i, left: `${acc}%` })
-  }
-  return out
-})
-
-let drag: { i: number; x: number; base: number[]; width: number } | null = null
-
-function grab(i: number, e: PointerEvent) {
-  const el = barEl.value
-  if (!el) return
-  drag = { i, x: e.clientX, base: [...segs.value], width: el.clientWidth }
-  dragIndex.value = i
-  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-  navigator.vibrate?.(5)
-}
-
-function move(e: PointerEvent) {
-  if (!drag) return
-  e.preventDefault()
-  const total = drag.base.reduce((a, b) => a + b, 0)
-  const raw = Math.round(((e.clientX - drag.x) / drag.width) * total)
-  // **每一段都要留得下一个手柄的宽度**（44px）。
-  // 不留的话，把某人推到 0 之后他两边的手柄就叠在一起，左边那条分界线
-  // 从此按不住 —— 手指再也放不上去，前面拖的全得推倒重来。
-  // 「这笔他不参与」有专门的入口（点头像），不该靠把条子拖到底来表达。
-  // 本来就比下限还窄的段不硬抬，只是不许再窄下去。
-  const minVal = Math.ceil((total * 44) / drag.width)
-  const floorL = Math.min(drag.base[drag.i] ?? 0, minVal)
-  const floorR = Math.min(drag.base[drag.i + 1] ?? 0, minVal)
-  const delta = Math.max(
-    -((drag.base[drag.i] ?? 0) - floorL),
-    Math.min((drag.base[drag.i + 1] ?? 0) - floorR, raw),
-  )
-  const next = [...drag.base]
-  next[drag.i] = (drag.base[drag.i] ?? 0) + delta
-  next[drag.i + 1] = (drag.base[drag.i + 1] ?? 0) - delta
-  applyBar(next)
-}
-
-function release() {
-  drag = null
-  dragIndex.value = null
-}
-
-/**
- * 把「我要的这几个数」写回规则里。
+ * 比例可选的档位。
  *
- * 写的是**调整额**，不是份数：
- *   应担 ＝ 按份数分的那份 ＋ 调整额，
- * 所以调整额 ＝ 目标 − 按份数分的那份。拖动只在相邻两人之间挪钱，总额不变，
- * 于是调整额之和恒为 0 —— 基数仍然是整笔金额，算出来的应担**一分不差**就是
- * 拖出来的那几个数（所见即所存）。
- *
- * 「按份数分的那份」用同一个分摊引擎算，不自己除 —— 余数怎么分是引擎的事，
- * 自己算会和落库差 1 円，而那正是这个组件用共享 fixture 钉死的东西。
+ * 原来只给到 3，理由是「一排按钮，多了挑花眼」—— 那是**按钮**的毛病。
+ * 换成滚轮之后不用扫视，推过去就行，所以放宽到 9：房间大小差一倍、
+ * 某人长住某人偶尔来，这些都可能落在 4、5 上。
  */
-function applyBar(next: number[]) {
-  if (!props.amount) {
-    // 还没填金额：拖的是纯比例，直接落在份数上（这时也没有「应担」可言）
-    touched.value = true
-    weights.value = {
-      ...weights.value,
-      ...Object.fromEntries(parts.value.map((m, k) => [String(m.id), Math.max(0, next[k] ?? 0)])),
-    }
-    return
-  }
-  let ratioOnly: Record<string, number>
-  try {
-    ratioOnly = split(
-      { ...rule.value, adjustments: {} } as never,
-      props.amount,
-      {
-        order: order.value,
-        payer: props.payerId === null ? null : String(props.payerId),
-        rotateSeed: props.entryId ?? 0,
-      },
-    )
-  } catch {
-    return
-  }
-  touched.value = true
-  const adj: Record<string, number> = {}
-  parts.value.forEach((m, k) => {
-    const d = (next[k] ?? 0) - (ratioOnly[String(m.id)] ?? 0)
-    if (d !== 0) adj[String(m.id)] = d
+const WEIGHT_CHOICES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+/** 一格多宽。**必须和样式里的 .tick 一致** —— 滚到第几格是拿它除出来的 */
+const TICK_W = 56
+
+/** 每一行自己的滚轮轨道。行会重建（成员变动），所以用函数式 ref 存 */
+const tracks = new Map<number, HTMLElement>()
+function setTrack(id: number, el: unknown) {
+  if (el instanceof HTMLElement) tracks.set(id, el)
+  else tracks.delete(id)
+}
+
+/** 打开时先把当前值滚到中间 —— 拨轮当然要从「你现在是几」开始拨 */
+function onRollerShow(id: number) {
+  void nextTick(() => {
+    const el = tracks.get(id)
+    if (!el) return
+    el.scrollLeft = Math.max(0, WEIGHT_CHOICES.indexOf(weightOf(id))) * TICK_W
   })
-  adjustments.value = adj
-  typing.value = {}
 }
 
-/** 推回等分：份数全 1、调整额清零 */
-function equalize() {
-  touched.value = true
-  weights.value = Object.fromEntries(props.members.map((m) => [String(m.id), 1]))
-  adjustments.value = {}
-  typing.value = {}
+/** 拨到哪一格就是哪一格，松手之前也一路跟着变（和调时间一个手感） */
+function onRoll(id: number, e: Event) {
+  const el = e.target as HTMLElement
+  const i = Math.min(WEIGHT_CHOICES.length - 1, Math.max(0, Math.round(el.scrollLeft / TICK_W)))
+  const n = WEIGHT_CHOICES[i]
+  if (n === undefined || n === weightOf(id)) return
+  setWeight(id, n)
+  navigator.vibrate?.(4)          // 一格一下。iOS 上没有这个 API，静静地跳过
 }
-
-/** 三四个室友，权重再高也就是「谁用得多一倍」。给到 3 足够，多了反而挑花眼 */
-const WEIGHT_CHOICES = [0, 1, 2, 3]
 
 const weightOf = (id: number) => weights.value[String(id)] ?? 0
 
@@ -653,23 +510,55 @@ defineExpose({
   box-shadow: inset 0 0 0 1px var(--nagaya-line);
   color: var(--nagaya-ink-4);
 }
-.weight-pick {
-  padding: 4px;
+/* 滚轮。宽度写死 4 格：中间那格是当前值，两边各留一格半当「还有」的暗示 */
+.roller {
+  position: relative;
+  width: 224px;                 /* 4 × 56 */
+  padding: 6px 0;
+  /* 自己带底。q-popup-proxy 的浮层是透明的，不铺底的话数字会和底下那行
+     表头叠在一起，看着像渲染坏了 */
+  background: var(--nagaya-bg);
+  border-radius: var(--nagaya-r-md);
+  box-shadow: 0 2px 8px rgba(22, 24, 29, 0.12), 0 10px 28px rgba(22, 24, 29, 0.1);
 }
-.weight-pick .pick {
-  min-width: 46px;
-  min-height: 46px;
+.roller-track {
+  display: flex;
+  overflow-x: auto;
+  /* 一格一停。没有 snap 的话它会停在两格之间，「到底算几」就说不清了 */
+  scroll-snap-type: x mandatory;
+  /* 首尾两格也要滚得到中间：(224 − 56) / 2 */
+  padding: 0 84px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  /* 两端渐隐。硬切出来像一条被裁断的数字带，淡出去才像个轮子 ——
+     而且它顺带说明了「两边还有」 */
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 22%, #000 78%, transparent);
+  mask-image: linear-gradient(to right, transparent, #000 22%, #000 78%, transparent);
+}
+.roller-track::-webkit-scrollbar { display: none; }
+.tick {
+  flex: 0 0 56px;
+  height: 56px;
+  scroll-snap-align: center;
   border: none;
-  border-radius: 8px;
   background: transparent;
-  color: #333;
-  font-size: 17px;
+  color: var(--nagaya-ink-3);
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
-.weight-pick .pick.on {
-  background: var(--nagaya-accent);
-  color: #fff;
-  font-weight: 600;
+.tick.on { color: var(--nagaya-ink); font-weight: 600; }
+.roller-mark {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 50%;
+  width: 56px;
+  margin-left: -28px;
+  border-radius: var(--nagaya-r-sm);
+  background: var(--nagaya-accent-bg);
+  box-shadow: inset 0 0 0 1.5px var(--nagaya-accent);
+  pointer-events: none;
 }
 .weight-input::-webkit-outer-spin-button,
 .weight-input::-webkit-inner-spin-button {
@@ -690,73 +579,5 @@ defineExpose({
 }
 .num-input::placeholder { color: var(--nagaya-ink-4); }
 
-/* ---------------------------------------------------------- 分配条 */
-.alloc-wrap { margin: 2px 0 14px; }
-.alloc {
-  position: relative;
-  display: flex;
-  height: 44px;                 /* 够粗才拖得住，也才看得出比例 */
-  border-radius: 12px;
-  overflow: hidden;
-  background: var(--nagaya-fill);
-  touch-action: none;           /* 不然手指一动就变成页面滚动 */
-  user-select: none;
-}
-.seg {
-  position: relative;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s;
-}
-.seg.dragging { filter: brightness(1.08); }
-.seg-label {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-  overflow: hidden;
-  pointer-events: none;
-}
-/* 手柄：屏幕上是一道 4px 的白杠，可点区域 44px —— 拇指按得住 */
-.handle {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 44px;
-  margin-left: -22px;
-  border: none;
-  padding: 0;
-  background: transparent;
-  cursor: col-resize;
-  touch-action: none;
-}
-.handle::before {
-  content: '';
-  position: absolute;
-  top: 6px;
-  bottom: 6px;
-  left: 20px;
-  width: 4px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
-  transition: transform 0.12s;
-}
-.handle.on::before { transform: scaleX(1.6); }
-.alloc-foot {
-  display: flex;
-  align-items: center;
-  margin-top: 6px;
-}
-.link {
-  border: none;
-  background: transparent;
-  color: var(--nagaya-accent);
-  font-size: var(--nagaya-fs-meta);
-  padding: 4px 2px;
-  cursor: pointer;
-}
 .total-bar { font-size: 15px; }
 </style>

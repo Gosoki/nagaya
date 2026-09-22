@@ -14,7 +14,6 @@ export default {
   nav: { add: '记一笔', bill: '账单', entries: '更多' },
   kind: { expense: '支出', income: '收入', settlement: '转账' },
   entry: {
-    fixedCostHint: '房租 / 水电煤网在「账单」那页填',
     payer: '谁付的', receiver: '谁收的',
     to: '转给谁', title: '备注（选填）',
     saved: '已记下',
@@ -31,8 +30,6 @@ export default {
   split: {
     excluded: '不参与',
     excludeHint: '点一下＝这笔他不参与',
-    dragHint: '拖动分界线调整谁多谁少',
-    equalize: '恢复等分',
     weight: '比例', adjustment: '调整', share: '应担',
     total: '合计', diff: '差额',
     notBalanced: '还差 {n}，不平不能存',
