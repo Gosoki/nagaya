@@ -89,8 +89,10 @@ async function deleteLatestEntry(page: import('@playwright/test').Page) {
  * 真机 iOS 上输入框会弹出数字键盘挡半屏，为一个只在 0/1 之间变的值不值当。
  */
 async function setWeight(page: import('@playwright/test').Page, index: number, value: number) {
-  // 比例就在行内那个小轮子上拨，没有弹层了。点一下那一格等于拨到它
+  // 比例就在行内那个小轮子上拨，没有弹层了。**先点一下激活**，再点那一格
   const wheel = page.locator('.wheel').nth(index)
+  await wheel.click()
+  await expect(wheel).toHaveClass(/live/)
   await wheel.locator('.tick').filter({ hasText: String(value) }).first().click()
   await expect(wheel).toHaveAttribute('aria-valuenow', String(value))
 }

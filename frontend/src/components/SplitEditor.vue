@@ -65,21 +65,27 @@
         <div
           :ref="(el) => setTrack(m.id, el)"
           class="wheel"
-          :class="{ off: weightOf(m.id) === 0 }"
+          :class="{ live: armed === m.id, off: weightOf(m.id) === 0 }"
+          tabindex="0"
           role="spinbutton"
           :aria-label="m.display_name"
           :aria-valuenow="weightOf(m.id)"
           :aria-valuemin="WEIGHT_CHOICES[0]"
           :aria-valuemax="WEIGHT_CHOICES[WEIGHT_CHOICES.length - 1]"
+          @click="arm(m.id)"
+          @focus="arm(m.id)"
+          @keydown.left.prevent="step(m.id, -1)"
+          @keydown.right.prevent="step(m.id, 1)"
           @scroll="onRoll(m.id, $event)"
         >
           <button
             v-for="n in WEIGHT_CHOICES"
             :key="n"
             type="button"
+            tabindex="-1"
             class="tick"
             :class="{ on: weightOf(m.id) === n }"
-            @click="setWeight(m.id, n)"
+            @click="pick(m.id, n)"
           >
             {{ n }}
           </button>
@@ -127,7 +133,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import type { Member } from 'src/api/types'
@@ -348,6 +354,53 @@ const WEIGHT_CHOICES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 /** 一格多宽。**必须和样式里的 .tick 一致** —— 停在第几格是拿它除出来的 */
 const TICK_W = 36
 
+/**
+ * 现在在拨哪一行的轮子。**没点过就拨不动。**
+ *
+ * 一个永远可滑的横向滚动区摆在列表行里，手指想翻页却擦到它，比例就被改了 ——
+ * 而改的是钱怎么分，还没有任何提示。所以默认它只是个显示当前值的格子：
+ * 点一下才亮起来、露出两边的数、才开始接手势；点到别处就收回去。
+ */
+const armed = ref<number | null>(null)
+
+function arm(id: number) {
+  if (armed.value === id) return
+  armed.value = id
+  syncWheels()
+  // 点到别处就收。挂在捕获阶段：行内别的东西（比如头像那个按钮）也能正常吃到这一下
+  document.addEventListener('pointerdown', onOutside, true)
+}
+
+function onOutside(e: Event) {
+  const el = armed.value === null ? null : tracks.get(armed.value)
+  const cell = el?.parentElement
+  if (cell && e.target instanceof Node && cell.contains(e.target)) return
+  disarm()
+}
+
+function disarm() {
+  armed.value = null
+  document.removeEventListener('pointerdown', onOutside, true)
+}
+onBeforeUnmount(disarm)
+
+/** 点某一格＝直接拨到它，拨完这一下就算选完了，收回去 */
+function pick(id: number, n: number) {
+  setWeight(id, n)
+  syncWheels()
+  disarm()
+}
+
+/** 键盘上的左右键。轮子本身可聚焦，读屏和外接键盘都用得上 */
+function step(id: number, by: number) {
+  const i = WEIGHT_CHOICES.indexOf(weightOf(id))
+  const next = WEIGHT_CHOICES[Math.min(WEIGHT_CHOICES.length - 1, Math.max(0, i + by))]
+  if (next !== undefined) {
+    setWeight(id, next)
+    syncWheels()
+  }
+}
+
 /** 每一行自己的轮子。行会重建（成员变动），所以用函数式 ref 存 */
 const tracks = new Map<number, HTMLElement>()
 function setTrack(id: number, el: unknown) {
@@ -382,6 +435,11 @@ watch([weights, () => props.members.length], syncWheels, { immediate: true, deep
 
 /** 拨到哪一格就是哪一格，松手之前也一路跟着变（和调时间一个手感） */
 function onRoll(id: number, e: Event) {
+  // **只有激活的那一个才认滚动。**
+  // 没激活时轮子是 overflow:hidden，手指滚不动它 —— 但 scrollLeft 仍然能被
+  // 程序改：浏览器把聚焦元素滚进可视区、自动化脚本的 scrollIntoView，
+  // 都会悄悄把比例拨走一格。值只许从「拨了的那个轮子」或明确的点击/按键来
+  if (armed.value !== id) return
   const el = e.target as HTMLElement
   const i = Math.min(WEIGHT_CHOICES.length - 1, Math.max(0, Math.round(el.scrollLeft / TICK_W)))
   const n = WEIGHT_CHOICES[i]
@@ -501,7 +559,10 @@ defineExpose({
   display: flex;
   width: 108px;
   height: 44px;                 /* 拇指的底线 */
-  overflow-x: auto;
+  /* **没激活就滚不动**：默认只是个显示当前值的格子，两边的数被遮住，
+     手势也不接。点一下（.live）才露出来、才开始拨 */
+  overflow-x: hidden;
+  outline: none;
   /* 一格一停。没有 snap 它会停在两格之间，「到底算几」就说不清了 */
   scroll-snap-type: x mandatory;
   /* 首尾两格也要停得到中间：(108 − 36) / 2 */
@@ -511,12 +572,22 @@ defineExpose({
   /* **只接管横向手势**。不写的话手指在这一格上竖着划，页面不动，
      人会以为卡住了 —— 而这一格正好在屏幕中间，最容易被当成滚动区 */
   touch-action: pan-x;
-  /* 两端渐隐，看着是个轮子而不是被裁断的数字带 */
+  /* 没激活时只露中间那一格 —— 看上去就是个安静的数字，不像个能滑的条 */
+  -webkit-mask-image: linear-gradient(to right, transparent 33%, #000 33%, #000 67%, transparent 67%);
+  mask-image: linear-gradient(to right, transparent 33%, #000 33%, #000 67%, transparent 67%);
+  transition: -webkit-mask-image 0.15s;
+}
+.wheel.live {
+  overflow-x: auto;
+  /* 激活之后两边淡出，看着是个轮子而不是被裁断的数字带 */
   -webkit-mask-image: linear-gradient(to right, transparent, #000 30%, #000 70%, transparent);
   mask-image: linear-gradient(to right, transparent, #000 30%, #000 70%, transparent);
 }
 .wheel::-webkit-scrollbar { display: none; }
 .tick {
+  /* 没激活时整格不接点击 —— 那一下要落到轮子身上（＝激活它），
+     而不是把旁边那个半露的数字选中 */
+  pointer-events: none;
   /* **flex-shrink 必须是 0**：默认会被压扁成一格 3px，整条轮子就不滚了 */
   flex: 0 0 36px;
   width: 36px;
@@ -530,6 +601,7 @@ defineExpose({
   font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
+.wheel.live .tick { pointer-events: auto; }
 .tick.on { color: var(--nagaya-ink); font-weight: 600; }
 /* 凹槽：中间那一格的底。轮子是透明的，它从底下透出来 */
 .wheel-slot {
@@ -542,6 +614,12 @@ defineExpose({
   border-radius: var(--nagaya-r-sm);
   background: var(--nagaya-fill);
   pointer-events: none;
+  transition: box-shadow 0.15s;
+}
+/* 激活了就给凹槽描一圈 —— 「现在拨的是这一格」得看得见 */
+.wheel.live + .wheel-slot,
+.weight-col:has(.wheel.live) .wheel-slot {
+  box-shadow: inset 0 0 0 2px var(--nagaya-accent);
 }
 /* 不参与那一行：凹槽收成一圈细线，别让一个空槽看着像还填着东西 */
 .member-row.out .wheel-slot {
