@@ -19,9 +19,20 @@ function link(rel: string): HTMLLinkElement | null {
   return document.querySelector<HTMLLinkElement>(`link[rel="${rel}"]`)
 }
 
+function meta(name: string): HTMLMetaElement | null {
+  return document.querySelector<HTMLMetaElement>(`meta[name="${name}"]`)
+}
+
 export function applyAppearance(name: string, iconVersion: number): void {
   const title = name.trim()
   if (title) document.title = title
+
+  // **iOS 加到主屏时叫什么，只看这一行。** 它不读清单里的 name/short_name，
+  // 而 index.html 里这行是打包时写死的「長屋」—— 于是设置里改完名字，
+  // 加到主屏的图标下面仍然写着長屋。名字是在「添加到主屏幕」那一刻从
+  // 当前 DOM 里读的，所以改这个标签就够，不用重新打包
+  const appleTitle = meta('apple-mobile-web-app-title')
+  if (appleTitle && title) appleTitle.content = title
 
   const manifest = link('manifest')
   if (manifest) manifest.href = '/api/appearance/manifest.webmanifest'
