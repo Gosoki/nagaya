@@ -10,11 +10,19 @@
 -->
 <template>
   <div class="bill-section">
-    <q-item dense class="section-head">
+    <!-- 默认收起来：名字和图标是「定一次就不再动」的东西，
+         而设置页天天要来的是上面的个人设置。收起时右边显示当前叫什么 -->
+    <q-item clickable dense class="section-head" @click="open = !open">
       <q-item-section>{{ t('appearance.title') }}</q-item-section>
+      <q-item-section side class="text-caption text-grey-6 ellipsis">
+        {{ name || t('appearance.namePlaceholder') }}
+      </q-item-section>
+      <q-item-section side>
+        <q-icon :name="open ? 'expand_less' : 'expand_more'" color="grey-5" size="20px" />
+      </q-item-section>
     </q-item>
 
-    <q-item class="profile-row">
+    <q-item v-if="open" class="profile-row">
       <q-item-section avatar>
         <!-- 点它换图。和换头像一个手势，这一页上两处别是两套 -->
         <button class="icon-btn" :aria-label="t('appearance.pick')" @click="pickFile">
@@ -39,7 +47,7 @@
       </q-item-section>
     </q-item>
 
-    <q-item class="profile-row">
+    <q-item v-if="open" class="profile-row">
       <q-item-section>
         <q-item-label class="row items-center no-wrap">
           <div class="col">{{ t('appearance.name') }}</div>
@@ -72,6 +80,7 @@ const meta = useMeta()
 
 const fileEl = ref<HTMLInputElement | null>(null)
 const busy = ref(false)
+const open = ref(false)
 
 const name = computed(() => meta.setting<string>('app_name', ''))
 const iconVersion = computed(() => meta.setting<number>('app_icon_version', 0))

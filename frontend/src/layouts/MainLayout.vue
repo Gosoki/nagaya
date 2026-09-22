@@ -292,7 +292,25 @@ watch(
   { immediate: true },
 )
 
-onMounted(boot)
+/**
+ * 切回前台就重新拉一次 meta。
+ *
+ * App 的名字和图标是**全屋共用**的一份（存在后端的设置里），但原来只有冷启动
+ * 才会去拉 —— 室友在设置里改完，另外两个人的 app 还挂在后台，切回来看到的
+ * 仍是旧名字旧图标，而且可能挂上好几天。成员、分类同理。
+ *
+ * 只在真的回到前台时拉，失败不打扰：这一下纯属「顺手对一下表」。
+ */
+function onVisible() {
+  if (document.visibilityState !== 'visible') return
+  void meta.load().catch(() => {})
+}
+
+onMounted(() => {
+  void boot()
+  document.addEventListener('visibilitychange', onVisible)
+})
+onBeforeUnmount(() => document.removeEventListener('visibilitychange', onVisible))
 </script>
 
 <!-- 非 scoped：底栏高度给固定操作条用。
