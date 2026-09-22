@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import sqlite3
 import sys
@@ -159,7 +160,8 @@ def main(argv: list[str]) -> None:
         row = con.execute("select value_json from setting where key='backup_path'").fetchone()
         con.close()
         if row:
-            print(f"注意：备份目录跟着回滚成了 {row[0]} —— 不对的话去设置里改回来。")
+            # value_json 存的是 JSON，直接印会带一对引号
+            print(f"注意：备份目录跟着回滚成了 {json.loads(row[0])} —— 不对的话去设置里改回来。")
     except sqlite3.Error:
         pass
     print("起服务就行。所有人的密码没变；换了机器的话大家要重新登录一次"
