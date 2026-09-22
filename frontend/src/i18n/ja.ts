@@ -141,7 +141,7 @@ export default {
   appearance: {
     title: 'アプリ設定',
     name: '名前', namePlaceholder: '長屋 nagaya',
-    icon: 'アイコン', pick: 'アイコンを変更', removeIcon: '既定に戻す',
+    icon: 'アイコン', pick: 'アイコンを変更', removeIcon: '既定に戻す', applied: '更新しました。再読み込みします',
     iconHint: 'タップして変更（最大 5MB）。ホーム画面に追加したときに表示されます',
   },
   settings: {

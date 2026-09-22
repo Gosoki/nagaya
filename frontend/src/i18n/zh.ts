@@ -141,7 +141,7 @@ export default {
   appearance: {
     title: '应用设置',
     name: '名字', namePlaceholder: '長屋 nagaya',
-    icon: '图标', pick: '换个图标', removeIcon: '用回默认',
+    icon: '图标', pick: '换个图标', removeIcon: '用回默认', applied: '改好了，正在刷新',
     iconHint: '点图标换一张，最大 5MB。加到手机主屏后显示的就是它',
   },
   settings: {

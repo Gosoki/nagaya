@@ -132,10 +132,24 @@ async function saveName(el: HTMLInputElement) {
   }
 }
 
-/** 改完当场生效：页签标题、页签小图、主屏清单，不用等下次开 App */
+/**
+ * 改完之后收尾。
+ *
+ * 前半截是**当场生效**的部分：页签标题、页签小图、清单的指向 —— 这些是
+ * Vue 管不到的 DOM，得手动贴。
+ *
+ * 后半截是一次**整页重载**，为的是「加到主屏」那条路：iOS 读 App 名字和图标
+ * 的时机是**页面加载那一刻**，之后我们再怎么改 meta、怎么换 link 元素，
+ * 它都不回头看（实测 WebKit 连那份新清单都不去拉）。所以改完名字不刷新，
+ * 加到主屏拿到的仍是旧名字 —— 那就替人把这一下刷了。
+ *
+ * 这一屏没有「还没保存」的东西（全是失焦即存），刷掉不会丢任何输入。
+ */
 async function after() {
   await meta.load()
   applyAppearance(meta.setting<string>('app_name', ''), meta.setting<number>('app_icon_version', 0))
+  $q.notify({ type: 'positive', message: t('appearance.applied'), timeout: 1200 })
+  setTimeout(() => location.reload(), 700)
 }
 </script>
 
