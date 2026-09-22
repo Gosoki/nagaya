@@ -17,6 +17,7 @@ import { useQuasar } from 'quasar'
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import { escapeHtml } from 'src/html'
 import { useDrafts } from 'src/stores/drafts'
 import { useLedger } from 'src/stores/ledger'
 
@@ -26,12 +27,6 @@ const drafts = useDrafts()
 const ledger = useLedger()
 const busy = ref(false)
 
-/** html: true 的那条通知里塞的是后端的话，先转义 —— 别让一句错误提示变成注入点 */
-function escapeHtml(text: string): string {
-  return text.replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c,
-  )
-}
 
 async function submit() {
   busy.value = true

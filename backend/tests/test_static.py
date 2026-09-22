@@ -77,3 +77,18 @@ def test_head_is_supported(client) -> None:
     不注册的话 curl -I 和用 HEAD 探活的监控都会拿到 405，被判成服务挂了。"""
     for path in ("/", "/api/health"):
         assert client.head(path).status_code == 200, path
+
+
+def test_app_name_with_backslash_keeps_index_alive(client, monkeypatch) -> None:
+    """App 名字里带反斜杠，index.html 不许 500。
+
+    `re.sub` 会把**字符串**替换串里的「\\1」「\\d」当反向引用/转义去解析，
+    名字叫「a\\1」就是一个 500 —— 所有人连门都进不来，也就没法进设置改回去。"""
+    from app import main
+
+    monkeypatch.setattr(
+        main.settings_svc, "get", lambda _s, key: "a\\1b\\d" if key == "app_name" else 0
+    )
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "<title>a\\1b\\d</title>" in r.text

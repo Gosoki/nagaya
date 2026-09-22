@@ -447,6 +447,7 @@ import { useRouter } from 'vue-router'
 
 import { ApiError, api } from 'src/api/client'
 import type { Bill, BillTransfer, Entry, Statement } from 'src/api/types'
+import { escapeHtml } from 'src/html'
 import { FALLBACK } from 'src/palette'
 import MemberAvatar from 'src/components/MemberAvatar.vue'
 import MonthlyFixed from 'src/components/MonthlyFixed.vue'
@@ -900,10 +901,12 @@ function doCut() {
     .filter((r) => !r.archived && !r.amount)
     .map((r) => r.name)
   if (blank.length) hints.push(t('bill.cutBlankFixed', { names: blank.join('、') }))
-  const hint = hints.join('<br><br>')
+  // 开 html 只为换行，每一段都先转义：固定费的名字是用户起的，
+  // 带个 `<` 就会被当标签吞掉（见 src/html.ts）
+  const hint = hints.map(escapeHtml).join('<br><br>')
   $q.dialog({
     title: t('bill.cut'),
-    message: hint ? `${t('bill.cutConfirm')}<br><br>${hint}` : t('bill.cutConfirm'),
+    message: hint ? `${escapeHtml(t('bill.cutConfirm'))}<br><br>${hint}` : t('bill.cutConfirm'),
     html: Boolean(hint),
     cancel: true,
     options: {

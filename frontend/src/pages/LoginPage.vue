@@ -22,6 +22,9 @@
         filled
         :label="t('login.name')"
         autocomplete="username"
+        autocapitalize="off"
+        autocorrect="off"
+        spellcheck="false"
         class="q-mb-md"
       />
       <q-input

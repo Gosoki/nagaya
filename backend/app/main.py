@@ -188,7 +188,10 @@ if DIST.is_dir():
                 '<meta name="apple-mobile-web-app-title" content="長屋" />',
                 f'<meta name="apple-mobile-web-app-title" content="{safe}" />',
             )
-            html = re.sub(r"<title>.*?</title>", f"<title>{safe}</title>", html, count=1)
+            # 替换串用函数给，不用字符串：re.sub 会把字符串里的「\1」「\d」当成
+            # 反向引用/转义去解析 —— 名字里带个反斜杠，index.html 就 500，
+            # 所有人（连装到主屏的 app）都进不来，也就没法进设置把名字改回去
+            html = re.sub(r"<title>.*?</title>", lambda _: f"<title>{safe}</title>", html, count=1)
         return Response(html, media_type="text/html", headers={"Cache-Control": REVALIDATE})
 
     @app.api_route("/{full_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
