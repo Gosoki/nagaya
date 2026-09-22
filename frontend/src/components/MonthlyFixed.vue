@@ -237,9 +237,17 @@ function build(d: MonthlyData) {
   const keep = new Map(
     rows.value.filter((r) => r.dirty || r.deleted_rule).map((r) => [r.category_id, r]),
   )
+  const taken: string[] = []
   data.value = d
   rows.value = d.rows.map((r) => {
-    const held = keep.get(r.category_id)
+    let held = keep.get(r.category_id)
+    // **手里那一笔被出账带走了**（有人在另一台上出了账）：这一行现在是新一期的
+    // 空行。没存上的输入不能留 —— 留着的话，下一次失焦/离开这一屏就把它当成
+    // 新的一笔记进下一期，而人以为自己改的是刚才那笔
+    if (held?.dirty && held.entry_id !== null && held.entry_id !== r.entry_id) {
+      taken.push(r.name)
+      held = undefined
+    }
     return reactive({
       ...r,
       text: held?.dirty ? held.text : r.amount === null ? '' : formatPlain(r.amount),
@@ -252,6 +260,9 @@ function build(d: MonthlyData) {
       deleted_date: held?.deleted_date ?? null,
     })
   })
+  if (taken.length) {
+    $q.notify({ type: 'warning', timeout: 6000, message: t('monthly.takenByCut', { names: taken.join('、') }) })
+  }
 }
 
 async function load() {

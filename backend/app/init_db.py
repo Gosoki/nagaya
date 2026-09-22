@@ -10,6 +10,7 @@ from sqlmodel import Session, SQLModel, select
 
 from app.db import engine
 from app.models import CATEGORY_COLORS, Category, Member
+from app.services import settings as settings_svc
 from app.services.settings import seed_settings
 
 #: 默认分类，中文。
@@ -36,14 +37,19 @@ def init_db() -> None:
     with Session(engine) as session:
         seed_settings(session)
         if not session.exec(select(Category)).first():
-            for order, (name, icon, color, monthly) in enumerate(DEFAULT_CATEGORIES):
-                session.add(
-                    Category(
-                        name=name, icon=icon, color=color,
-                        monthly=monthly, display_order=order,
-                    )
-                )
+            created = [
+                Category(name=name, icon=icon, color=color, monthly=monthly, display_order=order)
+                for order, (name, icon, color, monthly) in enumerate(DEFAULT_CATEGORIES)
+            ]
+            session.add_all(created)
             session.commit()
+            # 兜底分类指到「其他」（默认表的最后一项）。原来全新部署时它是空的：
+            # 没选分类、写了备注的支出按「记入账」毫无反应 —— 前端要把它记进兜底分类，
+            # 兜底是 null 就走不下去。只在**这一次新建了分类**时设，
+            # 不覆盖用户在面板上主动清空的值
+            if settings_svc.get(session, "fallback_category_id") is None:
+                session.refresh(created[-1])
+                settings_svc.set_(session, "fallback_category_id", created[-1].id)
 
 
 def has_members() -> bool:

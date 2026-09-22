@@ -35,18 +35,20 @@ def _shares_by_entry(session: Session, entry_ids: Sequence[int]) -> dict[int, di
     return out
 
 
-def _labels(session: Session, statement_ids: Sequence[int | None]) -> dict[int, str]:
+def _labels(session: Session, statement_ids: Sequence[int | None]) -> dict[int, Statement]:
     ids = {i for i in statement_ids if i is not None}
     if not ids:
         return {}
     rows = session.exec(select(Statement).where(Statement.id.in_(ids)))  # type: ignore[attr-defined]
-    return {s.id: s.label for s in rows}
+    return {s.id: s for s in rows}
 
 
-def _to_out(entry: Entry, shares: dict[int, dict[str, int]], labels: dict[int, str]) -> EntryOut:
+def _to_out(entry: Entry, shares: dict[int, dict[str, int]], labels: dict[int, Statement]) -> EntryOut:
+    st = labels.get(entry.statement_id) if entry.statement_id else None
     return EntryOut(
         **entry.model_dump(),
-        statement_label=labels.get(entry.statement_id) if entry.statement_id else None,
+        statement_label=st.label if st else None,
+        statement_cut_at=st.cut_at if st else None,
         shares=shares.get(entry.id, {}),
     )
 
@@ -154,13 +156,16 @@ def update_entry(
 @router.delete("/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_entry(
     entry_id: int,
+    # 可选：带上就按乐观锁核一遍（别人刚改过/刚被出账带走就 409）。
+    # 不带是给还装在手机上的旧版页面留的路
+    version: int | None = Query(None),
     session: Session = Depends(get_session),
     member: Member = Depends(current_member),
 ):
     entry = session.get(Entry, entry_id)
     if entry is None:
         raise not_found("entry")
-    ledger.delete_entry(session, entry, actor_id=member.id)
+    ledger.delete_entry(session, entry, actor_id=member.id, version=version)
 
 
 @router.post("/{entry_id}/restore", response_model=EntryOut)

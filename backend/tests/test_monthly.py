@@ -425,3 +425,29 @@ def test_an_exact_rule_cannot_be_pruned_and_says_so(session: Session, members) -
     assert [f["name"] for f in out["failed"]] == ["家賃"]
     assert "120000" in out["failed"][0]["reason"] or "120,000" in out["failed"][0]["reason"]
     assert rows_by_name(session)["家賃"]["amount"] is None, "宁可空着，也不许填一个编出来的数"
+
+
+def test_deleted_this_period_stays_deleted_across_a_small_cut(session, members) -> None:
+    """本期手动删掉的房租，中间出一张「不含固定费」的小账之后，不许被自动记账复活。
+
+    原来 carry 拿「最近一张单子」当本期的下界 —— 那张小账不结固定费，
+    它之前删掉的房租就不算「本期删的」了（审计 flow-8 / integrity-4）。
+    """
+    a, *_ = members
+    c = cats(session)
+    c["家賃"].same_as_last = True
+    session.add(c["家賃"])
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG,
+                 amount=120_000, payer_id=a.id, category_id=c["家賃"].id)
+    cut_statement(session, actor_id=a.id)                       # 8 月：结了房租
+
+    made = carry_same_as_last(session, actor_id=a.id)["created"]
+    assert [m["amount"] for m in made] == [120_000]
+    rent = next(e for e in unbilled(session) if e.category_id == c["家賃"].id)
+    delete_entry(session, rent, actor_id=a.id)                  # 这期不交（比如预付过了）
+
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                 amount=500, payer_id=a.id, category_id=c["日用品"].id)
+    cut_statement(session, actor_id=a.id, include_monthly=False)  # 中途结一次日常小账
+
+    assert carry_same_as_last(session, actor_id=a.id)["created"] == []

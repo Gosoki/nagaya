@@ -77,7 +77,7 @@ export const useLedger = defineStore('ledger', () => {
   }
 
   async function remove(entry: Entry) {
-    await api.del(`/api/entries/${entry.id}`)
+    await api.del(`/api/entries/${entry.id}?version=${entry.version}`)
     writes += 1
     entries.value = entries.value.filter((e) => e.id !== entry.id)
     useBills().refreshCached(entry)

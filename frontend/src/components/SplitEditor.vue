@@ -293,8 +293,11 @@ const rule = computed<Record<string, unknown>>(() => ({
   weights: weights.value,
   adjustments: adjustments.value,
   // 余数归谁是**设置项**，不是代码里写死的值。写死成 'payer' 的话，面板上
-  // 改了不生效，而且这条死值还会随规则一起存进 split_rule_json，把设置永久钉住
-  remainder_to: meta.setting<string>('remainder_to', 'payer'),
+  // 改了不生效，而且这条死值还会随规则一起存进 split_rule_json，把设置永久钉住。
+  // **起步规则自己带着的优先**：改一笔旧账时，后端沿用的是那笔存下的 remainder_to，
+  // 预览却拿当前设置去算，除不尽的那 1 円就指到了别人头上
+  remainder_to:
+    (props.seedRule?.remainder_to as string | undefined) || meta.setting<string>('remainder_to', 'payer'),
 }))
 
 /**
@@ -489,15 +492,29 @@ function setWeight(id: number, n: number) {
 
 /** 设成 0 之前那个人是几，恢复时原样还回去（不是一律变回 1） */
 const lastNonZero = ref<Record<string, number>>({})
+/** 同上，调整额。「不参与」时收起来，恢复时还回去 */
+const lastAdj = ref<Record<string, number>>({})
 
+/**
+ * 点头像：这个人这笔不参与 / 恢复。
+ *
+ * **调整额要一起收掉。** 原来只把比例设 0，调整额留着：这一行写着「不参与」，
+ * 可他实际应担的是那笔调整额（+500 就是 ¥500），合计照样对得上、还是绿的 ——
+ * 屏幕上说他不出钱，存下去却要他出。收起来存着，恢复时原样还回去
+ */
 function toggleOut(id: number) {
   const key = String(id)
   const now = weightOf(id)
   if (now === 0) {
     setWeight(id, lastNonZero.value[key] ?? 1)
+    const back = lastAdj.value[key]
+    if (back) write(id, String(back))
   } else {
     lastNonZero.value = { ...lastNonZero.value, [key]: now }
+    const adj = adjustments.value[key]
+    lastAdj.value = { ...lastAdj.value, [key]: adj ?? 0 }
     setWeight(id, 0)
+    if (adj) write(id, '')
   }
 }
 
@@ -559,6 +576,8 @@ const adjNeg = (id: number) => adjText(id).startsWith('-')
 
 /** 父组件切完分类想恢复默认时调它 */
 defineExpose({
+  /** 预览此刻用的那条规则（不管动没动过）。改一笔旧账时照它存，所见即所存 */
+  currentRule: () => rule.value,
   reset() {
     touched.value = false
     resetWeights()

@@ -447,6 +447,7 @@ import { useRouter } from 'vue-router'
 
 import { ApiError, api } from 'src/api/client'
 import type { Bill, BillTransfer, Entry, Statement } from 'src/api/types'
+import { leftOf as leftOfPlan } from 'src/core/transfers'
 import { toHalfWidth } from 'src/digits'
 import { escapeHtml } from 'src/html'
 import { FALLBACK } from 'src/palette'
@@ -506,26 +507,9 @@ const mine = computed(
 // 最新那张的方案同样会在出账后作废（有人没照方案走、或者又记了新账），
 // 而更早那张上的钱可能确确实实还欠着。现在一律看 leftOf()：此刻还欠不欠。
 
-/**
- * 这一笔**此刻**还该转多少。
- *
- * 两头取小：
- *   * 「这一笔还剩多少」＝ 方案额 − 已经转过的（后端的 settled_paid）；
- *   * 「这一对此刻还欠多少」＝ live_transfers 里同一对的金额。
- * 后者是关键：出账之后大家换了条路结清（现金、并单转、经第三人），
- * 这一对就再也不会走钱，它此刻是 0 —— 于是按钮自己消失，按不出假债来。
- * 前者保证在旧单子上不会问出一个超过这张单子本身的数。
- */
+/** 这一笔**此刻**还该转多少。口径见 src/core/transfers.ts */
 function leftOf(tr: BillTransfer, i: number): number {
-  const b = bill.value
-  if (!b) return 0
-  const rest = tr.amount - (b.settled_paid?.[i] ?? 0)
-  // **实时方案里没有这一对 ＝ 此刻不欠。** 原来这里退回成「方案剩余额」，
-  // 于是已经换了条路结清（或者被后来的账净额化掉）的那一对，按钮照样亮、
-  // 大字照样叫人转钱 —— 正是上面那段话要防的事。后端 bill.pair_left 同一口径
-  const live =
-    (b.live_transfers ?? []).find((x) => x.from_id === tr.from_id && x.to_id === tr.to_id)?.amount ?? 0
-  return Math.max(0, Math.min(rest, live))
+  return bill.value ? leftOfPlan(bill.value, tr, i) : 0
 }
 
 /** 卡片上那行小字：转了多少、还差多少、或者「已经不用转了」 */

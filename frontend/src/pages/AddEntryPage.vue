@@ -241,6 +241,7 @@ import { ApiError, api } from 'src/api/client'
 import { jstDateOf, todayJst } from 'src/date'
 import { digitsOf } from 'src/digits'
 import { formatYen } from 'src/i18n'
+import { statementLabel } from 'src/statement'
 import type { Entry, EntryKind } from 'src/api/types'
 import AmountInput from 'src/components/AmountInput.vue'
 import MemberPicker from 'src/components/MemberPicker.vue'
@@ -550,7 +551,9 @@ async function loadForEdit(id: number) {
     ownRule.value = e.split_rule_json
     loadedRule.value = e.split_rule_json
     loadedKind.value = e.kind
-    billedLabel.value = e.statement_label
+    // label 是空的是常态（名字由出账日渲染）—— 原来直接拿 label，于是这条提示从来不出现
+    billedLabel.value =
+      e.statement_id !== null ? statementLabel({ label: e.statement_label, cut_at: e.statement_cut_at }) || null : null
   } catch (err) {
     $q.notify({ type: 'negative', message: err instanceof ApiError ? err.text : String(err) })
     goBack()
@@ -577,7 +580,10 @@ async function saveEdit() {
       to_member_id: kind.value === 'settlement' ? toMemberId.value : null,
       category_id: kind.value === 'expense' ? categoryId.value : null,
       title: title.value,
-      rule: kind.value === 'settlement' ? null : rule.value,
+      // **改旧账时一律把预览正在用的规则发上去**，不去镜像后端「没发规则时用哪条」
+      // 的判据：换过分类又换回来、支出改收入、改过余数设置 …… 那套判据前端总有
+      // 一处对不上，屏幕上的分摊和存下去的就成了两回事
+      rule: kind.value === 'settlement' ? null : (rule.value ?? splitEl.value?.currentRule() ?? null),
     })
     // 改上了就是改上了：后面这次刷新失败（断网）不许报成「没存上」
     await ledger.refresh().catch(() => {})
@@ -692,8 +698,10 @@ async function ensureCategory(): Promise<boolean> {
     if (typed === null || !typed.trim()) return false
     title.value = typed.trim()
   }
+  // 兜底分类没设（全新部署、或者在面板上清空了）就不带分类记 —— 备注已经说清
+  // 这笔是什么了。原来这里 return false，按钮点了毫无反应，也没有一句话
   categoryId.value = fallbackCategoryId.value
-  return categoryId.value !== null
+  return true
 }
 
 async function save() {

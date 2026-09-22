@@ -7,6 +7,7 @@
  * 库里那种「M/D 出账」的老名字也认出来重渲，不用写迁移。
  * 用户自己起的名字（「搬家那次」）照原样显示。
  */
+import { jstDateOf } from 'src/date'
 import { i18n } from 'src/i18n'
 
 /** 后端当年自动拼的那种名字，认出来就别照着印 */
@@ -21,10 +22,13 @@ export function statementLabel(st: {
   const label = (st.label ?? '').trim()
   const auto = label ? AUTO.exec(label) : null
   if (label && !auto) return label
+  // cut_at 是 naive UTC：按**日本时间**取那一天。原来拿 new Date() 当本地时间解析，
+  // 日本时间 0〜9 点出的账，名字会写成前一天（标题、LINE 文本、流水时间线都跟着错）
+  const jst = st.cut_at ? jstDateOf(st.cut_at).split('-') : null
   const [m, d] = auto
     ? [auto[1]!, auto[2]!]
-    : st.cut_at
-      ? [String(new Date(st.cut_at).getMonth() + 1), String(new Date(st.cut_at).getDate())]
+    : jst
+      ? [String(Number(jst[1])), String(Number(jst[2]))]
       : ['', '']
   return m ? t('bill.cutLabel', { m, d }) : label
 }

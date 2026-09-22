@@ -54,6 +54,8 @@ export interface Entry {
   to_member_id: number | null
   statement_id: number | null
   statement_label: string | null
+  /** 所属那张账单的出账时刻（naive UTC）。老账单 label 是空的，名字靠它渲染 */
+  statement_cut_at?: string | null
   bundle_id: number | null
   split_rule_json: Record<string, unknown>
   note: string

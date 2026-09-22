@@ -443,8 +443,20 @@ def update_entry(
     return entry
 
 
-def delete_entry(session: Session, entry: Entry, *, actor_id: int | None) -> None:
-    """软删，进回收站。分摊快照留着 —— 但余额不再算它。"""
+def delete_entry(
+    session: Session, entry: Entry, *, actor_id: int | None, version: int | None = None
+) -> None:
+    """软删，进回收站。分摊快照留着 —— 但余额不再算它。
+
+    带 version 就先核乐观锁：打开编辑页之后这笔被人改过、或者被出账带走了，
+    删的就不是屏幕上那一笔了。已经删掉的再删一次什么都不做（重试不该再记一条审计）
+    """
+    if entry.deleted_at is not None:
+        return
+    if version is not None and version != entry.version:
+        raise LedgerError(
+            "version_conflict", "这笔账刚被人改过，请刷新后重试", expected=entry.version, got=version
+        )
     before = _snapshot(session, entry)
     entry.deleted_at = now_utc()
     # version 也要推进：别人手里那份就此过期。不推的话，另一台手机拿着删除前的

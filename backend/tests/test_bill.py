@@ -575,3 +575,26 @@ def test_the_list_endpoint_agrees_with_the_per_bill_one(session: Session, member
         assert settled[st.id] == settlement_progress(session, st)["settled"], st.id
     # 至少有一张没结清，否则这条用例等于什么都没验
     assert not all(settled.values())
+
+
+def test_small_cut_does_not_reset_the_monthly_clock(session: Session, members) -> None:
+    """月中结过一次「不含固定费」的小账，月底那次正经出账照样默认带上固定费。
+
+    原来「距上次出账几天」量的是最近一张，小账才过三天，月底那次就默认不勾
+    「包括固定费」（审计 integrity-4）。
+    """
+    a, *_ = members
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=1_000, payer_id=a.id)
+    full = cut_statement(session, actor_id=a.id)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=OCT, amount=2_000, payer_id=a.id)
+    small = cut_statement(session, actor_id=a.id, include_monthly=False)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=OCT, amount=3_000, payer_id=a.id)
+
+    full.cut_at = now_utc() - dt.timedelta(days=25)
+    small.cut_at = now_utc() - dt.timedelta(days=3)
+    session.add_all([full, small])
+    session.commit()
+
+    draft = build_bill(session, None)
+    assert draft["days_since_prev_cut"] == 25
+    assert draft["suggest_monthly"] is True

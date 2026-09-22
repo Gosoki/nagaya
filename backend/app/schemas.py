@@ -157,6 +157,9 @@ class EntryOut(SQLModel):
     to_member_id: Optional[int]
     statement_id: Optional[int]
     statement_label: Optional[str]
+    #: 所属那张账单的出账时刻。老账单的 label 是空的（名字由前端按出账日渲染），
+    #: 只给 label 的话编辑页那条「这笔已经出过账」的提示永远拼不出来
+    statement_cut_at: Optional[dt.datetime] = None
     bundle_id: Optional[int]
     split_rule_json: dict[str, Any]
     note: str

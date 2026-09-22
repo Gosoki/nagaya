@@ -47,6 +47,7 @@ export default {
     unsaved: '{n} 项没存上',
     saving: '保存中…',
     autoSaved: '改完自动保存',
+    takenByCut: '{names} 那一笔刚被出账带走了，这边没存上的金额已丢弃 —— 要改去那张账单上改',
     willDelete: '将删除',
     addItem: '加一项固定费',
     addPlaceholder: '名字，比如 停车位',

@@ -47,6 +47,7 @@ export default {
     unsaved: '{n} 件未保存',
     saving: '保存中…',
     autoSaved: '自動保存',
+    takenByCut: '{names} はたった今請求書にまとめられました。保存前の金額は破棄しています。修正はその請求書から行ってください',
     willDelete: '削除されます',
     addItem: '固定費を追加',
     addPlaceholder: '名称（例：NHK受信料）',

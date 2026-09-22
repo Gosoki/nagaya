@@ -249,9 +249,12 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
     # 刚出过账又出一张，多半是临时结的小账，固定费还没到下一轮 —— 默认别带上。
     # 阈值在设置里，代码只认这个数怎么用。
     ref = statement.cut_at if statement else now_utc()
+    # 「上一轮」按**结过固定费的那一张**算：月中结过一次日常小账（不含固定费）的话，
+    # 拿它来量，月底那次正经出账就会因为「才过了几天」默认不含固定费
+    prev_monthly = _last_monthly_cut(session, before=ref)
     # 按 JST 的**自然日**数，不是 24 小时整段。昨晚 23 点出的账、今天上午再出一张，
     # 整段算只有 0.5 天 → 0 天，会让「包括固定费」在该勾的时候默认不勾
-    gap_days = (jst_date(ref) - jst_date(prev.cut_at)).days if prev else None
+    gap_days = (jst_date(ref) - jst_date(prev_monthly.cut_at)).days if prev_monthly else None
     threshold = int(settings_svc.get(session, "monthly_gap_days"))
     return {
         "prev_cut_at": prev.cut_at.isoformat() if prev else None,
@@ -283,6 +286,23 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
         # 这张单子上的转账记完了没有 —— 「转账按钮都点过了就显示结清」
         **settlement_progress(session, statement),
     }
+
+
+def _last_monthly_cut(session: Session, before: dt.datetime | None = None) -> Statement | None:
+    """最近一张**结了固定费**的账单 —— 出账时没选「不含固定费」的那种。
+
+    「不含固定费」的小账不是一期的边界：固定费那一轮该从哪天算、本期删掉的
+    固定费算不算「本期删的」，都得从结了固定费的那一张量起。
+    判据是出账时记进快照的 include_monthly；这个标记之前出的老账单一律当完整出账。
+    账单一年十来张，逐张看快照比写 JSON 查询省事也好读。
+    """
+    stmt = select(Statement)
+    if before is not None:
+        stmt = stmt.where(Statement.cut_at < before)
+    for st in session.exec(stmt.order_by(Statement.cut_at.desc())):
+        if (st.snapshot_json or {}).get("include_monthly", True) is not False:
+            return st
+    return None
 
 
 def _pair_debts(session: Session, statement: Statement | None) -> dict[tuple[int, int], int]:
@@ -506,7 +526,10 @@ def cut_statement(
     claimed = session.execute(
         sa_update(Entry)
         .where(Entry.id.in_(ids), Entry.statement_id.is_(None))
-        .values(statement_id=statement.id)
+        # version 跟着 +1：出账前打开的编辑页、固定费面板手里拿的 version 全部作废。
+        # 不推进的话它们照样改得进去 —— 改的是一张刚发进群里的账单，而屏幕上以为
+        # 自己在改草稿
+        .values(statement_id=statement.id, version=Entry.version + 1)
         .execution_options(synchronize_session=False)
     ).rowcount
     if claimed != len(ids):
@@ -524,6 +547,8 @@ def cut_statement(
     # 就是这么漏过一次的），所以这里按它的返回值来，不手抄字段名
     for key in settlement_progress(session, None):
         snapshot.pop(key, None)
+    # 这一张结没结固定费。「不含固定费」的小账不是一期的边界（见 _last_monthly_cut）
+    snapshot["include_monthly"] = include_monthly
     statement.snapshot_json = snapshot
     session.add(statement)
     session.add(
@@ -741,7 +766,11 @@ def _carry(session: Session, *, actor_id: int | None) -> dict[str, Any]:
     # 光看这一条的话，半年前删过一次的分类会从此**永远**不再自动记 ——
     # 那是另一个方向的静默失效。两条一起才圈得出「这一期手动删掉的」。
     handled = {e.category_id for e in unbilled(session) if e.category_id is not None}
-    since = session.exec(select(Statement).order_by(Statement.cut_at.desc())).first()
+    # 「上次出账」得是**结过固定费的那一次**。中途出一张「不含固定费」的小账
+    # （include_monthly=false）不算一期的边界：拿它当下界的话，它之前那段时间里
+    # 手动删掉的房租就不算「本期删的」了，下次打开账单页被自动记账复活。
+    # 判据见 _last_monthly_cut
+    since = _last_monthly_cut(session)
     dropped = select(Entry).where(
         Entry.deleted_at.is_not(None),
         Entry.category_id.is_not(None),
