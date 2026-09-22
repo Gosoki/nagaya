@@ -21,6 +21,7 @@ import os
 import re
 import shutil
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -140,7 +141,7 @@ def _sweep_parts(directory: Path) -> None:
     但这一条让「cron 和手点同时发生」也不会互相拆台）。
     """
     now = dt.datetime.now().timestamp()
-    for p in directory.glob(f"nagaya-*.db{PART_SUFFIX}"):
+    for p in directory.glob(f"nagaya-*{PART_SUFFIX}"):
         try:
             if now - p.stat().st_mtime > STALE_PART_SECONDS:
                 p.unlink()
@@ -288,15 +289,22 @@ def run(session: Session) -> dict[str, Any]:
     while final.exists():
         stamp += dt.timedelta(seconds=1)
         final = directory / stamp.strftime(NAME_FMT)
-    part = final.with_name(final.name + PART_SUFFIX)
+    # **.part 的名字必须每次都不一样**，不能从 final 推出来。
+    # 推的话同一秒里的两次备份会算出同一个 .part：两边互相 unlink、
+    # 互相往同一个文件里 VACUUM —— 实测 6 个并发**一份都产不出来**
+    # （disk I/O error / table member already exists），而不是「一个成一个败」。
+    # 定时任务和手点「立即备份」正好会撞上这一秒。
+    part = final.with_name(f"{final.name}.{os.getpid()}-{threading.get_ident()}{PART_SUFFIX}")
 
     try:
-        part.unlink(missing_ok=True)      # VACUUM INTO 拒绝写一个已存在的文件
+        part.unlink(missing_ok=True)      # VACUUM INTO 拒绝写一个已存在的文件（名字带 pid+线程，撞不上别人的）
         session.execute(text("VACUUM INTO :p"), {"p": str(part)})
         os.chmod(part, 0o600)             # 密码哈希和头像都在里面
         _fsync_file(part)
         counts = _verify(part, before, _tables(session))
-        os.replace(part, final)           # 到这一刻它才配叫备份
+        # 到这一刻它才配叫备份。同一秒里两个线程各自验过、都想叫这个名字时，
+        # 后到的覆盖先到的 —— 两份都是那一瞬间的完整快照，覆盖不丢任何东西
+        os.replace(part, final)
         _fsync_dir(directory)
     except BackupError:
         part.unlink(missing_ok=True)

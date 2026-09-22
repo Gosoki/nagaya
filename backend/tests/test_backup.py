@@ -306,3 +306,63 @@ def test_tests_never_write_into_the_real_backup_folder(session: Session, members
     after = {p.name for p in real.iterdir()} if real.is_dir() else set()
     assert after == before, f"往真实备份目录里写了：{after - before}"
     assert str(bk.backup_dir(session)).startswith("/"), "该指到 tmp 而不是仓库里"
+
+
+def test_concurrent_backups_do_not_destroy_each_other(tmp_path: Path) -> None:
+    """同一秒里的几次备份**互相不能踩**。
+
+    `.part` 的名字原来是从正式名字推出来的，于是同一秒里的两次算出同一个 `.part`：
+    两边互相 unlink、互相往同一个文件里 VACUUM —— 实测 6 个并发**一份都产不出来**
+    （disk I/O error / table member already exists），不是「一个成一个败」。
+
+    而这不是假想：自动备份跑在后台线程里（asyncio.to_thread），
+    用户在设置页点一下「立即备份」走的是请求线程，两边撞上同一秒就是这个场面。
+
+    跑在真文件库上（不是内存库）：内存库每个连接各自一份数据，撞不出来。
+    """
+    import threading
+
+    from sqlmodel import SQLModel, create_engine
+
+    from app.models import Category, EntryKind, Member
+    from app.services import ledger
+    from app.services.settings import seed_settings
+
+    engine = create_engine(f"sqlite:///{tmp_path}/x.db", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as s:
+        seed_settings(s)
+        settings_svc.set_(s, "backup_path", str(tmp_path / "bk"))
+        settings_svc.set_(s, "backup_keep", 50)
+        ms = [Member(name=f"m{i}", display_name=f"M{i}", display_order=i,
+                     joined_on=dt.date(2020, 1, 1)) for i in range(3)]
+        for m in ms:
+            s.add(m)
+        cat = Category(name="日用品")
+        s.add(cat)
+        s.commit()
+        for x in [*ms, cat]:
+            s.refresh(x)
+        ledger.create_entry(s, actor_id=ms[0].id, kind=EntryKind.expense, on=dt.date(2026, 9, 1),
+                            amount=3_000, payer_id=ms[0].id, category_id=cat.id)
+
+    done: list[object] = []
+    def one() -> None:
+        try:
+            with Session(engine) as s2:
+                done.append(backup_svc.run(s2)["name"])
+        except Exception as e:                       # noqa: BLE001 —— 失败了也要记下来看
+            done.append(e)
+
+    threads = [threading.Thread(target=one) for _ in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    failed = [x for x in done if isinstance(x, Exception)]
+    assert not failed, f"并发备份失败了 {len(failed)} 个：{failed[:2]}"
+    assert not list((tmp_path / "bk").glob("*.part")), "不许留下半截文件"
+    for p in (tmp_path / "bk").iterdir():
+        if backup_svc.NAME_RE.match(p.name):
+            backup_svc.verify_file(p)                # 每一份都得是完整的库

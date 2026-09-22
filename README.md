@@ -87,7 +87,7 @@ cd frontend && npm run build && cd ../backend && ./run.sh
 ## 测试
 
 ```bash
-cd backend  && .venv/bin/python -m pytest   # 182 条：算法 / 账本 / 账单 / API / 边界输入 / 随机操作序列 / 备份恢复
+cd backend  && .venv/bin/python -m pytest   # 183 条：算法 / 账本 / 账单 / API / 边界输入 / 随机操作序列 / 备份恢复
 cd frontend && npm test                     # 94 条：分摊引擎（对后端 fixture）+ 若干守卫
 ./run-e2e.sh                                # 44 条：375px 手机视口，跑前重置库、跑完恢复
 ```
