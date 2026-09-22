@@ -225,6 +225,16 @@ def test_restore_does_not_let_a_stale_wal_climb_back_on(tmp_path: Path) -> None:
     )
 
     assert run("-m", "tools.seed_dev").returncode == 0
+    # 种子库不许自动备份：产物和真备份同名同形，混进同一个目录之后
+    # 「恢复最新那份」会把三个假室友盖到真账本上
+    off = run("-c", (
+        "import sys;sys.path.insert(0,'.')\n"
+        "from sqlmodel import Session\n"
+        "from app.db import engine\n"
+        "from app.services import settings as sv\n"
+        "print(sv.get(Session(engine), 'backup_every_hours'))"
+    ))
+    assert off.stdout.strip() == "0", "seed_dev 该把自动备份关掉"
     made = run("-c", (
         "import sys;sys.path.insert(0,'.')\n"
         "from sqlmodel import Session\n"
@@ -263,3 +273,19 @@ def test_restore_does_not_let_a_stale_wal_climb_back_on(tmp_path: Path) -> None:
     assert list(con.execute("PRAGMA integrity_check"))[0][0] == "ok"
     assert list(con.execute("select count(*) from entry"))[0][0] == before
     con.close()
+
+
+def test_status_actually_opens_the_newest_one(session: Session, bk: Path) -> None:
+    """「共 N 份」只是数了数文件名，而这一屏的全部价值是「它不撒谎」。
+
+    位腐、同步盘传了一半、iCloud 把内容抽走只留个占位 —— 名字都还在。
+    只验最新那一份：它就是要恢复的那一份，而全验 30 份要半秒，
+    这又是个每开一次设置页就调的 GET。
+    """
+    name = backup_svc.run(session)["name"]
+    assert backup_svc.status(session)["last_ok"] is True
+
+    (bk / name).write_bytes(b"truncated by the sync client")
+    st = backup_svc.status(session)
+    assert st["last_ok"] is False, "打不开的那份不许显示成正常"
+    assert st["error"] == "backup_corrupt"

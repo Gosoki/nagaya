@@ -6,11 +6,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlmodel import Session, select
 
 from app.auth import current_member
 from app.db import get_session
+from app.errors import AppError, not_found
 from app.models import Member, Memo, now_utc
 from app.schemas import MemoIn, MemoOut
 
@@ -23,9 +24,9 @@ MAX_BODY = 10_000
 
 def _check_len(title: str | None, body: str | None) -> None:
     if title is not None and len(title) > MAX_TITLE:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"名字最多 {MAX_TITLE} 字")
+        raise AppError("text_too_long", "memo title too long", field="title", limit=MAX_TITLE)
     if body is not None and len(body) > MAX_BODY:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"内容最多 {MAX_BODY} 字")
+        raise AppError("text_too_long", "memo body too long", field="body", limit=MAX_BODY)
 
 
 @router.get("", response_model=list[MemoOut])
@@ -40,7 +41,7 @@ def create_memo(
     member: Member = Depends(current_member),
 ):
     if not (body.title or "").strip():
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "备忘要有个名字")
+        raise AppError("name_required", "memo needs a title")
     _check_len(body.title, body.body)
     # 新的排在最后：列表顺序是人自己排出来的，新条目不该插队
     last = session.exec(select(Memo).order_by(Memo.display_order.desc())).first()  # type: ignore[attr-defined]
@@ -67,10 +68,10 @@ def update_memo(
 ):
     row = session.get(Memo, memo_id)
     if row is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "备忘不存在")
+        raise not_found("memo")
     fields = body.model_dump(exclude_unset=True)
     if "title" in fields and not (fields["title"] or "").strip():
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "备忘要有个名字")
+        raise AppError("name_required", "memo needs a title")
     _check_len(fields.get("title"), fields.get("body"))
     for key, value in fields.items():
         setattr(row, key, value.strip() if key == "title" else value)
@@ -89,7 +90,7 @@ def delete_memo(
 ):
     row = session.get(Memo, memo_id)
     if row is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "备忘不存在")
+        raise not_found("memo")
     # 真删。备忘不是账 —— 账要能追溯所以软删，一条「垃圾袋买大号的」不需要回收站
     session.delete(row)
     session.commit()

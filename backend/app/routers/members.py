@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import io
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, UploadFile, status
 from PIL import Image, ImageOps
 from sqlmodel import Session, select
 
 from app.auth import current_member, hash_password, verify_password
 from app.db import get_session
+from app.errors import AppError, not_found
 from app.models import Member
 from app.routers.auth import to_member_out
 from app.schemas import MemberIn, MemberOut
@@ -28,14 +29,14 @@ def create_member(
     _: Member = Depends(current_member),
 ):
     if not body.name:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "登录名不能为空")
+        raise AppError("name_required", "login name required")
     if session.exec(select(Member).where(Member.name == body.name)).first():
-        raise HTTPException(status.HTTP_409_CONFLICT, f"登录名 {body.name} 已存在")
+        raise AppError("name_taken", f"login name {body.name} taken", status=409, name=body.name)
 
     # 不给密码建出来的账号**永远登不进来**：密码只能自己改，而他登不进来就改不了，
     # 别人替他改会被上面那条挡下 —— 谁也解不开。建的时候就要有
     if not body.password:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "新成员要给一个初始密码")
+        raise AppError("member_needs_password", "a new member needs an initial password")
     data = body.model_dump(exclude_none=True, exclude={"password"})
     data.setdefault("display_name", body.name)
     member = Member(**data)
@@ -56,7 +57,7 @@ def update_member(
 ):
     member = session.get(Member, member_id)
     if member is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "成员不存在")
+        raise not_found("member")
 
     # **登录名和密码只能改自己的。** 这屋里三个人是互相信任的，但「信任」不该等于
     # 「谁都能把别人锁在门外」—— 这两样都是**没法自己恢复**的动作：
@@ -70,13 +71,13 @@ def update_member(
     if body.password is not None:
         private.append("password")
     if private and member.id != me.id:
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN, f"只能改自己的：{', '.join(private)}"
+        raise AppError(
+            "forbidden_self_only", f"self only: {private}", status=403, fields=", ".join(private)
         )
     if body.password is not None:
         # 已经设过密码的，得先报出旧的。手机搁桌上没锁屏，别人顺手就能改掉
         if member.password_hash and not verify_password(body.old_password or "", member.password_hash):
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "当前密码不对")
+            raise AppError("wrong_password", "current password does not match", status=403)
 
     # exclude_unset 而不是 exclude_none：PATCH 的语义是「我发了什么就改什么」。
     # 用 exclude_none 的话 left_on 一旦填错就再也清不掉 —— null 会被当成「没发」，
@@ -87,14 +88,14 @@ def update_member(
     nulled = [k for k in ("name", "display_name", "color", "display_order", "joined_on", "lang")
               if k in fields and fields[k] is None]
     if nulled:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"这些字段不能清空：{', '.join(nulled)}")
+        raise AppError("null_field", f"cannot be cleared: {nulled}", fields=", ".join(nulled))
     if "name" in fields:
         if not fields["name"]:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "登录名不能为空")
+            raise AppError("name_required", "login name required")
         clash = session.exec(select(Member).where(Member.name == fields["name"])).first()
         if clash is not None and clash.id != member_id:
             # 这一条原来会撞穿到数据库的唯一约束，返回 500；POST 那边早就是 409 了
-            raise HTTPException(status.HTTP_409_CONFLICT, f"登录名 {fields['name']} 已存在")
+            raise AppError("name_taken", "login name taken", status=409, name=fields["name"])
     for key, value in fields.items():
         setattr(member, key, value)
     if body.password:
@@ -126,7 +127,7 @@ def _compress_avatar(raw: bytes) -> bytes:
         img = ImageOps.fit(img, (AVATAR_SIZE, AVATAR_SIZE), method=Image.Resampling.LANCZOS)
         img = img.convert("RGB")
     except Exception as e:  # Pillow 认不出的、或者解压炸弹
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "这个文件不是图片") from e
+        raise AppError("avatar_not_image", "not an image") from e
     buf = io.BytesIO()
     img.save(buf, "WEBP", quality=80, method=6)
     return buf.getvalue()
@@ -142,19 +143,19 @@ async def upload_avatar(
     """换头像。只能换自己的。"""
     member = session.get(Member, member_id)
     if member is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "成员不存在")
+        raise not_found("member")
     if member.id != me.id:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "只能改自己的头像")
+        raise AppError("forbidden_self_only", "avatar is self only", status=403, fields="avatar")
 
     # 多读一个字节：正好等于上限的放过，超一点就拒 —— 不先整个读进内存
     raw = await file.read(MAX_AVATAR_BYTES + 1)
     if len(raw) > MAX_AVATAR_BYTES:
-        raise HTTPException(
-            status.HTTP_413_CONTENT_TOO_LARGE,
-            f"图片不能超过 {MAX_AVATAR_BYTES // 1024 // 1024}MB",
+        raise AppError(
+            "avatar_too_big", "avatar over the size limit", status=413,
+            limit_mb=MAX_AVATAR_BYTES // 1024 // 1024,
         )
     if not raw:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "没收到文件")
+        raise AppError("avatar_empty", "no file received")
 
     member.avatar = _compress_avatar(raw)
     member.avatar_version += 1
@@ -173,9 +174,9 @@ def delete_avatar(
     """撤掉头像，回到那个带首字的色圆。"""
     member = session.get(Member, member_id)
     if member is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "成员不存在")
+        raise not_found("member")
     if member.id != me.id:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "只能改自己的头像")
+        raise AppError("forbidden_self_only", "avatar is self only", status=403, fields="avatar")
     member.avatar = None
     member.avatar_version += 1
     session.add(member)

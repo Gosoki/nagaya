@@ -26,14 +26,22 @@ function walk(dir: string): string[] {
   })
 }
 
-/** 后端所有 XxxError("code", ...) 里的 code */
+/**
+ * 后端抛出来的所有 code。两条线都要扫：
+ *   * 业务错 —— `XxxError("code", ...)`
+ *   * 路由错 —— `AppError("code", ...)`，以及 `not_found()` 这个快捷方式
+ * 漏掉第二条的话，这条守卫会在「路由错全都还是中文」的情况下照样绿。
+ */
 function backendCodes(): string[] {
   const out = new Set<string>()
   for (const file of walk(BACKEND)) {
     const text = readFileSync(file, 'utf-8')
-    for (const m of text.matchAll(/\b(?:Ledger|Bill|Rule|Split)Error\(\s*\n?\s*"([a-z_]+)"/g)) {
+    for (const m of text.matchAll(
+      /\b(?:Ledger|Bill|Rule|Split|Backup|App)Error\(\s*\n?\s*"([a-z_]+)"/g,
+    )) {
       out.add(m[1])
     }
+    if (/\bnot_found\(/.test(text)) out.add('not_found')
   }
   return [...out].sort()
 }
@@ -42,8 +50,9 @@ describe('后端错误码 ↔ 前端文案', () => {
   const codes = backendCodes()
 
   it('扫到了错误码（正则写错会空跑成假绿）', () => {
-    expect(codes.length).toBeGreaterThan(8)
+    expect(codes.length).toBeGreaterThan(20)
     expect(codes).toContain('sum_mismatch')
+    expect(codes, '路由错那一路也要扫到').toContain('not_found')
   })
 
   it('每个 code 在中文词条里都有一句话', () => {

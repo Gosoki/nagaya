@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlmodel import Session, select
 
 from app.auth import current_member
 from app.core.rules import RuleError, expand
 from app.core.split import SplitError, split
 from app.db import get_session
+from app.errors import AppError, not_found
 from app.models import Category, Member
 from app.schemas import CategoryIn, CategoryOut
 
@@ -25,7 +26,7 @@ def _check(session: Session, body: CategoryIn, *, me: int | None = None) -> None
         改哪个、删哪个全靠猜。
     """
     if body.default_payer_id is not None and session.get(Member, body.default_payer_id) is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"成员不存在：{body.default_payer_id}")
+        raise AppError("not_found", "member not found", what="member", member_id=body.default_payer_id)
     if body.default_rule_json is not None:
         ids = [m.id for m in session.exec(select(Member).order_by(Member.display_order))]
         try:
@@ -36,9 +37,7 @@ def _check(session: Session, body: CategoryIn, *, me: int | None = None) -> None
                 payer=str(ids[0]) if ids else None,
             )
         except (RuleError, SplitError) as e:
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST, f"这条分摊规则用不了：{e}"
-            ) from e
+            raise AppError("bad_rule", f"category rule unusable: {e}", why=str(e)) from e
     if body.name is not None:
         clash = session.exec(
             select(Category).where(
@@ -47,7 +46,7 @@ def _check(session: Session, body: CategoryIn, *, me: int | None = None) -> None
             )
         ).first()
         if clash is not None and clash.id != me:
-            raise HTTPException(status.HTTP_409_CONFLICT, f"分类「{body.name}」已经有了")
+            raise AppError("name_taken", f"category {body.name} exists", status=409, name=body.name)
 
 
 @router.get("", response_model=list[CategoryOut])
@@ -71,7 +70,7 @@ def create_category(
     # strip 之后再判空：三个空格原来是收的，库里就多一个看不见名字的分类
     body.name = (body.name or "").strip() or None
     if not body.name:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "分类名不能为空")
+        raise AppError("name_required", "category needs a name")
     _check(session, body)
     row = Category(**body.model_dump(exclude_none=True))
     session.add(row)
@@ -89,11 +88,11 @@ def update_category(
 ):
     row = session.get(Category, category_id)
     if row is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "分类不存在")
+        raise not_found("category")
     if body.name is not None:
         body.name = body.name.strip()
         if not body.name:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "分类名不能为空")
+            raise AppError("name_required", "category needs a name")
     _check(session, body, me=category_id)
     # default_rule_json 要能被显式清空，所以单独处理（None 在这里是「清掉」的意思）
     data = body.model_dump(exclude_unset=True)

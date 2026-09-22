@@ -27,6 +27,8 @@
         <q-item-label v-if="st.error" class="text-negative">
           {{ errorText(st.error) }}
         </q-item-label>
+        <!-- 「这儿还没有」不是警报是指令：刚把目录指到别处的人做的是对的事，
+             不该被一盏红灯迎接 —— 而按钮就在这一行的右边 -->
         <q-item-label v-else-if="!st.last_at" class="text-grey-7">
           {{ t('backup.never') }}
         </q-item-label>
@@ -34,6 +36,9 @@
           {{ t('backup.last', { at: when(st.last_at) }) }}
           <span class="text-caption text-grey-6 q-ml-sm">
             {{ t('backup.count', { n: st.count }) }} · {{ size(st.last_bytes) }}
+            <!-- 「共 N 份」只是数了数文件名，而这一格是**真打开验过**的那一份。
+                 位腐、同步盘传了一半、iCloud 把内容抽走只留占位 —— 名字都还在 -->
+            <q-icon v-if="st.last_ok" name="check" size="14px" class="text-positive" />
           </span>
         </q-item-label>
 

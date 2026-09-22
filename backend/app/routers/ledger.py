@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlmodel import Session, select
 
 from app.auth import current_member
 from app.db import get_session
+from app.errors import not_found
 from app.models import Member, Statement
 from app.schemas import BalancesOut, StatementOut
 from app.services import bill as bill_svc
@@ -39,7 +40,7 @@ def monthly(
     if statement_id is not None:
         st = session.get(Statement, statement_id)
         if st is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "账单不存在")
+            raise not_found("statement")
     return bill_svc.monthly_rows(session, st)
 
 
@@ -86,7 +87,7 @@ def statement_bill(
     """
     st = session.get(Statement, statement_id)
     if st is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "账单不存在")
+        raise not_found("statement")
     return bill_svc.build_bill(session, st)
 
 

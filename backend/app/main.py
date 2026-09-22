@@ -23,6 +23,7 @@ from app.db import engine
 from app.services import backup as backup_svc
 
 from app.core.rules import RuleError
+from app.errors import AppError
 from app.services.backup import BackupError
 from app.services.bill import BillError
 from app.core.split import SplitError
@@ -96,15 +97,19 @@ app.add_middleware(
 )
 
 
-def _error_response(exc: LedgerError | RuleError | SplitError | BillError | BackupError) -> JSONResponse:
-    status_code = 409 if exc.code in CONFLICT_CODES else 400
+def _error_response(
+    exc: LedgerError | RuleError | SplitError | BillError | BackupError | AppError,
+) -> JSONResponse:
+    # AppError 自己带状态码（404/403/409 都有），别的那几种统一 400，
+    # 只有 version_conflict 要 409 —— 前端靠它知道该刷新再重试
+    status_code = getattr(exc, "status", None) or (409 if exc.code in CONFLICT_CODES else 400)
     return JSONResponse(
         status_code=status_code,
         content={"code": exc.code, "message": str(exc), "detail": exc.detail},
     )
 
 
-for error_type in (LedgerError, RuleError, SplitError, BillError, BackupError):
+for error_type in (LedgerError, RuleError, SplitError, BillError, BackupError, AppError):
     app.add_exception_handler(
         error_type,
         lambda request, exc: _error_response(exc),  # noqa: ARG005
@@ -154,6 +159,7 @@ if DIST.is_dir():
         if full_path.startswith("api/"):
             # /api 下的未知路径要老老实实 404，被 index.html 吞掉会让前端
             # 拿到一坨 HTML 去 JSON.parse，报出去的错完全指不到问题上
+            # 这两处 404 是 HTTP 管道，不是给人看的话，所以不配错误码
             raise HTTPException(status.HTTP_404_NOT_FOUND, "no such API")
 
         candidate = (DIST / full_path).resolve()

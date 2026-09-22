@@ -1,18 +1,26 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 
 from app.auth import current_member
 from app.core.rules import RuleError, expand
 from app.core.split import SplitError, split
 from app.db import get_session
+from app.errors import AppError, not_found
 from app.models import Category, Member
 from app.schemas import SettingIn, SettingOut
 from app.services import settings as settings_svc
 from app.settings_spec import SETTINGS_SPEC
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
+
+
+def _bad(key: str, want: str) -> AppError:
+    """这一项的值不对。**一个码就够**：用户正看着那一格，界面上说
+    「「余数归谁」这个设置的值不对」他就知道是哪儿了 —— 为十来种类型各造一个码，
+    翻出来的十几句话说的是同一件事，还容易翻歪。具体想要什么放 detail 里给排查用。"""
+    return AppError("setting_invalid", f"{key} wants {want}", key=key, want=want)
 
 
 @router.get("", response_model=list[SettingOut])
@@ -43,7 +51,7 @@ def update_setting(
     _: Member = Depends(current_member),
 ):
     if key not in SETTINGS_SPEC:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"没有这个配置项：{key}")
+        raise not_found("setting")
     spec = SETTINGS_SPEC[key]
     value = body.value
 
@@ -56,38 +64,44 @@ def update_setting(
         model = Member if spec["type"] == "member_id_or_null" else Category
         if value is not None:
             if not isinstance(value, int) or isinstance(value, bool):
-                raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{key} 要填一个 id")
+                raise _bad(key, "id")
             if session.get(model, value) is None:
-                raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{key} 指向的东西不存在：{value}")
+                raise AppError("not_found", f"{key} points nowhere", what="setting_ref", key=key)
     elif spec["type"] == "str" and not isinstance(value, str):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{key} 要填一行文字")
+        raise _bad(key, "str")
     elif spec["type"] in {"int", "int_or_null"}:
         if value is not None:
             if not isinstance(value, int) or isinstance(value, bool):
-                raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{key} 要填整数")
+                raise _bad(key, "int")
             lo, hi = spec.get("min"), spec.get("max")
             if (lo is not None and value < lo) or (hi is not None and value > hi):
-                raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{key} 要在 {lo}〜{hi} 之间")
+                # 越界单独一个码：这是面板上**唯一碰得到**的一种（数字框），
+                # 而「要在 0〜90 之间」正是这一条里唯一有用的信息 ——
+                # 归进 setting_invalid 的话说出来的只剩「值不对」
+                raise AppError(
+                    "setting_out_of_range", f"{key} must be {lo}..{hi}",
+                    key=key, min=lo, max=hi,
+                )
         elif spec["type"] == "int":
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{key} 不能留空")
+            raise _bad(key, "required")
     elif spec["type"] == "enum" and value not in spec["options"]:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{key} 只能是 {spec['options']} 之一")
+        raise _bad(key, str(spec["options"]))
     elif spec["type"] == "bool" and not isinstance(value, bool):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{key} 要填 true/false")
+        raise _bad(key, "true/false")
     elif spec["type"] == "string_list" and not (
         isinstance(value, list) and all(isinstance(v, str) for v in value)
     ):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{key} 要填字符串列表")
+        raise _bad(key, "list")
     elif spec["type"] == "json":
         # **当场试着用一下**。这一项是每笔账的兜底分摊规则，写坏了不会在这里报错，
         # 而是等到下一次「记一笔」时才 500 —— 那时人正在记账，也看不出跟设置有关
         if not isinstance(value, dict):
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{key} 要填一个对象")
+            raise _bad(key, "object")
         try:
             ids = [m.id for m in session.exec(select(Member).order_by(Member.display_order))]
             split(expand(value, ids), 1000, order=[str(i) for i in ids], payer=str(ids[0]) if ids else None)
         except (RuleError, SplitError) as e:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{key} 这条规则用不了：{e}") from e
+            raise AppError("bad_rule", f"{key} rule unusable: {e}", key=key, why=str(e)) from e
 
     settings_svc.set_(session, key, value)
     return SettingOut(

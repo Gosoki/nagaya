@@ -104,6 +104,9 @@ def current_member(
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
     session: Session = Depends(get_session),
 ) -> Member:
+    # 这一屏的 401 **故意不走 code 那条线**：前端在读 body 之前就按状态码短路了
+    # （client.ts 看到 401 直接清 token 跳登录页），给它配个码也没人会读到。
+    # 其它路由错都已经改成 {code,message,detail} 了，见 app/errors.py
     if creds is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "未登录")
     try:

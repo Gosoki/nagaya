@@ -329,6 +329,7 @@ def status(session: Session) -> dict[str, Any]:
         "path": str(backup_dir(session)),
         "error": None, "last_at": None, "last_name": None, "last_bytes": None,
         "count": 0, "keep": int(settings_svc.get(session, "backup_keep") or 0),
+        "last_ok": None,
         "every_hours": every, "stale": True, "same_disk": None,
     }
     try:
@@ -342,6 +343,17 @@ def status(session: Session) -> dict[str, Any]:
     out["count"] = len(files)
     newest = files[-1] if files else None
     if newest is not None:
+        # **真打开看一眼**，不是数一数文件名。位腐、同步盘传了一半、
+        # iCloud 把内容抽走只留占位 —— 目录里名字照样对得上，而这一屏
+        # 正是那个「承诺了一件自己没检查过的事」的地方。
+        # 只验最新这一份：它就是要恢复的那一份，17ms（5 年规模）。
+        # 全验 30 份要半秒，而这是个每开一次设置页就调的 GET
+        try:
+            verify_file(newest)
+            out["last_ok"] = True
+        except BackupError as e:
+            out["last_ok"] = False
+            out["error"] = e.code
         at = dt.datetime.strptime(newest.name, NAME_FMT)
         out["last_at"] = at.isoformat(timespec="seconds")
         out["last_name"] = newest.name

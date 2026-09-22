@@ -27,6 +27,8 @@ def to_member_out(m: Member) -> MemberOut:
 def login(body: LoginIn, session: Session = Depends(get_session)) -> LoginOut:
     member = authenticate(session, body.name, body.password)
     if member is None:
+        # 同样不配码：登录页是按 e.status === 401 显示「用户名或密码不对」的
+        # （别的状态码要原样说出来 —— 断网时说成密码错会让人一遍遍改密码）
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "用户名或密码不对")
     return LoginOut(token=make_token(member), member=to_member_out(member))
 

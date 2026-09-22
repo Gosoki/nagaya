@@ -190,6 +190,8 @@ export interface BackupStatus {
   every_hours: number
   /** 上一份太久了（超过间隔的两倍） */
   stale: boolean
+  /** 上一份**真打开验过**了吗（不是数文件名）。null ＝ 一份都还没有 */
+  last_ok: boolean | null
   /** 备份和账本在同一块盘上 —— 挡不住盘坏 */
   same_disk: boolean | null
 }

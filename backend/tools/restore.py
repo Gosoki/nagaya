@@ -19,12 +19,14 @@
 from __future__ import annotations
 
 import shutil
+import sqlite3
 import sys
 from pathlib import Path
 
-from sqlmodel import Session
+from sqlmodel import Session, SQLModel
 
 from app.db import DB_PATH, engine
+from app.models import Member  # noqa: F401 —— 导入即注册表，_schema_drift 要读 metadata
 from app.services import backup as backup_svc
 
 SIDECARS = ("-wal", "-shm")
@@ -49,13 +51,59 @@ def _pick(name: str | None) -> Path:
     return hit
 
 
+def _columns(path: Path) -> dict[str, set[str]]:
+    """一份库里每张表有哪些列。用来比对「这份备份和现在的代码对不对得上」。"""
+    con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        names = [
+            r[0] for r in con.execute(
+                "select name from sqlite_master where type='table' and name not like 'sqlite_%'"
+            )
+        ]
+        return {n: {r[1] for r in con.execute(f'pragma table_info("{n}")')} for n in names}
+    finally:
+        con.close()
+
+
+def _schema_drift(path: Path) -> list[str]:
+    """这份备份缺了今天的代码要用的哪些列。
+
+    **这是恢复路上最阴的一条。** 项目至今是 `create_all` 没有迁移
+    （SPEC D18：录真账之前再切 Alembic），而 create_all 对已存在的表**只加表不加列**。
+    于是恢复一份改字段之前做的备份：服务起得来、完整性检查也过，
+    然后每一条碰到新列的查询都是 `no such column` → 500 ——
+    而那时旧库已经被挪走了。宁可现在拦下来。
+    """
+    want = {t.name: {c.name for c in t.columns} for t in SQLModel.metadata.tables.values()}
+    got = _columns(path)
+    missing = []
+    for table, cols in want.items():
+        gone = cols - got.get(table, set())
+        if table not in got:
+            missing.append(f"{table}（整张表都没有）")
+        elif gone:
+            missing.append(f"{table}.{'/'.join(sorted(gone))}")
+    return missing
+
+
 def main(argv: list[str]) -> None:
     if "--list" in argv:
         folder = _dir()
         print(f"备份目录：{folder}")
         for p in sorted(folder.iterdir()) if folder.is_dir() else []:
-            if backup_svc.NAME_RE.match(p.name):
-                print(f"  {p.name}  {p.stat().st_size:,} 字节")
+            if not backup_svc.NAME_RE.match(p.name):
+                continue
+            # 把「里面有多少东西」一起列出来：种子库和真账本的备份同名同形，
+            # 光看文件名分不出来，而挑错一份的代价是把假账本盖到真账本上
+            try:
+                con = sqlite3.connect(f"file:{p}?mode=ro", uri=True)
+                who = ", ".join(r[0] for r in con.execute("select display_name from member"))
+                n = list(con.execute("select count(*) from entry"))[0][0]
+                con.close()
+                extra = f"{n} 笔 · {who}"
+            except sqlite3.Error as e:
+                extra = f"**打不开：{e}**"
+            print(f"  {p.name}  {p.stat().st_size:>10,} 字节  {extra}")
         return
 
     src = _pick(next((a for a in argv if not a.startswith("-")), None))
@@ -67,6 +115,17 @@ def main(argv: list[str]) -> None:
         sys.exit(f"这一份用不了：{e}\n什么都没动。换一份试试（--list 看有哪些）。")
     print(f"要恢复的这份：{src.name}（{src.stat().st_size:,} 字节，"
           f"{len(counts)} 张表，{sum(counts.values())} 行）")
+
+    drift = _schema_drift(src)
+    if drift and "--force" not in argv:
+        sys.exit(
+            "这份备份比现在的代码旧，缺这些列：\n  " + "\n  ".join(drift) +
+            "\n\n恢复上去服务起得来，但一查到这些列就是 500，而那时旧库已经被挪走了。\n"
+            "要么换一份新的（--list 看看），要么先把代码退回那个版本，\n"
+            "确实要硬来就加 --force。什么都没动。"
+        )
+    if drift:
+        print(f"⚠️ 缺列：{', '.join(drift)}（--force 了，继续）")
 
     if DB_PATH.exists() and "--yes" not in argv:
         print(f"\n现在的账本：{DB_PATH}")
@@ -91,6 +150,16 @@ def main(argv: list[str]) -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, DB_PATH)
     print(f"恢复完成：{DB_PATH}")
+    # **设置表也一起恢复了**，包括备份目录它自己。恢复一份「目录还指着旧移动盘」
+    # 时代的备份，备份目录会跟着回滚 —— 而这恰好是刚出完事、最不该再丢一次备份的时候
+    try:
+        con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+        row = con.execute("select value_json from setting where key='backup_path'").fetchone()
+        con.close()
+        if row:
+            print(f"注意：备份目录跟着回滚成了 {row[0]} —— 不对的话去设置里改回来。")
+    except sqlite3.Error:
+        pass
     print("起服务就行。所有人的密码没变；换了机器的话大家要重新登录一次"
           "（签名密钥 data/.secret 不在备份里）。")
 

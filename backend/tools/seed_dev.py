@@ -186,9 +186,16 @@ def main() -> None:
         s.commit()
 
         total = len(s.exec(select(Entry)).all())
+        # **种子数据不值得备份。** 不关的话，起服务那一下就会给这个假账本备一份，
+        # 产物和真备份同名同形躺在同一个目录里 —— 哪天恢复时挑「最新那份」，
+        # 盖上去的是三个假室友。真实部署建的是全新库，设置走 SETTINGS_SPEC 的默认值
+        # （backup_every_hours=24），不受这一行影响
+        settings_svc.set_(s, "backup_every_hours", 0)
+
         print(f"建好 {len(PEOPLE)} 个成员（密码 {PASSWORD}）、4 张出过的账单、{total} 笔账")
         print("  出账日 5/30 / 7/2 / 7/28 / 8/30 —— 故意不规整")
         print("  前三张已结清；最近一张只转了一笔；当前草稿的 燃气 / 水费 空着")
+        print("  自动备份已关掉 —— 种子数据不值得备份，也免得混进真备份里")
 
 
 def finish_cut(s: Session, actor_id: int, label: str, at: dt.datetime):

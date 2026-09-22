@@ -3,11 +3,12 @@ from __future__ import annotations
 import datetime as dt
 from typing import Sequence
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlmodel import Session, select
 
 from app.auth import current_member
 from app.db import get_session
+from app.errors import not_found
 from app.models import Category, Entry, EntryShare, Member, Statement
 from app.schemas import EntryIn, EntryOut, EntryPatch
 from app.services import ledger
@@ -96,7 +97,7 @@ def get_entry(
     """单独取一笔 —— 编辑页按 id 直接开，刷新和深链都能用。"""
     entry = session.get(Entry, entry_id)
     if entry is None or entry.deleted_at is not None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "账目不存在")
+        raise not_found("entry")
     return to_entry_out(session, entry)
 
 
@@ -135,7 +136,7 @@ def update_entry(
 ):
     entry = session.get(Entry, entry_id)
     if entry is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "账目不存在")
+        raise not_found("entry")
     fields = body.model_dump(exclude_unset=True, exclude={"rule", "member_ids"})
     entry = ledger.update_entry(
         session,
@@ -158,7 +159,7 @@ def delete_entry(
 ):
     entry = session.get(Entry, entry_id)
     if entry is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "账目不存在")
+        raise not_found("entry")
     ledger.delete_entry(session, entry, actor_id=member.id)
 
 
@@ -170,6 +171,6 @@ def restore_entry(
 ):
     entry = session.get(Entry, entry_id)
     if entry is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "账目不存在")
+        raise not_found("entry")
     ledger.restore_entry(session, entry, actor_id=member.id)
     return to_entry_out(session, entry)
