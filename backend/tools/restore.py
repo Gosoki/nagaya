@@ -127,10 +127,12 @@ def main(argv: list[str]) -> None:
     if drift:
         print(f"⚠️ 缺列：{', '.join(drift)}（--force 了，继续）")
 
-    if DB_PATH.exists() and "--yes" not in argv:
+    if DB_PATH.exists():
+        # 这句 --yes 时也要印：服务没停的话它还开着旧库的文件句柄，
+        # 换完之后它写的仍然是被挪走的那一份，而屏幕上一切正常
         print(f"\n现在的账本：{DB_PATH}")
         print("**先把服务停掉**（run.sh 那个进程），否则它还在往旧库里写。")
-        if input("停好了？输 yes 继续：").strip().lower() != "yes":
+        if "--yes" not in argv and input("停好了？输 yes 继续：").strip().lower() != "yes":
             sys.exit("没动任何东西。")
 
     # ② 现有的挪走，不删 —— 万一恢复错了那份，原来的还在

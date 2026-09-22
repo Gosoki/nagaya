@@ -51,6 +51,7 @@
         <q-item-label v-if="st.same_disk" caption class="text-grey-6">
           {{ t('backup.sameDisk') }}
         </q-item-label>
+        <!-- 只指路，不写步骤：恢复得在终端做，四步说明摆在手机上占三行还用不上 -->
         <q-item-label caption class="text-grey-6">{{ t('backup.restore') }}</q-item-label>
       </q-item-section>
     </q-item>

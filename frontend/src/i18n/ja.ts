@@ -103,7 +103,7 @@ export default {
     never: 'このフォルダにはまだありません —— 右のボタンで 1 つ作ってください', last: '前回 {at}', count: '{n} 世代',
     dir: '保存先', sameDisk: '台帳と同じディスク上です —— 誤削除や破損には有効ですが、ディスク故障には無力です',
     auto: '{n} 時間ごとに自動取得', autoOff: '自動取得しない',
-    restore: '復元：サービスを止める → その .db を data/nagaya.db にコピー → data/ の -wal と -shm を削除 → 起動',
+    restore: '復元するには：サービスを止めて backend で python -m tools.restore（詳細は README）',
   },
   profile: {
     title: 'プロフィール',

@@ -103,7 +103,7 @@ export default {
     never: '这个目录里还没有备份 —— 点右边那个按钮放一份进去', last: '上次 {at}', count: '共 {n} 份',
     dir: '目录', sameDisk: '和账本在同一块盘上 —— 防得住手滑和库坏，防不住盘坏',
     auto: '每 {n} 小时自动备一次', autoOff: '不自动备份',
-    restore: '恢复：停掉服务 → 把那份 .db 拷成 data/nagaya.db → 删掉 data/ 下的 -wal 和 -shm → 起服务',
+    restore: '要恢复：停掉服务，跑 backend 里的 python -m tools.restore（步骤见 README）',
   },
   profile: {
     title: '个人',
