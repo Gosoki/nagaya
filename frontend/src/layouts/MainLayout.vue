@@ -57,6 +57,8 @@
         <q-tab name="entries" icon="format_list_bulleted" :label="t('nav.entries')" @click="go('entries')" />
       </q-tabs>
     </q-footer>
+    <!-- 布局诊断条：设置页版本号连点 5 下才会出现，平时不渲染 -->
+    <LayoutProbe v-if="debugLayout" />
     <q-page-container>
       <router-view v-if="meta.members.length" />
       <!-- 起不来就得说出来。原来只有一个转圈：拉不到基础数据时它会一直转下去，
@@ -84,6 +86,7 @@ import { applyAppearance } from 'src/appearance'
 import { useOnline } from 'src/composables/online'
 import { useMemos } from 'src/stores/memos'
 import BillTabs from 'src/components/BillTabs.vue'
+import LayoutProbe from 'src/components/LayoutProbe.vue'
 import EntriesTabs from 'src/components/EntriesTabs.vue'
 import DraftBanner from 'src/components/DraftBanner.vue'
 import { useAuth } from 'src/stores/auth'
@@ -126,6 +129,15 @@ function go(name: string) {
   if (name === 'add') memos.goAddHome()
   if (route.name !== name) void router.push({ name })
 }
+
+/** 布局诊断条开着没有（设置页版本号连点 5 下切换，存在本机） */
+const debugLayout = (() => {
+  try {
+    return localStorage.getItem('nagaya.debugLayout') === '1'
+  } catch {
+    return false
+  }
+})()
 
 /** 账单那两页才显示页签 */
 const onBillTabs = computed(() => route.name === 'bill')

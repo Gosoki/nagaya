@@ -146,6 +146,7 @@ export default {
   },
   settings: {
     system: '系统设置', count: '{n} 项',
+    debugOn: '布局诊断已开启', debugOff: '布局诊断已关闭',
     label: {
       default_payer_id: '默认垫付人',
       remainder_to: '余数归谁',

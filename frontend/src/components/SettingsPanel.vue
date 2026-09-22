@@ -159,7 +159,7 @@
 
     <!-- 装的是哪一版。手机上的 PWA 换包要等 service worker 轮换，
          「改了怎么没生效」十次有九次是这儿对不上 —— 印出来就不用猜了 -->
-    <div class="text-center text-caption text-grey-5 q-py-md build">{{ build }}</div>
+    <div class="text-center text-caption text-grey-5 q-py-md build" @click="tapBuild">{{ build }}</div>
   </div>
 </template>
 
@@ -179,6 +179,31 @@ import { useMeta } from 'src/stores/meta'
 const { t, locale } = useI18n()
 /** 打包时刻（日本时间），vite.config.ts 注入 —— 印在这一屏最底下 */
 const build = __BUILD__
+
+/**
+ * 版本号连点 5 下：开/关布局诊断条（见 LayoutProbe）。
+ * 藏得深是故意的 —— 那是给排查手机上布局问题用的，不是给人日常看的。
+ * 切完整页刷新：要复现的正是「刚启动那一下」
+ */
+let taps = 0
+let tapTimer = 0
+function tapBuild() {
+  taps++
+  clearTimeout(tapTimer)
+  tapTimer = window.setTimeout(() => (taps = 0), 1500)
+  if (taps < 5) return
+  taps = 0
+  let on = false
+  try {
+    on = localStorage.getItem('nagaya.debugLayout') !== '1'
+    if (on) localStorage.setItem('nagaya.debugLayout', '1')
+    else localStorage.removeItem('nagaya.debugLayout')
+  } catch {
+    return
+  }
+  $q.notify({ message: t(on ? 'settings.debugOn' : 'settings.debugOff'), timeout: 1000 })
+  setTimeout(() => location.reload(), 800)
+}
 const $q = useQuasar()
 const meta = useMeta()
 
