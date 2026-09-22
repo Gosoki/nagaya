@@ -8,6 +8,8 @@ sum_mismatch 要红字显示差额），message 只是给开发看的兜底。
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -15,13 +17,20 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from sqlmodel import Session
+
+from app.db import engine
+from app.services import backup as backup_svc
 
 from app.core.rules import RuleError
+from app.services.backup import BackupError
 from app.services.bill import BillError
 from app.core.split import SplitError
 from app.init_db import init_db
-from app.routers import auth, categories, entries, ledger, members, memos, settings
+from app.routers import auth, backup, categories, entries, ledger, members, memos, settings
 from app.services.ledger import LedgerError
+
+log = logging.getLogger("nagaya")
 
 #: 这些错误是「用户输入不对」，不是 500。个别要用 409 让前端知道该刷新。
 CONFLICT_CODES = {"version_conflict"}
@@ -29,7 +38,48 @@ CONFLICT_CODES = {"version_conflict"}
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
-    yield
+    task = asyncio.create_task(_daily_backup())
+    try:
+        yield
+    finally:
+        task.cancel()
+
+
+#: 多久醒一次看看今天备过没有。一小时够了 —— 判据不是「距上次多久」而是
+#: 「今天有没有产出」，所以醒得勤一点只是多几次空查
+_BACKUP_TICK = 3600
+
+
+async def _daily_backup() -> None:
+    """每天一份备份，跑在进程里。
+
+    **为什么不挂 cron / systemd timer**：部署形态还没定（SPEC D8 写的是「部署放 M3
+    再定」），而这个功能的起因正是「面板承诺了一个不存在的备份」—— 一个还要用户
+    另外配一遍才生效的方案，在他配完之前仍然没有备份。这个 app 是单端口单进程
+    （README 部署那一行），进程内跑一个任务不会出现多实例互相打架。
+
+    判据是「离上一份多久了」而不是「睡够 24 小时没有」：合盖睡眠、半夜重启、
+    改系统时间都会让后者失准，而前者读的是目录里那份文件自己的时间戳。
+
+    备份失败**只记日志不抛**：备份坏了不该把记账也带下去。用户在设置页上看得见
+    「上次备份」停在哪天 —— 那比一条崩溃日志更可能被真的看到。
+    """
+    while True:
+        try:
+            made = await asyncio.to_thread(_backup_once)
+            if made is not None:
+                log.info("备份完成：%s（%d 字节）", made["name"], made["bytes"])
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("自动备份失败")
+        await asyncio.sleep(_BACKUP_TICK)
+
+
+def _backup_once() -> dict | None:
+    """在线程里跑：sqlite 那几步是阻塞的，别占着事件循环。"""
+    with Session(engine) as session:
+        return backup_svc.run_if_due(session)
 
 
 app = FastAPI(title="nagaya 長屋", description="合租记账", version="0.1.0", lifespan=lifespan)
@@ -46,7 +96,7 @@ app.add_middleware(
 )
 
 
-def _error_response(exc: LedgerError | RuleError | SplitError) -> JSONResponse:
+def _error_response(exc: LedgerError | RuleError | SplitError | BillError | BackupError) -> JSONResponse:
     status_code = 409 if exc.code in CONFLICT_CODES else 400
     return JSONResponse(
         status_code=status_code,
@@ -54,13 +104,13 @@ def _error_response(exc: LedgerError | RuleError | SplitError) -> JSONResponse:
     )
 
 
-for error_type in (LedgerError, RuleError, SplitError, BillError):
+for error_type in (LedgerError, RuleError, SplitError, BillError, BackupError):
     app.add_exception_handler(
         error_type,
         lambda request, exc: _error_response(exc),  # noqa: ARG005
     )
 
-for module in (auth, members, categories, entries, ledger, memos, settings):
+for module in (auth, members, categories, entries, ledger, memos, settings, backup):
     app.include_router(module.router)
 
 

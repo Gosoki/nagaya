@@ -87,7 +87,7 @@ cd frontend && npm run build && cd ../backend && ./run.sh
 ## 测试
 
 ```bash
-cd backend  && .venv/bin/python -m pytest   # 165 条：算法 / 账本 / 账单 / API / 边界输入 / 随机操作序列
+cd backend  && .venv/bin/python -m pytest   # 177 条：算法 / 账本 / 账单 / API / 边界输入 / 随机操作序列 / 备份恢复
 cd frontend && npm test                     # 86 条：分摊引擎（对后端 fixture）+ 若干守卫
 ./run-e2e.sh                                # 44 条：375px 手机视口，跑前重置库、跑完恢复
 ```
@@ -115,15 +115,48 @@ cd frontend && npm test                     # 86 条：分摊引擎（对后端 
 | 金额 | **整数日元，前后端都禁 float**。除不尽时用最大余数法，余数归谁可配 |
 | 部署 | 打包后 FastAPI 挂 `frontend/dist/pwa`，**一个端口一个进程**，没有 nginx 没有 docker |
 
+## 备份与恢复
+
+每 24 小时自动备一份（间隔和保留份数在设置里改，填 0 就不自动备），
+设置页上也有「立即备份」。每一份都是一个**能单独打开的完整库文件**，
+默认放在 `backend/backups/`。
+
+> **别只拷 `nagaya.db`。** 库开着 WAL，还没 checkpoint 的数据全在 `nagaya.db-wal` 里 ——
+> 实测主文件 4096 字节、`-wal` 3.9MB，单拷主文件那份**连打开都打不开**。
+> 备份走的是 `VACUUM INTO`，把 WAL 一并结算进去，产出的是单文件（顺带还压实了）。
+
+产出的每一份都**当场验过**才算数：独立连接只读打开、`integrity_check`、
+外键检查、逐表和源库对条数，不通过就删掉 —— 宁可没有备份，也不要一份骗人的备份。
+账本是空的时候不备份、**也不轮转**（防的是「库被误删之后备份照跑，
+几天内把每一份好备份都转掉」）。
+
+### 恢复
+
+```bash
+cd backend
+.venv/bin/python -m tools.restore --list        # 看有哪些
+# 先把服务停掉，然后：
+.venv/bin/python -m tools.restore               # 用最新那份
+.venv/bin/python -m tools.restore nagaya-20260922-133226.db
+```
+
+脚本会先验那份备份，再把**现在的账本整个挪到** `data/replaced-*/`（不删，
+恢复错了还能回头），最后才换上去。
+
+> **为什么不手工拷。** 恢复只有一步危险，而它长得完全不像危险：把 `.db` 拷回去却
+> 留着旧的 `nagaya.db-wal`，SQLite 会把旧 WAL 的页盖到新文件上 —— 实测 44 笔的备份
+> 恢复出来读到 127 笔，再读就是 `database disk image is malformed`。
+> 脚本把 `-wal` / `-shm` 一起处理掉，正是为了堵这一步。
+
+密码都在库里，恢复之后照旧能登。**换了机器**的话大家要重新登录一次 ——
+签名密钥 `backend/data/.secret` 不在备份里（它是凭据，不该到处复制）。
+
 ## 现状
 
 能用了，日常记账 / 出账 / 结算这条主线是通的。**还缺的：**
 
 - **成员管理界面**。加人减人后端支持（成员带「入住日 / 搬出日」，分摊按那笔账当天
   在籍的人算），同样只差一屏。
-- **备份**。`backup_path` 这个设置项摆在面板上，但**备份功能一行代码都没写**。
-  在它真做出来之前：手动拷**整个 `backend/data/` 目录**，不能只拷 `nagaya.db` ——
-  开着 WAL，没 checkpoint 的数据全在 `nagaya.db-wal` 里。
 - **数据库迁移**。Alembic 配好了但没启用 —— 设计阶段表结构还在改，用 `create_all`；
   录真实账目之前切过去（见 `backend/alembic/versions/README.md`）。
 

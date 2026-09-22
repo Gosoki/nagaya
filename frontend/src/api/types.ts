@@ -175,3 +175,29 @@ export interface EntryPayload {
   rule?: Record<string, unknown> | null
   bundle_id?: number | null
 }
+
+/** 备份现在什么情况。**全部现场探**，不是读一条存下来的结论 —— 存的那种会过期 */
+export interface BackupStatus {
+  /** 备份目录（绝对路径） */
+  path: string
+  /** 现在就做不了备份的原因（错误码）；null ＝ 没问题 */
+  error: string | null
+  last_at: string | null
+  last_name: string | null
+  last_bytes: number | null
+  count: number
+  keep: number
+  every_hours: number
+  /** 上一份太久了（超过间隔的两倍） */
+  stale: boolean
+  /** 备份和账本在同一块盘上 —— 挡不住盘坏 */
+  same_disk: boolean | null
+}
+
+export interface BackupMade {
+  name: string
+  bytes: number
+  at: string
+  rows: number
+  pruned: string[]
+}
