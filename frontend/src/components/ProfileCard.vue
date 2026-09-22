@@ -39,8 +39,7 @@
             />
           </q-item-label>
           <q-item-label caption>{{ t('profile.photoHint') }}</q-item-label>
-          <q-item-label caption class="q-mt-sm">{{ t('profile.color') }}</q-item-label>
-          <div class="swatches q-mt-xs">
+          <div class="swatches q-mt-sm">
             <button
               v-for="c in COLORS"
               :key="c"

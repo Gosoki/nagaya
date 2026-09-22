@@ -101,9 +101,6 @@
       </q-item>
     </q-list>
 
-    <!-- 「和上期一样」是那条硬规矩唯一的出口，得把代价说清楚 -->
-    <div class="text-caption text-grey-6 q-px-md q-pt-sm">{{ t('monthly.sameAsLastHint') }}</div>
-
     <div class="row items-center q-px-md q-py-sm add-row">
       <q-icon name="add" size="18px" class="text-grey-6 q-mr-sm" />
       <input
