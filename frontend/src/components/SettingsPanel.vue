@@ -69,7 +69,8 @@
               <!-- 挑一个人 -->
               <q-btn
                 v-else-if="s.type === 'member_id_or_null'"
-                dense flat no-caps color="primary" icon-right="arrow_drop_down"
+                dense flat no-caps icon-right="arrow_drop_down"
+                :color="gone(s.value) ? 'negative' : 'primary'"
                 :label="memberLabel(s.value)"
               >
                 <q-menu auto-close>
@@ -239,8 +240,12 @@ function optionLabel(value: string): string {
  */
 const noteParts = (s: Setting) => (locale.value === 'ja' ? s.note_ja : s.note_zh).split('**')
 
+/** 指着的人已经搬走了：标红、写明。记账那边早就不再用他（退回自己），这里得说出来 */
+const gone = (v: unknown) => typeof v === 'number' && meta.byId[v] !== undefined && !meta.byId[v]!.is_active
 const memberLabel = (v: unknown) =>
-  typeof v === 'number' ? (meta.byId[v]?.display_name ?? String(v)) : t('settings.none')
+  typeof v === 'number'
+    ? `${meta.byId[v]?.display_name ?? String(v)}${gone(v) ? t('settings.memberLeft') : ''}`
+    : t('settings.none')
 const categoryLabel = (v: unknown) =>
   typeof v === 'number'
     ? (meta.categoryById[v]?.name ?? String(v))

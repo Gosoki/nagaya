@@ -75,7 +75,8 @@
           <q-item-label class="row items-center no-wrap q-mt-xs">
             <div class="text-caption text-grey-6">{{ t('entry.payer') }}</div>
             <q-btn
-              dense flat no-caps size="sm" color="primary" icon-right="arrow_drop_down"
+              dense flat no-caps size="sm" icon-right="arrow_drop_down"
+              :color="payerGone(c) ? 'negative' : 'primary'"
               :label="payerLabel(c)"
             >
               <q-menu auto-close>
@@ -155,10 +156,13 @@ const adding = ref(false)
 
 const items = computed(() => meta.monthlyCategories)
 const open = ref(false)
+/** 这一项的垫付人已经搬走：标红、写明（「和上期一样」这一项会因此停下，见 carry） */
+const payerGone = (c: Category) =>
+  c.default_payer_id !== null && meta.byId[c.default_payer_id]?.is_active === false
 const payerLabel = (c: Category) =>
   c.default_payer_id === null
     ? t('settings.none')
-    : (meta.byId[c.default_payer_id]?.display_name ?? String(c.default_payer_id))
+    : `${meta.byId[c.default_payer_id]?.display_name ?? String(c.default_payer_id)}${payerGone(c) ? t('settings.memberLeft') : ''}`
 
 /** 存一个字段。**成功与否要说得出来** —— 调用方靠返回值决定后面还做不做 */
 async function save(c: Category, patch: Record<string, unknown>): Promise<boolean> {

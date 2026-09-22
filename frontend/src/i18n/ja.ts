@@ -158,6 +158,7 @@ export default {
   },
   settings: {
     system: 'システム設定', count: '{n} 項目',
+    memberLeft: '（退去済み）',
     debugOn: 'レイアウト診断をオンにしました', debugOff: 'レイアウト診断をオフにしました',
     label: {
       default_payer_id: '既定の立替者',
