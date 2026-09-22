@@ -189,8 +189,14 @@
 
          **键盘弹起来时不抬它。** 试过用 visualViewport 把它顶到键盘上沿：
          位置是对的，但 iOS 的键盘是一段动画，resize 一路分帧抛出来，
-         按钮跟着一格一格挪，卡得很难看。宁可它被键盘压住 —— 收了键盘就在那儿 -->
-    <div class="actions">
+         按钮跟着一格一格挪，卡得很难看。宁可它被键盘压住 —— 收了键盘就在那儿。
+
+         **画在底栏里**（Teleport 到 .footer-slot），不自己 fixed 定位：
+         「量出底栏高度再往上摆」那套在首帧会量早一拍（安全区还没生效），
+         操作条整条沉进底栏 —— 头一次进应用正好撞上。放进底栏，位置由布局定，
+         也不用再和它叠 1px 防发丝缝 -->
+    <Teleport to=".footer-slot">
+    <div v-show="!showMemo" class="actions">
       <div v-if="splitDiff !== 0 && amount > 0" class="diff-line text-negative">
         {{ t('split.notBalanced', { n: formatYen(splitDiff) }) }}
       </div>
@@ -220,6 +226,7 @@
       />
       </div>
     </div>
+    </Teleport>
     </div>
   </q-page>
 </template>
@@ -731,13 +738,8 @@ function reset() {
   font-size: 12px;
   line-height: 1.5;
 }
-/* 底部只有一层要自己让：**固定操作条**（「记入账」，实测 58 高）。
-   底栏那一层不用管 —— Quasar 的 q-page-container 已经给固定底栏留了
-   一份 padding，我们再留一份就是双份，内容底下白吊着 57px。
-
-   而且这份留白只属于表单那一面：备忘那面没有操作条，挂在 q-page 上
-   会让它底下也白出一块 */
-.form-pane { padding-bottom: 70px; }
+/* 下边距一份都不用留：操作条已经画在底栏里，而 Quasar 会把底栏的总高
+   （导航 + 操作条）算进 q-page-container 的 padding-bottom */
 /* 这条画在顶栏里（见上面的 Teleport）。
    **底色必须不透明**：里头没选中的那几格本身是透明的，不铺底的话
    滚过去的内容会从字底下透出来。
@@ -801,25 +803,12 @@ function reset() {
    就是 0.6 透明度）—— 但它点得动，点了当场补金额 */
 .actions :deep(.q-btn.looks-off) { opacity: 0.6; }
 .date-hint { max-width: 290px; border-top: 1px solid rgba(0, 0, 0, 0.08); }
+/* 画在底栏里：不需要 fixed、不需要 z-index、也不用和底栏叠 1px 防缝 ——
+   它们本来就是同一个固定容器的上下两层。那条分隔线改画在下边 */
 .actions {
-  position: fixed;
-  left: 0;
-  right: 0;
-  /* 正好压在底栏上沿。--nagaya-footer-h 是**量出来的**、已经含安全区，
-     这里再加一次 env() 就会把操作条顶高，两条之间露出一道缝，
-     而缝里会有正在滚的内容漏过去 */
-  /* 再往下压 1px，**故意和底栏叠一条**：两条各自取整之后中间可能差出半像素，
-     在 3x 屏上就是一条看得见的发丝缝，而缝里是正在滚的内容。
-     叠着没有代价 —— 底栏 z-index 2000，盖在上面 */
-  bottom: calc(var(--nagaya-footer-h) - 1px);
-  /* **必须自己有图层。** 不给的话它是 z-index:auto，而行里任何一个
-     带 z-index 的东西（比如比例轮子）都会画到按钮上面 —— 屏幕上就是
-     数字从实心按钮里透出来，看着像渲染坏了 */
-  z-index: 10;
   padding: 6px 16px 8px;
-  /* 不用半透明：内容从按钮底下透出来会看着像渲染坏了 */
   background: #fff;
-  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
 }
 /* 操作栏本身横贯到底（那条上边线要通），但里面的按钮跟页面一样收窄居中 */
 .actions > * {

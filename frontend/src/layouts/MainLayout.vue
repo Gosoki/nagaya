@@ -41,6 +41,12 @@
     </q-page-container>
 
     <q-footer ref="footEl" class="bg-white text-grey-8 footer-safe">
+      <!-- 各页自己的固定操作条（「记入账」「出账单」）画在这儿 —— 见各页的 Teleport。
+           **不再用「量底栏高度 + fixed 定位」那一套**：量早一拍（安全区还没生效、
+           图标字体还没到）就会把操作条摆进底栏里，头一次进应用正好撞上这一拍。
+           放进底栏之后位置由布局决定，一个数都不用量，Quasar 还会把底栏的总高
+           （导航 + 这一条）算进页面的下边距，内容也不会被盖住 -->
+      <div class="footer-slot" />
       <!-- 不用 q-route-tab：它的高亮跟着 vue-router 的 matched 链走，而
            /bill/current、/bill/past 是和 /bill 平级的路由、不是它的子路由，
            于是站在那两页上底栏三个 Tab 一个都不亮。

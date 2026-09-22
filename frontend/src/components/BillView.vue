@@ -331,7 +331,10 @@
       </div>
 
       <!-- 主操作固定在拇指区，和记一笔那屏一个规矩：这一页很长，
-           「出账单」压在最底下的话每次都要先滚到底 -->
+           「出账单」压在最底下的话每次都要先滚到底。
+           **画在底栏里**（Teleport 到 .footer-slot），不自己 fixed 定位 ——
+           理由见 AddEntryPage 那条：量底栏高度那套在首帧会量早一拍 -->
+      <Teleport to=".footer-slot">
       <div class="actions">
         <q-btn
           outline
@@ -358,6 +361,7 @@
           {{ t('bill.issued') }}
         </div>
       </div>
+      </Teleport>
 
     </template>
 
@@ -981,15 +985,8 @@ function doCut() {
   line-height: 24px;
 }
 .issued :deep(.q-icon) { margin-right: 12px; }
+/* 画在底栏里：不需要 fixed、不需要 z-index、也不用和底栏叠 1px 防缝 */
 .actions {
-  position: fixed;
-  left: 0;
-  right: 0;
-  /* 再往下压 1px，**故意和底栏叠一条**：两条各自取整之后中间可能差出半像素，
-     在 3x 屏上就是一条看得见的发丝缝，而缝里是正在滚的内容。
-     叠着没有代价 —— 底栏 z-index 2000，盖在上面 */
-  bottom: calc(var(--nagaya-footer-h) - 1px);
-  z-index: 10;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
@@ -997,12 +994,9 @@ function doCut() {
      否则宽屏上按钮会跑到内容外面去 */
   padding: 8px max(12px, calc((100% - var(--nagaya-max-w)) / 2));
   background: #fff;
-  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
 }
-.page {
-  /* 给固定操作条留位，否则滚到底时最后一块会被它盖住 */
-  padding-bottom: calc(var(--nagaya-footer-h) + 78px);
-}
+/* 下边距不用自己留：操作条在底栏里，Quasar 会把底栏总高算进页面容器 */
 .bill-text {
   white-space: pre-wrap;
   word-break: break-word;

@@ -44,10 +44,3 @@ function adoptRouteParam() {
 onMounted(adoptRouteParam)
 watch(() => route.params.statementId, adoptRouteParam)
 </script>
-
-<style scoped>
-.page {
-  /* 给账单页那条固定操作条留位，否则滚到底时最后一块会被它盖住 */
-  padding-bottom: calc(var(--nagaya-footer-h) + 78px);
-}
-</style>

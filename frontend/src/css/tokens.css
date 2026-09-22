@@ -134,10 +134,12 @@ a,
 /*
   提示条的落点。Quasar 默认贴着屏幕最底边，那儿站着底栏（含安全区）和
   「记入账」那条固定操作条 —— 提示会压在刚点过的按钮上。
-  抬到它们上面：--nagaya-footer-h 是量出来的底栏高度，90 是操作条那一截。
+  抬到它上面：--nagaya-footer-h 是量出来的底栏高度（**含各页的操作条**）。
 */
 .q-notifications__list--bottom {
-  bottom: calc(var(--nagaya-footer-h) + 90px);
+  /* --nagaya-footer-h 量的是底栏**整条**，而各页的固定操作条现在就画在底栏里，
+     所以这一个数就够了 —— 不用再替操作条另外抬一截 */
+  bottom: calc(var(--nagaya-footer-h) + 8px);
 }
 
 /*
