@@ -2,8 +2,17 @@
 <html lang="zh">
   <head>
     <meta charset="UTF-8" />
-    <!-- viewport-fit=cover：全屏 PWA 下内容能铺到刘海屏边缘，再靠 safe-area 内缩 -->
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- viewport-fit=cover：全屏 PWA 下内容能铺到刘海屏边缘，再靠 safe-area 内缩。
+
+         user-scalable=no / maximum-scale=1：关掉缩放。**只在加到主屏的那个 app 里生效** ——
+         iOS 10 起 Safari 的标签页里一律无视这两条（Apple 不许网页禁掉捏合放大），
+         而 standalone 的 PWA 仍然听。这一屏是拿着手机一只手点的记账板，
+         捏合放大和双击放大只会把版式推歪，没人真想放大它。
+         输入框一律 ≥16px 那条留着：那是另一件事（聚焦时的自动放大），也更好读 -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
     <meta name="theme-color" content="#3d4785" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
