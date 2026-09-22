@@ -259,8 +259,24 @@ function onViewport() {
   })
 }
 
-/** 上下两条一起重量。两处的兜底都可能和真值差一截（安全区、图标字体） */
+/**
+ * 上下两条一起重排、重量。
+ *
+ * **重排是为了主屏 app 冷启动那一下。** iOS 先按「网页」那会儿的视口高度排版
+ * （比全屏矮一截），fixed 的顶栏/底栏照这个高度定了位；视口随后长到全屏，
+ * WebKit 却不回头重新定位 —— 底栏悬在半空，要切一下页面（整页重排）才落回去。
+ *
+ * 所以替它做「切一下页面」那次重排：把两条的 position 临时改掉、强制一次布局、
+ * 再改回来，WebKit 只能按**当前**视口重新摆。两步在同一个任务里完成，中间不会
+ * 画出一帧；位置本来就对的设备上，这是一次看不见的空操作。
+ */
 function remeasure() {
+  for (const el of [headEl.value?.$el, footEl.value?.$el]) {
+    if (!el) continue
+    el.style.position = 'absolute'
+    void el.offsetHeight
+    el.style.position = ''
+  }
   measureFooter()
   measureHeader()
 }
@@ -274,7 +290,9 @@ onMounted(() => {
   window.addEventListener('load', remeasure)
   window.addEventListener('resize', remeasure)
   window.addEventListener('orientationchange', remeasure)
-  setTimeout(remeasure, 300)
+  // 冷启动时视口是分几拍长到全屏的，什么时候长完没有事件可等 —— 多敲几下
+  for (const ms of [100, 300, 800, 1500]) setTimeout(remeasure, ms)
+  window.addEventListener('pageshow', remeasure)
 
   window.visualViewport?.addEventListener('scroll', onViewport)
   window.visualViewport?.addEventListener('resize', onViewport)
@@ -296,6 +314,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('load', remeasure)
   window.removeEventListener('resize', remeasure)
   window.removeEventListener('orientationchange', remeasure)
+  window.removeEventListener('pageshow', remeasure)
   window.visualViewport?.removeEventListener('scroll', onViewport)
   window.visualViewport?.removeEventListener('resize', onViewport)
   document.removeEventListener('touchstart', onTouchStart)
@@ -331,6 +350,8 @@ watch(
 function onVisible() {
   if (document.visibilityState !== 'visible') return
   void meta.load().catch(() => {})
+  // 从后台切回来，iOS 同样可能按旧视口摆 fixed 元素
+  remeasure()
 }
 
 onMounted(() => {
