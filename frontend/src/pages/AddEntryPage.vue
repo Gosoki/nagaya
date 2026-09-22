@@ -493,6 +493,15 @@ watch(showMemo, (hidden) => {
   })
 })
 
+// 底栏点了「记一笔」：类型拨回支出。记的绝大多数是支出，而上次那次转账
+// 不该一直挂在那儿等着人发现。改一笔已有的账时不管 —— 那时类型是这笔账自己的
+watch(
+  () => memos.addHome,
+  () => {
+    if (editingId.value === null) kind.value = 'expense'
+  },
+)
+
 onMounted(async () => {
   if (editingId.value !== null) {
     await loadForEdit(editingId.value)

@@ -32,9 +32,23 @@ function savedTab(): EntriesTab {
 
 export const useMemos = defineStore('memos', () => {
   const tab = ref<EntriesTab>(savedTab())
-  // 【试验中】备忘在「记一笔」那屏。**不记进 sessionStorage**：记一笔是 PWA 的
+  // 备忘在「记一笔」那屏。**不记进 sessionStorage**：记一笔是 PWA 的
   // 落地页，上次停在备忘上、下次打开就不是「打开即记账」了
   const addTab = ref<AddTab>('add')
+
+  /**
+   * 「回记一笔那一屏」按了几次。底栏那一格点一下就 +1。
+   *
+   * **为什么要个计数器**：人已经站在这一屏上时，底栏那一下不会触发路由跳转，
+   * 组件也就不重建，上次选的「转账」会一直留着。而底栏那一格的意思是
+   * 「我要记一笔」，记的绝大多数是支出 —— 点一下就该回到支出。
+   * 页面盯着这个数，+1 就把类型拨回去。
+   */
+  const addHome = ref(0)
+  function goAddHome() {
+    addTab.value = 'add'
+    addHome.value++
+  }
   watch(tab, (v) => {
     try {
       sessionStorage.setItem(TAB_KEY, v)
@@ -68,5 +82,5 @@ export const useMemos = defineStore('memos', () => {
     items.value = items.value.filter((m) => m.id !== id)
   }
 
-  return { tab, addTab, items, loaded, load, create, update, remove }
+  return { tab, addTab, addHome, goAddHome, items, loaded, load, create, update, remove }
 })
