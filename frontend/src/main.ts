@@ -31,7 +31,7 @@ navigator.serviceWorker?.addEventListener('controllerchange', () => {
   location.reload()
 })
 
-createApp(App)
+const app = createApp(App)
   // 不给 lang 的话所有弹框的按钮都是英文的 CANCEL / OK，
   // 夹在一屏中文里格外扎眼。切日语时 setLang() 会跟着换
   .use(Quasar, {
@@ -41,9 +41,16 @@ createApp(App)
     // 看不全等于没提示。具体离底边多高由 CSS 定（要躲开底栏和固定操作条）
     config: { notify: { position: 'bottom' } },
   })
-  .use(createPinia())
-  .use(i18n)
-  .use(router)
-  .mount('#app')
+
+/**
+ * 弹框的按钮和勾选框一律用主色。Quasar 的对话框插件在深色模式下默认换成
+ * 琥珀色 —— 「确定」一片黄，看着像警告。插件没有全局默认色的配置，
+ * 只能在它装好之后包一层（useQuasar() 拿到的是同一个 $q）
+ */
+const $q = app.config.globalProperties.$q
+const plainDialog = $q.dialog
+$q.dialog = (opts) => plainDialog({ color: 'primary', ...opts })
+
+app.use(createPinia()).use(i18n).use(router).mount('#app')
 
 installColorScheme()

@@ -27,13 +27,18 @@
          人会以为卡死了或者这家还没出过账，于是反复点页签，每点一次又重发一轮，
          越点越慢。骨架按真实块高摆，数据到了内容是「填进去」而不是「砸出来」 -->
     <div v-if="!bill && bills.pending" class="skel">
-      <div class="q-pa-md">
-        <q-skeleton type="text" width="45%" height="26px" />
-        <q-skeleton type="text" width="60%" height="16px" class="q-mt-xs" />
-        <q-skeleton type="text" width="35%" height="22px" class="q-mt-sm" />
+      <!-- 头卡片的骨架和真卡片同一套行高（head-top / head-meta / mine），
+           数据到了原地填进去，下面那块不跳 -->
+      <div class="bill-section head">
+        <div class="head-top row items-center"><q-skeleton type="text" width="40%" height="22px" /></div>
+        <div class="head-meta row items-center"><q-skeleton type="text" width="55%" height="14px" /></div>
+        <div class="mine settled">
+          <div class="mine-label"><q-skeleton type="text" width="18%" height="14px" /></div>
+          <div class="mine-figure"><q-skeleton type="text" width="45%" height="28px" /></div>
+        </div>
       </div>
       <div class="bill-section q-px-md q-pb-md">
-        <q-skeleton type="text" width="30%" height="18px" class="q-mb-sm" />
+        <q-skeleton type="text" width="30%" height="18px" class="q-my-sm" />
         <q-skeleton
           v-for="n in 5"
           :key="n"
@@ -42,7 +47,7 @@
           class="q-mb-xs"
         />
       </div>
-      <div class="q-px-md q-py-md">
+      <div class="bill-section q-pa-md">
         <q-skeleton v-for="n in 3" :key="n" type="rect" height="56px" class="q-mb-sm" />
       </div>
     </div>

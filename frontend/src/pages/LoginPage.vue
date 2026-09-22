@@ -1,7 +1,7 @@
 <template>
   <!-- 用普通容器而不是 q-page：登录页没有 QLayout 包着，
        QPage 必须是 QLayout 的后代，否则 Quasar 直接拒绝渲染（整页空白）。 -->
-  <div class="login-page column flex-center bg-primary text-white q-pa-md">
+  <div class="login-page column flex-center text-white q-pa-md">
     <!-- 这屋自己的名字和图标也要出现在门口：设置里改完，登录页还挂着
          别人家的「長」字，第一眼就不像自己家的东西。
          名字和图标从**清单**里拿 —— 那个地址不要登录（本来就是给浏览器读的），
@@ -37,7 +37,8 @@
         type="submit"
         color="white"
         text-color="primary"
-        class="full-width"
+        unelevated
+        class="full-width submit"
         size="lg"
         no-caps
         :loading="busy"
@@ -119,6 +120,9 @@ function toggleLang() {
 
 <style scoped>
 .login-page {
+  /* 品牌色一整面，自上而下压暗一点 —— 深浅色模式下都是它：
+     门口就该是这屋自己的颜色，不跟着系统变 */
+  background: linear-gradient(170deg, var(--nagaya-brand) 0%, var(--nagaya-brand-deep) 100%);
   min-height: 100vh;
   min-height: 100dvh;          /* 手机浏览器地址栏收起时也铺满 */
   padding-top: env(safe-area-inset-top);
@@ -138,4 +142,13 @@ function toggleLang() {
 }
 .logo-img { width: 88px; height: 88px; object-fit: cover; }
 .text-white-7 { opacity: 0.7; }
+/* 输入框：一块圆角的半透明白，不要 Quasar filled 底下那条线 */
+.login-page :deep(.q-field--filled .q-field__control) {
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.12);
+}
+.login-page :deep(.q-field--filled .q-field__control::before),
+.login-page :deep(.q-field--filled .q-field__control::after) { display: none; }
+/* 进门那个按钮：字用品牌藏青，深色模式下主色会被提亮，这里不跟 */
+.login-page .submit.text-primary { border-radius: 14px; font-weight: 600; color: var(--nagaya-brand) !important; }
 </style>

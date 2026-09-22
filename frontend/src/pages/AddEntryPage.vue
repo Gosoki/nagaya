@@ -50,7 +50,7 @@
         />
         <q-btn dense flat no-caps icon="event" :label="dateLabel" class="text-grey-7 date-btn">
           <q-popup-proxy cover transition-show="scale">
-            <div>
+            <div class="date-pop">
               <q-date v-model="date" mask="YYYY-MM-DD" today-btn minimal :options="dateAllowed" />
               <!-- 已出过账的日期选不了：那张单子锁着，记进去也不会出现在上面，
                    只会让人以为补上了。要补记就写在备注里 -->
@@ -748,7 +748,6 @@ function reset() {
   gap: 8px;
   padding: 2px 12px 12px;
 }
-.cat:active { background: var(--nagaya-press); }
 .cat {
   display: flex;
   flex-direction: column;
@@ -764,8 +763,10 @@ function reset() {
   color: var(--nagaya-ink);
   font-size: var(--nagaya-fs-meta);
   cursor: pointer;
-  transition: background 0.12s, color 0.12s;
+  transition: background 0.12s, color 0.12s, transform 0.12s;
 }
+/* 按下去缩一点：点中了没有，手指底下就知道 */
+.cat:active { transform: scale(0.95); background: var(--nagaya-press); }
 /* 选中态的字色由 catStyle() 给（深色分类配白字、浅色配黑字） */
 
 
@@ -774,6 +775,14 @@ function reset() {
 /* 「该填的还没填」这个信号要留着，所以长得和禁用一模一样（Quasar 的禁用态
    就是 0.6 透明度）—— 但它点得动，点了当场补金额 */
 .actions :deep(.q-btn.looks-off) { opacity: 0.6; }
+/* 日期弹层：日历和底下那句「之前的日期选不了」是一整块，底色和圆角一起给 ——
+   手机上这个弹层走的是对话框，外面没有卡片包着，提示会直接印在遮罩上 */
+.date-pop {
+  overflow: hidden;
+  border-radius: var(--nagaya-r-lg);
+  background: var(--nagaya-surface-2);
+}
+.date-pop :deep(.q-date) { box-shadow: none; border-radius: 0; }
 .date-hint { max-width: 290px; border-top: 1px solid var(--nagaya-line); }
 /* 画在底栏里：不需要 fixed、不需要 z-index、也不用和底栏叠 1px 防缝 ——
    它们本来就是同一个固定容器的上下两层，底色也由底栏给（半透明 + 模糊） */

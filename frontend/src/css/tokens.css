@@ -47,6 +47,9 @@
      那两个是给色块当底色用的，当文字色时偏亮（下面有接管 text-positive 那几条） */
   --nagaya-accent: #3d4785;   /* 品牌 ＝ 链接 ＝ 选中           8.6:1 */
   --nagaya-accent-bg: rgba(61, 71, 133, 0.1);
+  /* 品牌藏青（和 App 图标同色）。登录页那一整面用它，深浅色都不变 */
+  --nagaya-brand: #3d4785;
+  --nagaya-brand-deep: #252b57;
   --nagaya-pos: #1f7a4d;      /* 应收 / 收入                    5.3:1 */
   --nagaya-neg: #b3261e;      /* 应付 / 差额                    6.5:1 */
   --nagaya-warn: #8a6100;     /* 未结清 / 离线                  5.5:1 */

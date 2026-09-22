@@ -41,7 +41,9 @@ const short = (name: string) => (name.length <= 4 ? name : name.slice(0, 3))
   color: var(--nagaya-ink-2);
   font-size: 15px;
   cursor: pointer;
+  transition: transform 0.12s, background-color 0.15s;
 }
+.pick:active { transform: scale(0.95); }
 /**
  * 选中要加粗，而加粗会让字变宽 —— 一排三个按钮，切一下整排就左右挪一下。
  *
