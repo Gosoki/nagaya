@@ -13,7 +13,11 @@
       name="viewport"
       content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
     />
-    <meta name="theme-color" content="#3d4785" />
+    <!-- **白，不是主题藏青。** iOS Safari 拿 theme-color 去填「页面内容之外」
+         那块区域 —— 键盘弹起时那块被撑得很大，底栏下面就是一整片深蓝，
+         看着像页面破了个洞（页面自己铺白底管不到它，那是浏览器的涂层）。
+         这个 app 通体是白的，填白才连成一片。 -->
+    <meta name="theme-color" content="#ffffff" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="長屋" />
