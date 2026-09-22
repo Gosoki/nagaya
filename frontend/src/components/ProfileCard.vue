@@ -41,7 +41,7 @@
           <q-item-label caption>{{ t('profile.photoHint') }}</q-item-label>
           <div class="swatches q-mt-sm">
             <button
-              v-for="c in PALETTE"
+              v-for="c in MEMBER_COLORS"
               :key="c"
               class="swatch"
               :class="{ on: auth.me.color.toLowerCase() === c }"
@@ -160,13 +160,13 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 
 import { ApiError } from 'src/api/client'
-import { PALETTE } from 'src/palette'
+import { MEMBER_COLORS } from 'src/palette'
 import MemberAvatar from 'src/components/MemberAvatar.vue'
 import { useAuth } from 'src/stores/auth'
 import { useMeta } from 'src/stores/meta'
 
 /** 头像色候选。够分得开就行 —— 三个人要一眼认出谁是谁 */
-// 头像颜色和分类颜色挑的是同一组（见 src/palette.ts）
+// 头像挑的是深那一档；分类走亮的那一档，同一批色相（见 src/palette.ts）
 
 const { t } = useI18n()
 const $q = useQuasar()

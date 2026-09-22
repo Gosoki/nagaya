@@ -39,7 +39,7 @@
                 <div class="text-caption text-grey-6 q-mt-sm q-mb-xs">{{ t('monthly.color') }}</div>
                 <div class="colors">
                   <button
-                    v-for="hex in PALETTE"
+                    v-for="hex in CATEGORY_COLORS"
                     :key="hex"
                     class="color-cell"
                     :class="{ on: c.color.toLowerCase() === hex }"
@@ -130,7 +130,7 @@ import { useI18n } from 'vue-i18n'
 import { ApiError, api } from 'src/api/client'
 import type { Category } from 'src/api/types'
 import { useMeta } from 'src/stores/meta'
-import { PALETTE } from 'src/palette'
+import { CATEGORY_COLORS } from 'src/palette'
 
 /** 图标候选：合租里真会出现的那些项。够用就行，不做成一个图标库浏览器 */
 const ICONS = [
@@ -139,7 +139,7 @@ const ICONS = [
   'tv', 'subscriptions', 'phone_iphone', 'local_laundry_service', 'cleaning_services',
   'key', 'shopping_basket', 'receipt_long',
 ]
-// 分类颜色和头像颜色挑的是同一组（见 src/palette.ts）
+// 分类挑的是亮那一档；头像走深的那一档，同一批色相（见 src/palette.ts）
 
 const { t } = useI18n()
 const $q = useQuasar()

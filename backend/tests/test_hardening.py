@@ -561,7 +561,7 @@ def test_new_members_do_not_all_come_out_the_same_grey(client: TestClient, auth,
     都留默认灰的话分配条就是一整块灰板，拖完看不出钱挪给了谁。
     而新家建人走的是命令行或接口，没人会先去挑色板。
     """
-    from app.models import PALETTE
+    from app.models import MEMBER_COLORS
 
     made = []
     for i in range(3):
@@ -570,7 +570,7 @@ def test_new_members_do_not_all_come_out_the_same_grey(client: TestClient, auth,
         assert r.status_code == 201, r.text
         made.append(r.json()["color"])
     assert len(set(made)) == 3, made
-    assert all(c in PALETTE for c in made), made
+    assert all(c in MEMBER_COLORS for c in made), made
     # 自己挑了就用自己的
     r = client.post("/api/members", headers=auth, json={
         "name": "pick", "display_name": "Pick", "password": "pw123456", "color": "#123456",
