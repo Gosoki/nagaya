@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hmac
 import os
 import secrets
 from pathlib import Path
@@ -68,10 +69,32 @@ def verify_password(raw: str, hashed: str) -> bool:
         return False
 
 
-def make_token(member_id: int) -> str:
+def session_tag(member: Member) -> str:
+    """把「这个人现在的密码」压成一个短指纹，写进 token 当版本号。
+
+    改了密码，旧 token 就该当场作废 —— 手机丢了、或者被人瞄到密码时，
+    改密码是唯一的自救动作，而它原来不断任何已经发出去的 session
+    （token 管 90 天）。
+
+    **不给 Member 加字段**：`create_all` 不会给已有的表补列，实测老库打开就是
+    `no such column`，而现在还没到切 Alembic 那一步（SPEC D18：录真账之前再切）。
+    密码哈希本来就随密码变，拿它当版本号刚好，一个字节的 schema 都不用动。
+
+    过一道 HMAC 而不是直接截哈希：token 的 payload 是 base64，谁拿到 token
+    谁就读得到。虽然那个人本来就是他自己，但没必要顺手把密码哈希的指纹也发出去。
+    """
+    return hmac.new(SECRET.encode(), member.password_hash.encode(), "sha256").hexdigest()[:16]
+
+
+def make_token(member: Member) -> str:
     now = dt.datetime.now(dt.timezone.utc)
     return jwt.encode(
-        {"sub": str(member_id), "iat": now, "exp": now + dt.timedelta(days=TOKEN_DAYS)},
+        {
+            "sub": str(member.id),
+            "pw": session_tag(member),
+            "iat": now,
+            "exp": now + dt.timedelta(days=TOKEN_DAYS),
+        },
         SECRET,
         algorithm=ALGORITHM,
     )
@@ -93,6 +116,10 @@ def current_member(
     member = session.get(Member, int(payload["sub"]))
     if member is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "账号不存在")
+    # 密码换过了 —— 这张 token 是改之前发的。**没有 pw 的老 token 也一并作废**：
+    # 宽容一次就等于永远留着那个洞，而代价只是大家重登一次
+    if not hmac.compare_digest(payload.get("pw", ""), session_tag(member)):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "密码改过了，请重新登录")
     return member
 
 

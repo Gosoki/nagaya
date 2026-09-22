@@ -28,7 +28,7 @@ def login(body: LoginIn, session: Session = Depends(get_session)) -> LoginOut:
     member = authenticate(session, body.name, body.password)
     if member is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "用户名或密码不对")
-    return LoginOut(token=make_token(member.id), member=to_member_out(member))
+    return LoginOut(token=make_token(member), member=to_member_out(member))
 
 
 @router.get("/me", response_model=MemberOut)

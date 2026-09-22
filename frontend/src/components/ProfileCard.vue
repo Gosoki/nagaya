@@ -231,8 +231,13 @@ function saveText(field: 'name' | 'display_name', raw: string) {
 
 async function savePassword() {
   busy.value = true
+  const fresh = newPw.value
   try {
-    await auth.updateMe({ password: newPw.value, old_password: oldPw.value })
+    await auth.updateMe({ password: fresh, old_password: oldPw.value })
+    // 改完密码，**手里这张 token 也作废了**（后端按密码指纹认 session，
+    // 改密码就是为了把别的设备踢下去）。用新密码当场换一张，别把自己也踢出去 ——
+    // 否则下一个动作会莫名其妙跳回登录页，人还以为密码没改成
+    await auth.login(auth.me!.name, fresh)
     toggle()
     $q.notify({ type: 'positive', message: t('profile.passwordChanged'), timeout: 2000 })
   } catch (e) {

@@ -335,3 +335,28 @@ def test_avatar_can_be_removed(client, auth, members) -> None:
     r = client.delete(f"/api/members/{me.id}/avatar", headers=auth)
     assert r.status_code == 200 and r.json()["avatar"] is None
     assert r.json()["avatar_version"] == 2, "版本号要继续往前走，缓存才知道换了"
+
+
+def test_changing_the_password_kills_the_other_sessions(client, auth, members) -> None:
+    """手机丢了 / 被人瞄到密码时，改密码是唯一的自救动作 ——
+    而它原来不断任何已经发出去的 token（管 90 天）。
+
+    实现上**没有给 Member 加字段**：create_all 不给已有的表补列，加一列就等于
+    让老库打不开（实测 `no such column`）。密码哈希本来就随密码变，
+    拿它过一道 HMAC 当版本号，schema 一个字节都不用动。
+    """
+    me, *_ = members
+    old_headers = dict(auth)
+    assert client.get("/api/auth/me", headers=old_headers).status_code == 200
+
+    r = client.patch(f"/api/members/{me.id}", headers=old_headers,
+                     json={"password": "brandnew123", "old_password": "pw123456"})
+    assert r.status_code == 200, r.text
+
+    assert client.get("/api/auth/me", headers=old_headers).status_code == 401, \
+        "改完密码，改之前发出去的 token 必须当场失效"
+    # 新密码换一张新的就照旧能用 —— 界面上改完密码会自己重登一次
+    again = client.post("/api/auth/login", json={"name": me.name, "password": "brandnew123"})
+    assert again.status_code == 200
+    fresh = {"Authorization": f"Bearer {again.json()['token']}"}
+    assert client.get("/api/auth/me", headers=fresh).status_code == 200

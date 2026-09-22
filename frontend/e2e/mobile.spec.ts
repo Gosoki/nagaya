@@ -1195,7 +1195,15 @@ test('个人设置：头像色 / 昵称 / 语言 / 改密码', async ({ page }) 
       display_name: before.display_name, color: before.color,
     },
   })
-  expect((await (await page.request.get('/api/auth/me', { headers: fresh })).json()).display_name)
+  // **改完密码，刚才那张 token 也作废了** —— 后端按密码指纹认 session，
+  // 改密码就是为了把别的设备踢下去，自己手里这张当然也算「别的设备」。
+  // 界面上 ProfileCard 会自己用新密码重登一次；这里是走接口，所以自己换一张
+  expect((await page.request.get('/api/auth/me', { headers: fresh })).status(),
+    '改完密码，改之前发的 token 必须失效').toBe(401)
+  const back = await page.request.post('/api/auth/login',
+    { data: { name: 'kan', password: PASSWORD } })
+  const last = { Authorization: `Bearer ${(await back.json()).token}` }
+  expect((await (await page.request.get('/api/auth/me', { headers: last })).json()).display_name)
     .toBe(before.display_name)
 })
 
