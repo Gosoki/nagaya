@@ -509,3 +509,46 @@ def test_carry_refuses_a_rule_that_never_heard_of_the_new_roommate(
     out = bill.carry_same_as_last(session, actor_id=a.id)
     assert out["created"] == [], "新室友会被这条旧规则分到 ¥0"
     assert [f["reason"] for f in out["failed"]] == ["rule_stale"], out
+
+
+def test_an_old_bill_tells_you_what_is_still_owed_right_now(session: Session, members) -> None:
+    """已出账那张单子要同时说两件事：**当初**的方案，和**此刻**还该转多少。
+
+    少了后者，界面只能拿冻结方案当行动指示 —— 于是：
+      * 已经还清的人被继续命令「你要给 Zen ¥10,000」，他真会再转一次；
+      * 出账后大家换了条路结清（现金、经第三人），冻结方案里那一对再也不走钱，
+        而「确认已完成」按钮还亮着 —— 按一下凭空造一笔债。
+    """
+    a, b, c_ = members
+    cat = _cat(session)
+    ledger.create_entry(session, actor_id=c_.id, kind=EntryKind.expense, on=TODAY,
+                        amount=30_000, payer_id=c_.id, category_id=cat.id)
+    st = cut_statement(session, actor_id=a.id, label="上一期", on=TODAY)
+
+    frozen = bill.build_bill(session, st)
+    assert {(t["from_id"], t["to_id"], t["amount"]) for t in frozen["transfers"]} == {
+        (a.id, c_.id, 10_000), (b.id, c_.id, 10_000)
+    }
+    # 一分没转时，此刻 = 当初
+    assert frozen["live_transfers"] == frozen["transfers"]
+
+    # a 还了一半
+    ledger.create_entry(session, actor_id=a.id, kind=EntryKind.settlement, on=TODAY,
+                        amount=4_000, payer_id=a.id, to_member_id=c_.id)
+    now = bill.build_bill(session, st)
+    assert now["transfers"][0]["amount"] == 10_000, "当初那份方案不许变"
+    live = {(t["from_id"], t["to_id"]): t["amount"] for t in now["live_transfers"]}
+    assert live[(a.id, c_.id)] == 6_000, "此刻只该再转 6,000"
+    assert now["live_closing"][a.id] == -6_000
+
+    # b 的钱**绕 a 还了**（现金/并单转都是这个形状）：冻结方案里 b→c 那一对
+    # 从此再也不会走钱，此刻的方案里它必须消失，否则按钮会叫 b 再转一次
+    ledger.create_entry(session, actor_id=b.id, kind=EntryKind.settlement, on=TODAY,
+                        amount=10_000, payer_id=b.id, to_member_id=a.id)
+    ledger.create_entry(session, actor_id=a.id, kind=EntryKind.settlement, on=TODAY,
+                        amount=10_000, payer_id=a.id, to_member_id=c_.id)
+    after = bill.build_bill(session, st)
+    live = {(t["from_id"], t["to_id"]): t["amount"] for t in after["live_transfers"]}
+    assert live.get((b.id, c_.id), 0) == 0, "b 已经不欠 c 了，此刻的方案里不许还有这一对"
+    assert after["live_closing"][b.id] == 0
+    assert after["transfers"][1]["amount"] == 10_000, "当初那份方案还是不许变"

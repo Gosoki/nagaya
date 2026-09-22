@@ -93,7 +93,7 @@
         <div
           v-if="mine"
           class="mine q-mt-sm"
-          :class="[mine.closing < 0 ? 'owe' : 'owed', { done: bill.settled && !bill.is_draft }]"
+          :class="[mine.closing < 0 ? 'owe' : 'owed', { done: !bill.is_draft && myLeft === 0 }]"
         >
           {{ mineText }}
         </div>
@@ -242,18 +242,32 @@
                 {{ nameOf(tr.to_id) }}
               </div>
               <div class="text-subtitle1 text-weight-medium">{{ formatYen(tr.amount) }}</div>
+              <!-- **进度必须上屏。** 后端一直算着「这一笔已经转过多少」，可它以前
+                   只送进了对话框的预填值 —— 屏幕上只有一个全额，于是已经还了一半的人
+                   照着这个数再转一次全额 -->
+              <div v-if="noteOf(tr, i)" class="text-caption" :class="noteClassOf(tr, i)">
+                {{ noteOf(tr, i) }}
+              </div>
             </div>
 <!-- 转出方和转入方看到的是同一个「已完成」，记的也是同一笔。
                  **跟这笔没关系的人不显示按钮**：原来对所有人显示「已收到」，
-                 Kan 一点就替 Go 确认了收款，而 Go 那边钱还没到 -->
+                 Kan 一点就替 Go 确认了收款，而 Go 那边钱还没到。
+
+                 **按钮的开关是「此刻还欠不欠」，不是「这是不是最新那张」。**
+                 原来按 isCurrent 判：更早那些单子收掉了按钮，最新那张没收 ——
+                 而出账之后只要有人没照方案走（现金、并单转、经第三人），
+                 冻结方案里那一对就再也不会走钱，按下去凭空造一笔债。
+                 实测：全屋余额已经全是 0，按一下变成一个人倒欠另一个人一万。
+                 改看 leftOf() 之后这种情况按钮自己就不在了，而「钱确实还欠着」
+                 的旧单子反倒能结账了 —— 两头都比原来对 -->
             <q-icon
-              v-if="bill.settled_transfers[i]"
+              v-if="bill.settled_transfers[i] || leftOf(tr, i) === 0"
               name="check_circle"
-              color="positive"
+              :color="bill.settled_transfers[i] ? 'positive' : 'grey-5'"
               size="24px"
             />
             <q-btn
-              v-else-if="isCurrent && (auth.me?.id === tr.to_id || auth.me?.id === tr.from_id)"
+              v-else-if="auth.me?.id === tr.to_id || auth.me?.id === tr.from_id"
               dense
               color="primary"
               no-caps
@@ -270,8 +284,8 @@
              于是「C→A」那一行永远点不亮、整张永远挂着「未结清」。
              实测（两种结算模式都一样）：全屋余额已经全是 0，按一下那个按钮
              凭空造出一万块债。所以旧单子只留绿勾，结账去最新那张。 -->
-        <div v-if="!isCurrent && !bill.settled" class="text-caption text-grey-6 q-mt-sm">
-          {{ t('bill.planSuperseded') }}
+        <div v-if="superseded" class="text-caption text-grey-6 q-mt-sm">
+          {{ supersededText }}
         </div>
         </div>
       </div>
@@ -406,35 +420,116 @@ const showCutResult = computed({
 const mine = computed(
   () => bill.value?.members.find((r) => r.member_id === auth.me?.id) ?? null,
 )
-/**
- * 这是不是「现在这一张」—— 草稿，或者最新出的那张。
- *
- * 只有它的转账方案还作数：更早那些的方案是出账那一刻冻结的，
- * 而后来的开销会把债权重新净额化，冻结的那几对之间可能再也不会有钱流过。
- */
-const isCurrent = computed(
-  () => bill.value?.is_draft || bill.value?.statement_id === bills.statements?.[0]?.id,
-)
+// 「这是不是最新那张」这个判断没有了 —— 它曾经是按钮的开关，而那是错的判据：
+// 最新那张的方案同样会在出账后作废（有人没照方案走、或者又记了新账），
+// 而更早那张上的钱可能确确实实还欠着。现在一律看 leftOf()：此刻还欠不欠。
 
+/**
+ * 这一笔**此刻**还该转多少。
+ *
+ * 两头取小：
+ *   * 「这一笔还剩多少」＝ 方案额 − 已经转过的（后端的 settled_paid）；
+ *   * 「这一对此刻还欠多少」＝ live_transfers 里同一对的金额。
+ * 后者是关键：出账之后大家换了条路结清（现金、并单转、经第三人），
+ * 这一对就再也不会走钱，它此刻是 0 —— 于是按钮自己消失，按不出假债来。
+ * 前者保证在旧单子上不会问出一个超过这张单子本身的数。
+ */
+function leftOf(tr: BillTransfer, i: number): number {
+  const b = bill.value
+  if (!b) return 0
+  const rest = tr.amount - (b.settled_paid?.[i] ?? 0)
+  const live = (b.live_transfers ?? []).find(
+    (x) => x.from_id === tr.from_id && x.to_id === tr.to_id,
+  )?.amount
+  return Math.max(0, Math.min(rest, live ?? rest))
+}
+
+/** 卡片上那行小字：转了多少、还差多少、或者「已经不用转了」 */
+function noteOf(tr: BillTransfer, i: number): string {
+  const b = bill.value
+  if (!b || b.settled_transfers[i]) return ''
+  const paid = b.settled_paid?.[i] ?? 0
+  const left = leftOf(tr, i)
+  if (left === 0) return t('bill.planPairDone')
+  if (paid > 0) return t('bill.planProgress', { paid: formatYen(paid), left: formatYen(left) })
+  if (left !== tr.amount) return t('bill.planLeft', { left: formatYen(left) })
+  return ''
+}
+const noteClassOf = (tr: BillTransfer, i: number) =>
+  leftOf(tr, i) === 0 ? 'text-grey-6' : 'text-primary'
+
+/**
+ * 这张单子的方案里有行**永远点不亮了** —— 钱已经绕别的路结清，
+ * 或者后来的账把债权重新净额化了。这时候得说一句，否则那张永远挂着「未结清」
+ * 而没人知道为什么。
+ */
+const superseded = computed(() => {
+  const b = bill.value
+  if (!b || b.is_draft) return false
+  return b.transfers.some((tr, i) => !b.settled_transfers[i] && leftOf(tr, i) === 0)
+})
+
+/**
+ * 方案被接手时那句话。**得带上「那我现在到底欠多少」** ——
+ * 只说「去未出账那页」等于把人赶去另一页自己找数字，而那个数这儿就有。
+ */
+const supersededText = computed(() => {
+  const owe = Number(bill.value?.live_closing?.[String(auth.me?.id ?? '')] ?? 0)
+  return owe < 0
+    ? t('bill.planSupersededMine', { amount: formatYen(-owe) })
+    : t('bill.planSuperseded')
+})
+
+/** 这张单子里跟我有关的那几行，此刻还剩多少要转 */
+const myLeft = computed(() => {
+  const b = bill.value
+  const me = auth.me?.id
+  if (!b || me === undefined) return 0
+  return b.transfers.reduce(
+    (sum, tr, i) => (tr.from_id === me || tr.to_id === me ? sum + leftOf(tr, i) : sum),
+    0,
+  )
+})
+
+/**
+ * 最显眼那行字。**它是行动指示，所以按「此刻」说话，不按出账那一刻说话。**
+ *
+ * 原来直接印冻结方案里我那几笔的原额：已经还清的人照样被命令「你要给 Zen ¥9,999」，
+ * 他真会再转一次（实测多付 ¥9,999）；还了一半的人被告知一个偏大的数。
+ * 后端其实一直算着「已经转过多少」，只是那个数以前只送进了对话框的预填值。
+ *
+ * 口径仍然限定在**这张单子的方案**里：翻七月那张时不该跳出今天的欠款。
+ */
 const mineText = computed(() => {
   const row = mine.value
-  if (!row) return ''
-  if (row.closing === 0) return t('bill.youSettled')
-  if (row.closing > 0) return t('bill.youReceive', { amount: formatYen(row.closing) })
+  const b = bill.value
+  if (!row || !b) return ''
+  const me = row.member_id
+  const mineRows = b.transfers
+    .map((tr, i) => ({ tr, left: leftOf(tr, i) }))
+    .filter((x) => x.tr.from_id === me || x.tr.to_id === me)
 
-  // 我要转出的每一笔。**得全列出来**：原来只取第一条、却把欠款总额安在那个人
-  // 头上 —— 要分给两个人时，屏幕上最显眼的那行字会让人把全部的钱转给其中一个
-  const mineOut = (bill.value?.transfers ?? []).filter((x) => x.from_id === row.member_id)
-  if (mineOut.length === 1) {
-    const only = mineOut[0]!
-    return t('bill.youPay', { to: nameOf(only.to_id), amount: formatYen(only.amount) })
-  }
-  if (mineOut.length > 1) {
+  if (mineRows.length) {
+    const out = mineRows.filter((x) => x.tr.from_id === me && x.left > 0)
+    const inc = mineRows.filter((x) => x.tr.to_id === me && x.left > 0)
+    if (!out.length && !inc.length) return t('bill.youSettled')
+    if (inc.length && !out.length) {
+      return t('bill.youReceive', { amount: formatYen(inc.reduce((n, x) => n + x.left, 0)) })
+    }
+    if (out.length === 1) {
+      const only = out[0]!
+      return t('bill.youPay', { to: nameOf(only.tr.to_id), amount: formatYen(only.left) })
+    }
+    // **得全列出来**：原来只取第一条、却把欠款总额安在那个人头上 ——
+    // 要分给两个人时，屏幕上最显眼的那行字会让人把全部的钱转给其中一个
     return t('bill.youPayList', {
-      list: mineOut.map((x) => `${nameOf(x.to_id)} ${formatYen(x.amount)}`).join('、'),
+      list: out.map((x) => `${nameOf(x.tr.to_id)} ${formatYen(x.left)}`).join('、'),
     })
   }
-  // 方案里没有我这条边（已出账单用的是冻结方案，事后改账会出现这种）：只说欠多少
+
+  // 方案里没有我这条边：只说这张单子上我是什么状态
+  if (row.closing === 0) return t('bill.youSettled')
+  if (row.closing > 0) return t('bill.youReceive', { amount: formatYen(row.closing) })
   return t('bill.youOwe', { amount: formatYen(Math.abs(row.closing)) })
 })
 
@@ -539,12 +634,17 @@ const billText = computed(() => {
   lines.push('')
   if (b.transfers.length) {
     lines.push(t('bill.plan', { n: b.transfers.length }))
-    for (const tr of b.transfers) {
-      lines.push(`  ${nameOf(tr.from_id)} → ${nameOf(tr.to_id)}  ${formatYen(tr.amount)}`)
+    for (const [i, tr] of b.transfers.entries()) {
+      // **进度得跟着一起贴出去。** 这份文本才是「群里那份」，而屏幕上有绿勾、
+      // 它没有 —— 于是已经还清的人在群里看到自己名下白纸黑字还欠着，再转一次
+      const done = b.settled_transfers[i]
+      const note = done ? `  ${t('bill.planDone')}` : noteOf(tr, i) ? `  ${noteOf(tr, i)}` : ''
+      lines.push(`  ${nameOf(tr.from_id)} → ${nameOf(tr.to_id)}  ${formatYen(tr.amount)}${note}`)
     }
   } else {
     lines.push(t('bill.planEmpty'))
   }
+  if (superseded.value) lines.push(t('bill.planSuperseded'))
   return lines.join('\n')
 })
 
@@ -567,8 +667,7 @@ async function copyBill() {
  * 一整笔。屏幕上没有任何地方提示过。
  */
 function confirmReceived(tr: BillTransfer, index: number) {
-  const paid = bill.value?.settled_paid?.[index] ?? 0
-  const left = Math.max(tr.amount - paid, 0)
+  const left = leftOf(tr, index)
   $q.dialog({
     title: t('bill.done'),
     message: t('bill.doneHint', { from: nameOf(tr.from_id), to: nameOf(tr.to_id) }),

@@ -118,7 +118,17 @@ export interface Bill {
   total_income: number
   entry_count: number
   members: BillRow[]
+  /** 出账那一刻冻结的方案。**这是历史陈述，不是行动指示** */
   transfers: BillTransfer[]
+  /**
+   * 「此刻」该谁给谁多少 —— 和「未出账」那页看到的是同一份。
+   *
+   * 大字、进度、按钮都归它管：冻结方案里那一对，后来可能再也不会走钱
+   * （大家换了现金、并单转、经第三人），照着它行动就是凭空造一笔债。
+   */
+  live_transfers: BillTransfer[]
+  /** 「此刻」每个人的净额。键是 member_id */
+  live_closing: Record<string, number>
   simplified: boolean
 }
 

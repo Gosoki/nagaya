@@ -1028,15 +1028,73 @@ test('账单两页：未出账 / 已出账，更早的从标题那个名字翻',
 
   // 翻到的是上一张，而且地址照样不动
   await expect(page.locator('.head .pick')).toContainText(all[1].label)
-  // **旧单子上不许再给「确认已完成」**。冻结的方案里那几对，后来可能再也不会有钱
-  // 流过（新开销把债权重新净额化，A 的钱是经 B 绕回来的）—— 那一行于是永远点不亮，
-  // 而按下去会凭空记一笔债：实测全屋余额已经全是 0，按一下就变成 A 倒欠 B 一万
-  await expect(page.getByRole('button', { name: '确认已完成' }),
-    '被取代的方案上不该还有结账按钮').toHaveCount(0)
   await expect(page).toHaveURL(/\/bill$/)
   // 页签没跑掉：翻旧账单仍然在「已出账」这一页里
   await expect(page.locator('.bill-tabs .q-tab').nth(1)).toHaveClass(/q-tab--active/)
   await expectNoHorizontalScroll(page)
+})
+
+test('结账按钮只在「此刻还欠着」时出现，而且说得出还差多少', async ({ page }) => {
+  await login(page)
+  const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
+  const all = await (await page.request.get('/api/statements', { headers })).json()
+  const settled = all.find((s: { settled: boolean }) => s.settled)
+  expect(settled, '种子数据里该有已结清的账单').toBeTruthy()
+
+  // **钱早就转完的单子上不许有按钮。** 按钮的开关是「此刻这一对还欠不欠」，
+  // 不是「这是不是最新那张」—— 后者两头都错：最新那张的方案同样会在出账后作废
+  // （有人没照方案走、或者又记了新账），按下去凭空造债；而更早那张上的钱
+  // 可能确确实实还欠着，收掉按钮等于没地方记。
+  await page.goto(`/bill/${settled.id}`)
+  await expect(page.locator('.head .pick')).toContainText(settled.label)
+  await expect(page.getByRole('button', { name: '确认已完成' }),
+    '钱已经转完了，不该还叫人再转一次').toHaveCount(0)
+
+  // **已经转过多少必须上屏。** 后端一直算着这个数，可它以前只送进了对话框的
+  // 预填值 —— 屏幕上只有一个全额，于是还了一半的人照着它再转一次全额。
+  // 造一个「转了一部分」的局面：挑一张出过的单子，往它的某一对之间记一笔小额
+  const me = await (await page.request.get('/api/auth/me', { headers })).json()
+  let target: { st: number; tr: { from_id: number; to_id: number; amount: number }; paid: number } | null = null
+  for (const st of all) {
+    const b = await (await page.request.get(`/api/statements/${st.id}/bill`, { headers })).json()
+    const live = new Map(
+      (b.live_transfers ?? []).map((x: { from_id: number; to_id: number; amount: number }) =>
+        [`${x.from_id}-${x.to_id}`, x.amount]),
+    )
+    const i = b.transfers.findIndex(
+      (tr: { from_id: number; to_id: number; amount: number }, k: number) =>
+        (tr.from_id === me.id || tr.to_id === me.id) &&
+        !b.settled_transfers[k] &&
+        Number(live.get(`${tr.from_id}-${tr.to_id}`) ?? 0) >= tr.amount - b.settled_paid[k],
+    )
+    if (i >= 0) {
+      target = { st: st.id, tr: b.transfers[i], paid: b.settled_paid[i] }
+      break
+    }
+  }
+  expect(target, '种子数据里该有一笔「还欠着、还没转完」的方案行').toBeTruthy()
+
+  const bump = 1000
+  const made = await (await page.request.post('/api/entries', {
+    headers,
+    data: {
+      kind: 'settlement', date: new Date().toISOString().slice(0, 10), amount_jpy: bump,
+      payer_id: target!.tr.from_id, to_member_id: target!.tr.to_id,
+    },
+  })).json()
+  try {
+    await page.goto(`/bill/${target!.st}`)
+    const left = target!.tr.amount - target!.paid - bump
+    const card = page.locator('.q-card').filter({ hasText: `¥${target!.tr.amount.toLocaleString('en-US')}` }).first()
+    await expect(card, '卡片上要写清已经转了多少、还差多少')
+      .toContainText(`¥${left.toLocaleString('en-US')}`)
+    // 按钮预填的也得是还差的数，不是全额
+    await card.getByRole('button', { name: '确认已完成' }).click()
+    await expect(page.locator('.q-dialog input')).toHaveValue(String(left))
+    await page.getByRole('button', { name: '取消' }).click()
+  } finally {
+    await page.request.delete(`/api/entries/${made.id}`, { headers })
+  }
 })
 
 test('结清了的账单：绿标就占状态那一格，自己那笔划掉', async ({ page }) => {

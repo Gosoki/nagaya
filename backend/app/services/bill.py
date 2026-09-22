@@ -218,6 +218,28 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
             else plan_pairwise(_pair_debts(session, statement))
         )
 
+    # 「**此刻**该谁给谁多少」—— 和「未出账」那页看到的是同一份。
+    #
+    # 已出账那张单子上的每人行和转账方案说的都是**出账那一刻**的事（方案还是冻结的），
+    # 这是对的：账单是一份历史陈述。但界面上最显眼的那句大字和「确认已完成」按钮
+    # 是**行动指示**，它们必须按现在的实际情况说话。不这么分开的话：
+    #   * 钱已经还清的人，屏幕照样命令他「你要给 Zen ¥9,999」—— 他真会再转一次；
+    #   * 出账之后大家换了条路结清（现金、并单转、经第三人），冻结方案里那一对
+    #     再也不会走钱，而按钮还亮着 —— 按一下就是凭空造一笔债。
+    # 更早那些单子已经靠「收掉按钮」堵住了，最新那张漏了，而最新那张恰恰是
+    # 出完账默认停的那一页。
+    #
+    # 草稿那页的每人行和方案本来就是实时的（它覆盖全部账目），别再算一遍。
+    if statement is None:
+        live_closing, live_transfers = closing, transfers
+    else:
+        live_closing = ledger.balances(session)
+        live_transfers = (
+            plan_simplified(live_closing)
+            if simplify
+            else plan_pairwise(_pair_debts(session, None))
+        )
+
     dates = [e.date for e in entries]
     prev = session.exec(
         select(Statement)
@@ -252,6 +274,9 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
         "entry_count": len(entries),
         "members": rows,
         "transfers": [t._asdict() for t in transfers],
+        # 行和方案是**历史**，下面这两个是**此刻** —— 大字、进度、按钮都归它们管
+        "live_closing": live_closing,
+        "live_transfers": [t._asdict() for t in live_transfers],
         "simplified": simplify,
         # 出账之后又被改过的话要说出来，否则下一张的「上期结转」没人解释得清
         "edited_after_cut": _edited_after_cut(session, statement, rows),
