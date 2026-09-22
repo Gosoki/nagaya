@@ -675,9 +675,22 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
         dup[e.category_id] = dup.get(e.category_id, 0) + 1
         if e.category_id in monthly_ids:
             total += e.amount_jpy
+    # 草稿里还没录的行：垫付人和分摊从**上期那一笔**起步，和「和上期一样」同一个口径
+    # （SPEC F1：分摊规则默认＝该分类上次用的规则）。原来是分类默认规则 ——
+    # 而界面上改房租怎么分只能逐笔改，于是每期手填一次房租，分摊就打回均分一次。
+    # 人变了（有人搬走/搬进来）就不抄：退回分类默认，由人自己重新定
+    last = _last_billed(session, [c.id for c in categories]) if statement is None else {}
+    active = {m.id for m in ledger.active_members(session, today_jst())} if statement is None else set()
     rows = []
     for c in categories:
         entry = mine.get(c.id)
+        prev = last.get(c.id)
+        seed = c.default_rule_json
+        prev_payer = None
+        if prev is not None:
+            if prev.split_rule_json and _stale_for_today(prev.split_rule_json, None, active) is None:
+                seed = _prune_rule(prev.split_rule_json, active)
+            prev_payer = prev.payer_id if prev.payer_id in active else None
         # 翻一张已经出过的账单时只列它真有的那几项。空行会诱人往里填，
         # 而填出来的是**新账目**，落进当前草稿，根本不会进这张单子。
         if statement is not None and entry is None:
@@ -699,7 +712,9 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
                 "entry_id": entry.id if entry else None,
                 "amount": entry.amount_jpy if entry else None,
                 "version": entry.version if entry else None,
-                "rule": entry.split_rule_json if entry else c.default_rule_json,
+                "rule": entry.split_rule_json if entry else seed,
+                #: 上期那一笔是谁垫的（还在籍才给）。面板上没录的行按它预填「谁付的」
+                "last_payer_id": prev_payer,
                 "date": entry.date.isoformat() if entry else None,
                 #: 本期这个分类一共有几笔。>1 说明面板没显示全，界面上必须提示
                 "entry_count": dup.get(c.id, 0),
@@ -782,21 +797,28 @@ def _carry(session: Session, *, actor_id: int | None) -> dict[str, Any]:
     if since is not None:
         dropped = dropped.where(Entry.deleted_at > since.cut_at)
     handled |= {e.category_id for e in session.exec(dropped)}
-    last = _last_billed_amount(session, [c.id for c in categories])
-    # 分类上没定垫付人时回退到全局设置，再没有才算当前这个人 ——
-    # 和 models.py 上写的那条链、以及固定费面板的 payerOf() 对齐。
-    # 少了中间这一级的话，「本期第一个打开账单页的人」就成了房租的垫付人
-    fallback_payer = settings_svc.get(session, "default_payer_id") or actor_id
+    last = _last_billed(session, [c.id for c in categories])
     active = {m.id for m in ledger.active_members(session, today_jst())}
 
     made: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
     for c in categories:
-        amount = last.get(c.id)
-        if c.id in handled or not amount:
+        prev = last.get(c.id)
+        if c.id in handled or prev is None or not prev.amount_jpy:
             continue
-        payer = c.default_payer_id or fallback_payer
-        stale = _stale_for_today(c, payer, active)
+        # **「和上期一样」就是字面意思：金额、分摊、垫付人都照上期那一笔。**
+        #
+        # 原来只抄金额，分摊用分类默认、垫付人回退到「全局默认 → 当前这个人」：
+        #   * 分摊：界面上改房租怎么分只有一条路 —— 在固定费面板里展开那一行改，
+        #     改的是那一笔、不是分类。于是「Go 多担 5,000」下一期被悄悄打回均分，
+        #     以后每期都是；
+        #   * 垫付人：分类和全局都没设时，谁先打开账单页（carry 挂在页面挂载上），
+        #     房租就记成谁垫的。
+        # 分类上明写了默认垫付人的仍然优先 —— 那是面板上「谁付的」显式定下的常驻值
+        # （改它会同时写分类和那一笔）。SPEC F1：分摊规则默认＝该分类上次用的规则
+        payer = c.default_payer_id or prev.payer_id
+        rule = prev.split_rule_json or c.default_rule_json
+        stale = _stale_for_today(rule, payer, active)
         if stale is not None:
             # 自动记的钱必须看得见 —— 这一条也包括「这次没敢替你记」
             failed.append({"category_id": c.id, "name": c.name, "reason": stale})
@@ -807,10 +829,10 @@ def _carry(session: Session, *, actor_id: int | None) -> dict[str, Any]:
                 actor_id=actor_id,
                 kind=EntryKind.expense,
                 on=today_jst(),
-                amount=amount,
+                amount=prev.amount_jpy,
                 payer_id=payer,
                 category_id=c.id,
-                category_rule=_prune_rule(c.default_rule_json, active),
+                rule=_prune_rule(rule, active),
             )
         except (ValueError, KeyError) as e:   # LedgerError / RuleError / SplitError 都是 ValueError
             session.rollback()
@@ -820,7 +842,7 @@ def _carry(session: Session, *, actor_id: int | None) -> dict[str, Any]:
     return {"created": made, "failed": failed}
 
 
-def _stale_for_today(category: Category, payer: int | None, active: set[int]) -> str | None:
+def _stale_for_today(rule: dict[str, Any] | None, payer: int | None, active: set[int]) -> str | None:
     """这一项还能不能照上期自动记？返回拦下来的原因，None ＝ 可以记。
 
     「和上期一样」抄的是**上一期**的安排，而人是会搬走搬进来的。两件事一旦发生，
@@ -838,7 +860,7 @@ def _stale_for_today(category: Category, payer: int | None, active: set[int]) ->
     """
     if payer is not None and payer not in active:
         return "payer_left"
-    rule = category.default_rule_json or {}
+    rule = rule or {}
     named = rule.get("exact") if rule.get("mode", "ratio") == "exact" else rule.get("weights")
     if isinstance(named, dict) and named:
         listed: set[int] = set()
@@ -881,8 +903,8 @@ def _prune_rule(rule: dict[str, Any] | None, active: set[int]) -> dict[str, Any]
     return out
 
 
-def _last_billed_amount(session: Session, category_ids: list[int]) -> dict[int, int]:
-    """每个分类**上一次出过账的**金额。只给「和上期一样」那几项抄。
+def _last_billed(session: Session, category_ids: list[int]) -> dict[int, Entry]:
+    """每个分类**上一次出过账的**那一笔。只给「和上期一样」那几项抄。
 
     按分类回溯而不是只看上一张单子：水费两个月一收，上一张本来就没有它。
     """
@@ -901,11 +923,11 @@ def _last_billed_amount(session: Session, category_ids: list[int]) -> dict[int, 
         )
         .order_by(Entry.date.desc(), Entry.id.desc())
     ).all()
-    amounts: dict[int, int] = {}
+    last: dict[int, Entry] = {}
     for e in rows:
-        if e.category_id not in amounts:
-            amounts[e.category_id] = e.amount_jpy
-    return amounts
+        if e.category_id not in last:
+            last[e.category_id] = e
+    return last
 
 
 def settlement_progress(session: Session, statement: Statement | None) -> dict[str, Any]:

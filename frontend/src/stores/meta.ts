@@ -120,9 +120,20 @@ export const useMeta = defineStore('meta', () => {
     }
   }
 
+  /**
+   * 记新账时默认算谁付的：设置里的「默认垫付人」—— **前提是他那天还住在这儿**。
+   * 人搬走之后这条设置往往没人记得去改，照用的话，新记的日用品都算成已经不住
+   * 这儿的人垫的，账单反过来叫留下的人给他转账。不在籍就退回自己
+   */
+  function defaultPayerOn(date: string): number | null {
+    const set = setting<number | null>('default_payer_id', null)
+    if (set !== null && membersOn(date).some((m) => m.id === set)) return set
+    return auth.me?.id ?? null
+  }
+
   return {
     members, categories, settings,
-    activeMembers, activeMembersSelfFirst, membersOn, byId,
+    activeMembers, activeMembersSelfFirst, membersOn, byId, defaultPayerOn,
     dailyCategories, monthlyCategories, categoryById,
     setting, load, forget,
   }

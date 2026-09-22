@@ -142,9 +142,9 @@ import { ApiError, api } from 'src/api/client'
 import type { Category, MonthlyData, MonthlyRow } from 'src/api/types'
 import MemberPicker from 'src/components/MemberPicker.vue'
 import SplitEditor from 'src/components/SplitEditor.vue'
+import { todayJst } from 'src/date'
 import { digitsOf } from 'src/digits'
 import { formatYen } from 'src/i18n'
-import { useAuth } from 'src/stores/auth'
 import { useBills } from 'src/stores/bills'
 import { useLedger } from 'src/stores/ledger'
 import { useMeta } from 'src/stores/meta'
@@ -181,23 +181,21 @@ const meta = useMeta()
 const bills = useBills()
 const ledger = useLedger()
 const router = useRouter()
-const auth = useAuth()
 
 const data = ref<MonthlyData | null>(null)
 const rows = ref<Row[]>([])
 const busy = ref(false)
 
-/** 没给这一项定过、也没有全局设置时的兜底 */
-const fallbackPayerId = computed(
-  () => meta.setting<number | null>('default_payer_id', null) ?? auth.me?.id ?? null,
-)
+/** 没给这一项定过、也没有全局设置时的兜底（全局那位得今天还住在这儿） */
+const fallbackPayerId = computed(() => meta.defaultPayerOn(todayJst()))
 
 /**
  * 这一笔算谁垫的。按「谁最有发言权」排：
  *   1. 本期已经录了 → 就是当初记的那个人，谁也别动它
  *   2. 这一项定过默认垫付人 → 用它（房租永远从同一张卡扣）
- *   3. 全局的「默认垫付人」设置
- *   4. 当前登录的人
+ *   3. 上期那一笔是谁垫的（和「和上期一样」同一个口径）
+ *   4. 全局的「默认垫付人」设置（他今天还住在这儿的话）
+ *   5. 当前登录的人
  *
  * 少了第 2 条的话，这一屏就是「谁填的算谁」：别人刷的卡被随手填进去，
  * 账本当场错一整笔房租的钱，而屏幕上一点提示都没有。
@@ -208,7 +206,7 @@ function payerOf(row: Row): number | null {
   // 后面两级回退给的是「今天的默认垫付人」，跟当初谁真掏的钱没关系 ——
   // 而这一屏正是靠这个名字告诉人「这笔房租是谁垫的」
   if (historic.value && row.entry_id !== null) return null
-  return row.default_payer_id ?? fallbackPayerId.value
+  return row.default_payer_id ?? row.last_payer_id ?? fallbackPayerId.value
 }
 
 const payerName = (row: Row) => {

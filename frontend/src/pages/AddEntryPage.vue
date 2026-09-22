@@ -247,7 +247,6 @@ import AmountInput from 'src/components/AmountInput.vue'
 import MemberPicker from 'src/components/MemberPicker.vue'
 import MemoPanel from 'src/components/MemoPanel.vue'
 import SplitEditor from 'src/components/SplitEditor.vue'
-import { useAuth } from 'src/stores/auth'
 import { KIND_PALETTE } from 'src/theme'
 import { useDrafts } from 'src/stores/drafts'
 import { useLedger } from 'src/stores/ledger'
@@ -259,7 +258,6 @@ const $q = useQuasar()
 const route = useRoute()
 const router = useRouter()
 const meta = useMeta()
-const auth = useAuth()
 const ledger = useLedger()
 const memos = useMemos()
 const drafts = useDrafts()
@@ -527,7 +525,7 @@ onMounted(async () => {
     await loadForEdit(editingId.value)
     return
   }
-  payerId.value = meta.setting<number | null>('default_payer_id', null) ?? auth.me?.id ?? null
+  payerId.value = meta.defaultPayerOn(date.value)
   // 「PWA 一打开就是记一笔，启动即光标就位」（router 里那条 D16）——
   // 触屏设备冷启动那一下除外，理由见 focusAmountIfTypable
   if (!cold) focusAmountIfTypable()
@@ -657,7 +655,7 @@ watch(
   () => meta.settings.length,
   () => {
     if (payerId.value === null) {
-      payerId.value = meta.setting<number | null>('default_payer_id', null) ?? auth.me?.id ?? null
+      payerId.value = meta.defaultPayerOn(date.value)
     }
   },
 )

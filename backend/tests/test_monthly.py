@@ -413,8 +413,11 @@ def test_an_exact_rule_cannot_be_pruned_and_says_so(session: Session, members) -
         "exact": {str(a.id): 45_000, str(b.id): 40_000, str(c_.id): 35_000},
     }
     session.add(cat)
+    # 和接口一样把分类规则带上（routers/entries.py 的 _category_rule）：
+    # 上期那一笔存下的就是这条 exact 规则，carry 照它抄
     create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG,
-                 amount=120_000, payer_id=a.id, category_id=cat.id)
+                 amount=120_000, payer_id=a.id, category_id=cat.id,
+                 category_rule=cat.default_rule_json)
     cut_statement(session, actor_id=a.id)
     c_.left_on = dt.date(2026, 8, 31)
     session.add(c_)
@@ -451,3 +454,67 @@ def test_deleted_this_period_stays_deleted_across_a_small_cut(session, members) 
     cut_statement(session, actor_id=a.id, include_monthly=False)  # 中途结一次日常小账
 
     assert carry_same_as_last(session, actor_id=a.id)["created"] == []
+
+
+def test_carry_copies_last_periods_split_and_payer(session: Session, members) -> None:
+    """「和上期一样」照抄上期那一笔的分摊和垫付人（审计 money-1 critical / money-2）。
+
+    房租怎么分，界面上只能在固定费面板里逐笔改 —— 改的是那一笔、不是分类。
+    原来 carry 用分类默认规则，「A 多担 5,000」下一期被悄悄打回均分；
+    垫付人回退到「谁先打开账单页」，房租就记成了看页面的那个人垫的。
+    """
+    a, b, c_ = members
+    cat = cats(session)["家賃"]
+    cat.same_as_last = True
+    session.add(cat)
+    create_entry(
+        session, actor_id=a.id, kind=EntryKind.expense, on=AUG, amount=120_000, payer_id=a.id,
+        category_id=cat.id,
+        rule={"mode": "ratio", "weights": {str(a.id): 1, str(b.id): 1, str(c_.id): 1},
+              "adjustments": {str(a.id): 5_000, str(c_.id): -5_000}},
+    )
+    cut_statement(session, actor_id=a.id)
+
+    out = carry_same_as_last(session, actor_id=b.id)       # B 先打开的账单页
+    assert [m["amount"] for m in out["created"]] == [120_000]
+    rent = next(e for e in unbilled(session) if e.category_id == cat.id)
+    assert rent.payer_id == a.id, "垫付人是上期那一笔的 A，不是打开页面的 B"
+    from app.services.bill import _shares_of
+    shares = _shares_of(session, [rent.id])[rent.id]
+    assert shares == {a.id: 45_000, b.id: 40_000, c_.id: 35_000}
+
+
+def test_carry_asks_when_someone_new_moved_in(session: Session, members) -> None:
+    """上期那一笔点名了三个人，这期多了一个新室友 —— 不替人猜怎么分，报出来。"""
+    from app.models import Member
+
+    a, *_ = members
+    cat = cats(session)["家賃"]
+    cat.same_as_last = True
+    session.add(cat)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG,
+                 amount=120_000, payer_id=a.id, category_id=cat.id)
+    cut_statement(session, actor_id=a.id)
+    session.add(Member(name="d", display_name="D", display_order=3, joined_on=dt.date(2026, 9, 1)))
+    session.commit()
+
+    out = carry_same_as_last(session, actor_id=a.id)
+    assert out["created"] == []
+    assert out["failed"][0]["reason"] == "rule_stale"
+
+
+def test_unrecorded_row_starts_from_last_periods_payer_and_split(session: Session, members) -> None:
+    """没开「和上期一样」、这期手填房租时，面板也从上期那一笔的垫付人和分摊起步 ——
+    和 carry 同一个口径，否则每手填一次，分摊就被打回分类默认一次。金额照旧不预填。"""
+    a, b, c_ = members
+    cat = cats(session)["家賃"]
+    rule = {"mode": "ratio", "weights": {str(a.id): 1, str(b.id): 1, str(c_.id): 1},
+            "adjustments": {str(a.id): 5_000, str(c_.id): -5_000}}
+    create_entry(session, actor_id=b.id, kind=EntryKind.expense, on=AUG, amount=120_000,
+                 payer_id=b.id, category_id=cat.id, rule=rule)
+    cut_statement(session, actor_id=a.id)
+
+    row = rows_by_name(session)["家賃"]
+    assert row["amount"] is None
+    assert row["last_payer_id"] == b.id
+    assert row["rule"]["adjustments"] == {str(a.id): 5_000, str(c_.id): -5_000}

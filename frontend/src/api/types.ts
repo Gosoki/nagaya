@@ -143,6 +143,8 @@ export interface MonthlyRow {
   default_rule_json: Record<string, unknown> | null
   /** 这一项默认谁垫 */
   default_payer_id: number | null
+  /** 上期那一笔是谁垫的（还在籍才有）。没录的行按它预填 */
+  last_payer_id?: number | null
   /** 每期金额都一样 */
   same_as_last: boolean
   /** 这一项已经删掉（归档）了，只是本期还挂着钱，所以那一行还留着 */
