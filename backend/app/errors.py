@@ -25,6 +25,20 @@ class AppError(ValueError):
         self.detail = detail
 
 
+def reject_nulls(fields: dict[str, Any], names: tuple[str, ...]) -> None:
+    """PATCH 里把非空字段显式传成 null 的，在这里挡掉。
+
+    不挡的话是**裸 500**：NOT NULL 约束要等到 commit 才炸，那时已经是
+    IntegrityError 冒到最外层。前端拿到的是「服务器出错了」，人不知道自己哪里填错了。
+
+    `fields` 拼成一句话再进 detail —— 这个值是要直接插进界面文案的 `{fields}` 的，
+    传数组的话 vue-i18n 会把 `["a","b"]` 原样印进 toast。
+    """
+    nulled = [k for k in names if k in fields and fields[k] is None]
+    if nulled:
+        raise AppError("null_field", f"cannot be cleared: {nulled}", fields=", ".join(nulled))
+
+
 def not_found(what: str) -> AppError:
     """找不到了。多半是别人刚删掉、或者手里这份列表旧了 —— 刷新一下再试。"""
     return AppError("not_found", f"{what} not found", status=404, what=what)

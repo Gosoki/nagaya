@@ -11,7 +11,7 @@ from sqlmodel import Session, select
 
 from app.auth import current_member
 from app.db import get_session
-from app.errors import AppError, not_found
+from app.errors import AppError, not_found, reject_nulls
 from app.models import Member, Memo, now_utc
 from app.schemas import MemoIn, MemoOut
 
@@ -70,6 +70,7 @@ def update_memo(
     if row is None:
         raise not_found("memo")
     fields = body.model_dump(exclude_unset=True)
+    reject_nulls(fields, ("title", "body", "display_order"))
     if "title" in fields and not (fields["title"] or "").strip():
         raise AppError("name_required", "memo needs a title")
     _check_len(fields.get("title"), fields.get("body"))

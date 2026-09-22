@@ -19,9 +19,10 @@
 from __future__ import annotations
 
 import datetime as dt
+import threading
 from typing import Any
 
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, union_all
 from sqlalchemy import update as sa_update
 from sqlmodel import Session, select
 
@@ -103,23 +104,30 @@ def _opening(session: Session, statement: Statement | None) -> dict[int, int]:
     ids = _earlier_ids(session, statement)
     if ids is not None and not ids:
         return {}
-    net: dict[int, int] = {}
-    for mid, total in session.exec(
-        _scope_billed(select(Entry.payer_id, func.sum(Entry.amount_jpy)), ids).group_by(
-            Entry.payer_id
-        )
-    ):
-        net[mid] = net.get(mid, 0) + int(total or 0)
-    for mid, total in session.exec(
+    # **垫付和应担必须在同一条 SQL 里数完。**
+    # 分成两条 SELECT 的话它们不在同一个快照上 —— pysqlite 不会为 SELECT 开事务，
+    # 每条自己取一次最新状态。于是别人在这两条之间记了一笔（手机上按下保存，
+    # 电脑上正好在看账单），这边就会「数到了他垫的钱、没数到他应担的份」，
+    # 算出一本不平的账 → settle.plan 抛 unbalanced → GET /api/bill 直接 500。
+    # 账是好的，只是被看的那一瞬间是斜的。一条 UNION ALL + 一次 group by 就没这个缝
+    deltas = union_all(
         _scope_billed(
-            select(EntryShare.member_id, func.sum(EntryShare.amount_jpy)).join(
-                Entry, Entry.id == EntryShare.entry_id
-            ),
+            select(Entry.payer_id.label("mid"), Entry.amount_jpy.label("delta")), ids
+        ),
+        _scope_billed(
+            select(
+                EntryShare.member_id.label("mid"),
+                (-EntryShare.amount_jpy).label("delta"),
+            ).join(Entry, Entry.id == EntryShare.entry_id),
             ids,
-        ).group_by(EntryShare.member_id)
-    ):
-        net[mid] = net.get(mid, 0) - int(total or 0)
-    return net
+        ),
+    ).subquery()
+    return {
+        mid: int(total or 0)
+        for mid, total in session.exec(
+            select(deltas.c.mid, func.sum(deltas.c.delta)).group_by(deltas.c.mid)
+        )
+    }
 
 
 def _covers_from(prev: Statement | None, dates: list[dt.date]) -> str | None:
@@ -316,34 +324,35 @@ def _edited_after_cut(
     """
     if statement is None:
         return None
-    logs = session.exec(
-        select(AuditLog).where(
-            AuditLog.target_table == "entry",
-            AuditLog.at > statement.cut_at,
-            AuditLog.action.in_(["update", "delete", "restore"]),
-        )
-    ).all()
-    touched = {
-        l.target_id
-        for l in logs
-        if l.target_id is not None
-        and (session.get(Entry, l.target_id) is not None)
-        and session.get(Entry, l.target_id).statement_id == statement.id
-    }
+    # **一条聚合，不要逐条 get。** 原来是把 `at > cut_at` 的审计日志整行捞出来
+    # （只用得上 target_id，却把 before_json/after_json 两个 JSON blob 一起反序列化），
+    # 再对每一条调两次 `session.get(Entry, ...)` —— 两次不会被 identity map 挡掉：
+    # 它存的是**弱引用**，推导式里第一次 get 的返回值当场没人持有就被回收了。
+    # 5 年规模的库上实测 503 次 SQL / 71ms，而且随「改过多少笔账」无上界地涨
+    edited = select(AuditLog.target_id).where(
+        AuditLog.target_table == "entry",
+        AuditLog.at > statement.cut_at,
+        AuditLog.action.in_(["update", "delete", "restore"]),
+    )
+    n_touched = session.exec(
+        select(func.count())
+        .select_from(Entry)
+        .where(Entry.id.in_(edited), Entry.statement_id == statement.id)
+    ).one()
 
     snapshot = statement.snapshot_json or {}
     frozen_closing = {r["member_id"]: r["closing"] for r in snapshot.get("members", [])}
     live_closing = {r["member_id"]: r["closing"] for r in rows}
     drifted = any(live_closing.get(mid, 0) != c for mid, c in frozen_closing.items())
 
-    if not touched and not drifted:
+    if not n_touched and not drifted:
         return None
     return {
-        "count": len(touched),
+        "count": n_touched,
         "frozen_total": snapshot.get("total_expense"),
         "live_total": build_total_expense(session, statement),
         # 这张单子自己一笔没动，是更早那张被改了才漂的
-        "from_earlier": not touched and drifted,
+        "from_earlier": not n_touched and drifted,
     }
 
 
@@ -587,6 +596,16 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
     }
 
 
+#: carry 这件事整个进程里一次只许跑一个。
+#: 「读一遍本期已经有哪几项 → 把缺的记上」中间隔着好几十毫秒，而触发它的是
+#: 账单页挂载（MonthlyFixed.vue 的 onMounted）—— 群里一句「出账了」，三个人同时点开，
+#: 两个请求都在对方 commit 之前读到「本期还没记房租」，于是各记一笔，当期房租翻倍。
+#: 面板一行只显示得下一笔，屏幕上的金额还是对的、合计却是两倍。
+#: 服务是单端口单进程（见 main.py 的 _daily_backup），一把进程内的锁就够；
+#: 不加唯一索引 —— 同一分类手工记两笔是合法的（entry_count 就是为它准备的）
+_carry_lock = threading.Lock()
+
+
 def carry_same_as_last(session: Session, *, actor_id: int | None) -> dict[str, Any]:
     """把「和上期一样」的固定费按上期金额记进当前草稿。
 
@@ -604,6 +623,11 @@ def carry_same_as_last(session: Session, *, actor_id: int | None) -> dict[str, A
     而返回值随异常一起丢掉、接口返 400、前端一个空 catch 吞掉 ——
     屏幕上那几行还是空框，用户照着空框再填一遍，同一分类当期就有了两笔。
     """
+    with _carry_lock:
+        return _carry(session, actor_id=actor_id)
+
+
+def _carry(session: Session, *, actor_id: int | None) -> dict[str, Any]:
     categories = list(
         session.exec(
             select(Category).where(
@@ -619,14 +643,18 @@ def carry_same_as_last(session: Session, *, actor_id: int | None) -> dict[str, A
     # 「本期已经处理过」＝ 录了 **或者** 手动删掉了。
     # 只看 unbilled() 的话删掉的那笔不在里面，下次挂载面板又给它记回来。
     #
-    # 「本期」要按**上次出账那一刻**卡：软删的账目 statement_id 永远留着 NULL
-    # （出账只认没删的），所以光看 statement_id IS NULL 的话，半年前删过一次的
-    # 分类会从此**永远**不再自动记 —— 那是另一个方向的静默失效。
+    # 「本期」要按**上次出账那一刻**卡：草稿里删掉的账目 statement_id 恒为 NULL，
+    # 光看这一条的话，半年前删过一次的分类会从此**永远**不再自动记 ——
+    # 那是另一个方向的静默失效。两条一起才圈得出「这一期手动删掉的」。
     handled = {e.category_id for e in unbilled(session) if e.category_id is not None}
     since = session.exec(select(Statement).order_by(Statement.cut_at.desc())).first()
     dropped = select(Entry).where(
         Entry.deleted_at.is_not(None),
         Entry.category_id.is_not(None),
+        # 而且必须是**草稿里**删的。已出账的账目软删之后 statement_id 还留着，
+        # 少了这一条的话，「事后回去修一笔去年的房租」会被当成「本期删掉了房租」，
+        # 整个月的房租从此不自动记，面板上就是个空框，出账时按 0 结
+        Entry.statement_id.is_(None),
     )
     if since is not None:
         dropped = dropped.where(Entry.deleted_at > since.cut_at)

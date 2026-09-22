@@ -23,7 +23,7 @@ from app.db import engine
 from app.services import backup as backup_svc
 
 from app.core.rules import RuleError
-from app.errors import AppError
+from app.errors import AppError, not_found
 from app.services.backup import BackupError
 from app.services.bill import BillError
 from app.core.split import SplitError
@@ -114,6 +114,18 @@ for error_type in (LedgerError, RuleError, SplitError, BillError, BackupError, A
         error_type,
         lambda request, exc: _error_response(exc),  # noqa: ARG005
     )
+
+
+@app.exception_handler(OverflowError)
+def _id_too_big(request, exc):  # noqa: ANN001, ARG001
+    """id 大到 SQLite 存不下（`/api/entries/99999999999999999999` 这种）。
+
+    sqlite3 在绑参数那一层就抛 OverflowError —— 不是返回「查无此行」，
+    于是一路冒到顶变成裸 500。这么大的 id 在库里**不可能存在**，
+    回「找不到」才是实话。挂在这里而不是每个 session.get() 前面，
+    是因为这条路径遍布路由、服务、外键检查三层，一处一处堵必然漏。
+    """
+    return _error_response(not_found("row"))
 
 for module in (auth, members, categories, entries, ledger, memos, settings, backup):
     app.include_router(module.router)

@@ -37,6 +37,11 @@ def pick_rule(*candidates: Mapping[str, Any] | None) -> dict[str, Any]:
     return {"mode": "ratio", "equal_weight": 1}
 
 
+#: 规则里那些数字的上界。和 ledger.MAX_AMOUNT 同一个数 —— 在这里写死而不是 import，
+#: 是因为 core/ 不该反过来依赖 services/（现在的依赖方向是 services → core）
+MAX_RULE_VALUE = 1_000_000_000_000
+
+
 def _as_int(value: Any, field: str, key: str) -> int:
     """规则里的数字必须**本来就是整数**。
 
@@ -54,6 +59,14 @@ def _as_int(value: Any, field: str, key: str) -> int:
             f"{field}[{key}] 必须是整数，收到 {value!r}",
             field=field,
             member=key,
+        )
+    # 上界和金额同一个数。不设的话一条写进设置/分类的规则就能把每笔账的应担
+    # 打成天文数字 —— 而合计仍等于总额，所有自检照样是绿的。
+    # 卡在这里意味着**存规则那一刻**就拒（settings 和 categories 都会先试着用一下），
+    # 而不是等到有人拿它记第一笔账
+    if abs(value) > MAX_RULE_VALUE:
+        raise RuleError(
+            "not_in_range", f"{field}[{key}] 超出范围：{value}", field=field, member=key
         )
     return value
 
@@ -116,8 +129,14 @@ def participants(rule: Mapping[str, Any]) -> list[str]:
     return list(rule.get("weights", {}))
 
 
-def _normalize(d: Mapping[Any, Any]) -> dict[str, Any]:
-    """把 key 统一成字符串形式的 member id。"""
+def _normalize(d: Any) -> dict[str, Any]:
+    """把 key 统一成字符串形式的 member id。
+
+    先确认它真是个对象：`weights` / `exact` / `adjustments` 是从 JSON 里原样收进来的，
+    传成数组或字符串时 `.items()` 抛的 AttributeError 会一路冒到 FastAPI 顶上变成裸 500。
+    """
+    if not isinstance(d, Mapping):
+        raise RuleError("bad_rule_shape", f"这里要一个「成员 id → 数字」的对象，收到 {type(d).__name__}")
     out: dict[str, Any] = {}
     for k, v in d.items():
         try:

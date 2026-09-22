@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 
 from app.auth import current_member, hash_password, verify_password
 from app.db import get_session
-from app.errors import AppError, not_found
+from app.errors import AppError, not_found, reject_nulls
 from app.models import Member
 from app.routers.auth import to_member_out
 from app.schemas import MemberIn, MemberOut
@@ -85,10 +85,7 @@ def update_member(
     fields = body.model_dump(exclude_unset=True, exclude={"password", "old_password"})
     # 显式传 null 的那几个：数据库上是 NOT NULL，直接 setattr 下去就是 500。
     # left_on 不在里面 —— 它**必须**清得掉，否则填错一次那个人就永远是「已退出」
-    nulled = [k for k in ("name", "display_name", "color", "display_order", "joined_on", "lang")
-              if k in fields and fields[k] is None]
-    if nulled:
-        raise AppError("null_field", f"cannot be cleared: {nulled}", fields=", ".join(nulled))
+    reject_nulls(fields, ("name", "display_name", "color", "display_order", "joined_on", "lang"))
     if "name" in fields:
         if not fields["name"]:
             raise AppError("name_required", "login name required")

@@ -233,6 +233,17 @@ def _write_shares(session: Session, entry: Entry, expanded: dict[str, Any], paye
     total = sum(shares.values())
     if total != entry.amount_jpy:  # pragma: no cover —— 引擎已保证，这是最后一道闸
         raise LedgerError("sum_mismatch", f"分摊合计 {total} ≠ 总额 {entry.amount_jpy}")
+    # **逐条也要有上界。** MAX_AMOUNT 只卡 entry.amount_jpy，而真正落库的钱是
+    # entry_share：ratio 模式下 base = amount − Σadjustments，一个巨大的调整额
+    # 能把每个人的 share 打成天文数字，而**合计仍严格等于 amount** ——
+    # 于是「Σ余额≡0」「Σshares≡amount」两条自检全绿，屏幕上却看不出哪笔账错了。
+    # entry_share 只在这里写，这一处同时管住 POST / PATCH / carry / 分类规则 / 全局规则
+    for key, value in shares.items():
+        if abs(value) > MAX_AMOUNT:
+            raise LedgerError(
+                "share_too_large", f"某个人的应担超出上限：{value}",
+                member=key, limit=MAX_AMOUNT,
+            )
 
     session.exec(  # type: ignore[call-overload]
         EntryShare.__table__.delete().where(EntryShare.entry_id == entry.id)
@@ -330,7 +341,7 @@ def update_entry(
     nulled = [k for k in _NOT_NULLABLE if k in fields and fields[k] is None]
     if nulled:
         raise LedgerError(
-            "null_field", f"这些字段不能清空：{', '.join(nulled)}", fields=nulled
+            "null_field", f"这些字段不能清空：{', '.join(nulled)}", fields=", ".join(nulled)
         )
 
     if entry.deleted_at is not None:

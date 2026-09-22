@@ -7,7 +7,7 @@ from app.auth import current_member
 from app.core.rules import RuleError, expand
 from app.core.split import SplitError, split
 from app.db import get_session
-from app.errors import AppError, not_found
+from app.errors import AppError, not_found, reject_nulls
 from app.models import Category, Member
 from app.schemas import CategoryIn, CategoryOut
 
@@ -94,8 +94,11 @@ def update_category(
         if not body.name:
             raise AppError("name_required", "category needs a name")
     _check(session, body, me=category_id)
-    # default_rule_json 要能被显式清空，所以单独处理（None 在这里是「清掉」的意思）
+    # default_rule_json / default_payer_id 要能被显式清空（None 在这里是「清掉」的意思），
+    # 其余几个是 NOT NULL —— 传 null 进来得当场挡掉，不然要等 commit 才炸成 500
     data = body.model_dump(exclude_unset=True)
+    reject_nulls(data, ("name", "icon", "color", "monthly", "display_order",
+                        "archived", "same_as_last", "note"))
     for key, value in data.items():
         setattr(row, key, value)
     session.add(row)
