@@ -50,13 +50,28 @@
     <!-- 用 v-if 而不是 v-else：上面那句多了个「还在加载」的条件，
          两个都不成立时（冷启动的头几十毫秒）这一页就该是干净的 -->
     <template v-if="bill">
-      <div class="head bill-section q-pa-md">
-        <div class="row items-baseline">
+      <!--
+        头一张卡片：这是哪张单子、一共多少、**我**要做什么。
+
+        **未出账和已出账两页，这一块必须一样高**（第 5 条）：两页来回切的时候，
+        下面「本期固定费」那块不该上下跳。所以三行各自钉死行高、一律不折行：
+          第一行  单子的名字 ………… 合计
+          第二行  覆盖的日期 ………… 状态（笔数 / 已结清 / 未结清 / 出账后改过）
+          第三块  我这期：一行标签 + 一行结论
+        原来会让它变高的三样东西都收进了这个框里：
+          * 「要转给两个人」那句整句 28px，会折成两行 —— 现在标签归标签，
+            两笔收成一行、字小一号；
+          * 「出账后被改过」那条橙色横幅 —— 现在是第二行里一颗橙色的签，
+            点开看全文（复制出去的文本里照旧带着整句）；
+          * 我不在这张单子上（比如后来才搬进来）时，那一块原来整个不见。
+      -->
+      <div class="head bill-section">
+        <div class="head-top row items-center no-wrap">
           <!-- 出过的单子：名字就是翻页入口。原来「以前」单独占一个页签，
                而「挑某个月」才是常态、「逐张翻」很少 —— 并进来之后
                这一屏永远是一张账单，形状不再变来变去 -->
-          <button v-if="!bill.is_draft" class="pick text-subtitle1 text-weight-medium">
-            {{ statementLabel(bill) }}
+          <button v-if="!bill.is_draft" class="pick head-title">
+            <span class="ellipsis">{{ statementLabel(bill) }}</span>
             <q-icon name="expand_more" size="20px" class="text-grey-6" />
             <q-menu anchor="bottom left" self="top left" max-height="60vh">
               <q-list separator style="min-width: 260px">
@@ -65,7 +80,8 @@
                   :key="st.id"
                   v-close-popup
                   clickable
-                  :class="{ 'bg-blue-1': st.id === bill.statement_id }"
+                  :active="st.id === bill.statement_id"
+                  active-class="picked"
                   @click="pickStatement(st.id)"
                 >
                   <q-item-section>
@@ -76,71 +92,78 @@
                   </q-item-section>
                   <q-item-section side>
                     <div class="text-weight-medium text-grey-9">{{ formatYen(st.total_expense) }}</div>
-                    <q-badge
-                      v-if="st.settled"
-                      color="positive"
-                      class="q-mt-xs"
-                      :label="t('bill.settledBadge')"
-                    />
+                    <span v-if="st.settled" class="chip ok q-mt-xs">{{ t('bill.settledBadge') }}</span>
                     <div v-else class="text-caption text-grey-6 q-mt-xs">{{ t('bill.unsettled') }}</div>
                   </q-item-section>
                 </q-item>
               </q-list>
             </q-menu>
           </button>
-          <div v-else class="text-subtitle1 text-weight-medium">{{ t('bill.draft') }}</div>
+          <div v-else class="head-title ellipsis">{{ t('bill.draft') }}</div>
           <q-space />
           <!-- 「这一期一共花了多少」降级：它谁也不用去做什么。
                真正要做的那件事（我要给谁多少）挪到下面用 28px 印 -->
-          <div class="text-caption text-grey-6 q-mr-xs">{{ t('bill.total') }}</div>
-          <div class="text-subtitle1 text-weight-medium num">{{ formatYen(bill.total_expense) }}</div>
+          <div class="total-label">{{ t('bill.total') }}</div>
+          <div class="total num">{{ formatYen(bill.total_expense) }}</div>
         </div>
-        <div class="row items-baseline text-caption text-grey-6">
-          <div v-if="bill.covers_from">
-            {{ t('bill.coversRange', { from: bill.covers_from, to: bill.covers_to }) }}
+        <div class="head-meta row items-center no-wrap">
+          <div class="ellipsis">
+            <template v-if="bill.covers_from">
+              {{ t('bill.coversRange', { from: bill.covers_from, to: bill.covers_to }) }}
+            </template>
           </div>
           <q-space />
           <!-- 这一格就是「这张单子现在什么状态」：草稿报笔数，出过的账单
-               结清了给绿标、没结清给橙字。原来绿标另起一行占着一整行 -->
-          <div v-if="bill.is_draft">
+               结清了给绿签、没结清给橙字 -->
+          <div v-if="bill.is_draft" class="no-wrap">
             <span v-if="bill.prev_cut_at" class="q-mr-sm">
               {{ t('bill.lastCut', { label: statementLabel({ label: bill.prev_label, cut_at: bill.prev_cut_at }) }) }}
             </span>
             {{ t('bill.entryCount', { n: bill.entry_count }) }}
           </div>
-          <q-badge v-else-if="bill.settled" color="positive" :label="t('bill.settledBadge')" />
-          <div v-else class="text-warning">{{ t('bill.unsettled') }}</div>
+          <template v-else>
+            <!-- 不锁历史，但改动必须可见：否则下一张的「上期结转」没人解释得清。
+                 **这颗签是那条规矩在屏幕上的凭证**（复制出去的文本里是整句），
+                 点开看全文 -->
+            <button
+              v-if="bill.edited_after_cut"
+              class="chip warn edited q-mr-xs"
+              type="button"
+              @click="showEdited = true"
+            >
+              <q-icon name="error_outline" size="14px" />
+              {{ t('bill.editedChip') }}
+            </button>
+            <span v-if="bill.settled" class="chip ok">{{ t('bill.settledBadge') }}</span>
+            <span v-else class="text-warning">{{ t('bill.unsettled') }}</span>
+          </template>
         </div>
 
         <!-- 自己那笔摆在最显眼处。读账单的人要的就是这一个数字，
              埋在半屏之下的话，他先看到的全是别人的录入框。
              **结清了就划掉**：钱早就转过了，一个亮着的「你应收 ¥84,106」
              会让人以为现在还欠着 -->
-        <!-- **一句话里也要分层。** 原来整句 17px 红字印成一行，人得读完
-             「你要给 Zen ¥53,047」才拿到那个数；而这是全屏第一重要的数字，
-             旁边「合计」反倒用了更大的字。现在标签归标签、数字归数字 -->
         <div
-          v-if="mine"
-          class="mine q-mt-md"
-          :class="[minePart.tone, { done: !bill.is_draft && myLeft === 0 }]"
+          class="mine"
+          :class="[minePart.tone, { done: !bill.is_draft && myLeft === 0, multi: minePart.multi }]"
         >
-          <div v-if="minePart.label" class="mine-label">{{ minePart.label }}</div>
-          <div class="mine-figure num">{{ minePart.figure }}</div>
+          <div class="mine-label">{{ minePart.label }}</div>
+          <div class="mine-figure num ellipsis">{{ minePart.figure }}</div>
         </div>
-
-        <!-- 不锁历史，但改动必须可见：否则下一张的「上期结转」没人解释得清。
-             **这条横幅是那条规矩唯一的可见凭证** —— 曾被一个 class="hidden" 的
-             外壳罩住（重构时套错的），于是「可以改」成了「改了没人知道」 -->
-        <q-banner v-if="bill.edited_after_cut" dense class="bg-orange-1 text-orange-9 q-mt-sm rounded-borders">
-          {{ bill.edited_after_cut.from_earlier
-            ? t('bill.driftedFromEarlier')
-            : t('bill.editedAfterCut', {
-              n: bill.edited_after_cut.count,
-              frozen: formatYen(bill.edited_after_cut.frozen_total ?? 0),
-              live: formatYen(bill.edited_after_cut.live_total),
-            }) }}
-        </q-banner>
       </div>
+
+      <q-dialog v-model="showEdited">
+        <q-card style="width: 92vw; max-width: 400px">
+          <q-card-section class="row items-center no-wrap q-pb-none">
+            <q-icon name="error_outline" size="22px" class="text-warning q-mr-sm" />
+            <div class="text-subtitle1 text-weight-medium">{{ t('bill.editedChip') }}</div>
+          </q-card-section>
+          <q-card-section>{{ editedText }}</q-card-section>
+          <q-card-actions align="right">
+            <q-btn v-close-popup flat no-caps color="primary" :label="t('common.confirm')" />
+          </q-card-actions>
+        </q-card>
+      </q-dialog>
 
       <!-- 本期固定费：出账单时顺手把家賃/水电煤网填了，账单跟着重算 -->
       <MonthlyFixed v-if="bill.is_draft" @saved="load" />
@@ -267,22 +290,25 @@
         </q-list>
       </div>
 
-      <div>
+      <div class="bill-section plan">
         <q-item dense class="section-head">
           <q-item-section>
             {{ bill.transfers.length ? t('bill.plan', { n: bill.transfers.length }) : t('bill.planEmpty') }}
           </q-item-section>
         </q-item>
         <div class="q-px-md q-pb-md">
-        <q-card v-for="(tr, i) in bill.transfers" :key="i" flat bordered class="q-mb-sm">
-          <q-card-section class="row items-center q-py-sm q-px-md">
-            <div class="col">
-              <div class="text-caption text-grey-7">
-                {{ nameOf(tr.from_id) }}
-                <q-icon name="arrow_forward" size="13px" class="q-mx-xs" />
-                {{ nameOf(tr.to_id) }}
+        <q-card v-for="(tr, i) in bill.transfers" :key="i" flat class="transfer q-mb-sm">
+          <q-card-section class="row items-center no-wrap q-py-sm q-px-md">
+            <div class="pair row items-center no-wrap q-mr-md">
+              <MemberAvatar :member-id="tr.from_id" size="28px" />
+              <q-icon name="arrow_forward" size="14px" class="text-grey-6 q-mx-xs" />
+              <MemberAvatar :member-id="tr.to_id" size="28px" />
+            </div>
+            <div class="col" style="min-width: 0">
+              <div class="text-caption text-grey-7 ellipsis">
+                {{ nameOf(tr.from_id) }} → {{ nameOf(tr.to_id) }}
               </div>
-              <div class="text-subtitle1 text-weight-medium">{{ formatYen(tr.amount) }}</div>
+              <div class="tr-amount num">{{ formatYen(tr.amount) }}</div>
               <!-- **进度必须上屏。** 后端一直算着「这一笔已经转过多少」，可它以前
                    只送进了对话框的预填值 —— 屏幕上只有一个全额，于是已经还了一半的人
                    照着这个数再转一次全额 -->
@@ -593,7 +619,8 @@ const mineText = computed(() => {
  * 比别的档矮 20px —— 在未出账和已出账之间来回切，下面整块跟着上下跳。
  * tone 也在这儿定：结清了是中性色，不能沿用「欠钱」那个红。
  */
-const minePart = computed<{ label: string; figure: string; tone: 'owe' | 'owed' | 'settled' }>(() => {
+type MinePart = { label: string; figure: string; tone: 'owe' | 'owed' | 'settled'; multi?: boolean }
+const minePart = computed<MinePart>(() => {
   const row = mine.value
   const b = bill.value
   const settled = {
@@ -601,7 +628,9 @@ const minePart = computed<{ label: string; figure: string; tone: 'owe' | 'owed' 
     figure: t('bill.youSettled'),
     tone: 'settled' as const,
   }
-  if (!row || !b) return { label: '', figure: '', tone: 'settled' }
+  // 我不在这张单子上（后来才搬进来的人翻旧账单）：这一块照样占着位置，
+  // 否则这一页比别的页矮一截，两页来回切时底下整块上下跳
+  if (!row || !b) return { label: t('bill.youSettledLabel'), figure: t('bill.youNotIn'), tone: 'settled', multi: true }
   const me = row.member_id
   const rows = b.transfers
     .map((tr, i) => ({ tr, left: leftOf(tr, i) }))
@@ -634,7 +663,32 @@ const minePart = computed<{ label: string; figure: string; tone: 'owe' | 'owed' 
       tone: row.closing > 0 ? 'owed' : 'owe',
     }
   }
-  return { label: '', figure: mineText.value, tone: row.closing < 0 ? 'owe' : 'owed' }
+  // 要转给好几个人：**得全列出来**（原来只取第一条、却把欠款总额安在那个人头上）。
+  // 收成一行、字小一号 —— 整句 28px 会折成两行，把这一块撑高
+  const pay = rows.filter((x) => x.tr.from_id === me)
+  if (pay.length) {
+    return {
+      label: t('bill.youPayListLabel'),
+      figure: pay.map((x) => `${nameOf(x.tr.to_id)} ${formatYen(x.left)}`).join('  ·  '),
+      tone: 'owe',
+      multi: true,
+    }
+  }
+  return { label: t('bill.youSettledLabel'), figure: mineText.value, tone: row.closing < 0 ? 'owe' : 'owed', multi: true }
+})
+
+/** 「出账后改过」那颗签点开之后的全文。和复制出去的文本是同一句 */
+const showEdited = ref(false)
+const editedText = computed(() => {
+  const e = bill.value?.edited_after_cut
+  if (!e) return ''
+  return e.from_earlier
+    ? t('bill.driftedFromEarlier')
+    : t('bill.editedAfterCut', {
+        n: e.count,
+        frozen: formatYen(e.frozen_total ?? 0),
+        live: formatYen(e.live_total),
+      })
 })
 
 /** 改完数据强制重取这一张。进页面用的是 ensure（缓存先上屏） */
@@ -908,15 +962,55 @@ function doCut() {
 .closing { font-size: var(--nagaya-fs-figure-s); font-weight: 600; letter-spacing: -0.01em; }
 /* 「我」那一行。原来用 Quasar 的 bg-blue-1，蓝得压过了红绿两种金额色 */
 .member-row.me { background: var(--nagaya-accent-bg); }
+.member-row { padding-top: 10px; padding-bottom: 10px; }
 
 /* 「已预付」和「已收到」互斥，共用第 2 行第 1 格 */
 .b-owed { grid-area: 1 / 1; }
 .b-paid { grid-area: 1 / 2; }
 .b-tx { grid-area: 2 / 1; }
 .b-carry { grid-area: 2 / 2; }
+/* ---- 头一张卡片。三行各自钉死行高，两页才一样高（见模板上那段） ---- */
+.head { padding: 14px 16px 16px; }
+.head-top { height: 28px; }
+.head-title {
+  min-width: 0;
+  font-size: var(--nagaya-fs-title);
+  font-weight: 600;
+  line-height: 28px;
+}
+.total-label {
+  margin-right: 6px;
+  font-size: var(--nagaya-fs-meta);
+  color: var(--nagaya-ink-3);
+}
+.total { font-size: var(--nagaya-fs-title); font-weight: 600; }
+.head-meta {
+  height: 22px;
+  margin-top: 2px;
+  font-size: var(--nagaya-fs-meta);
+  color: var(--nagaya-ink-3);
+  white-space: nowrap;
+}
+/* 状态签：绿＝结清，橙＝出账后改过（点得开） */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--nagaya-r-pill);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 20px;
+  white-space: nowrap;
+}
+.chip.ok { background: color-mix(in srgb, var(--nagaya-pos) 14%, transparent); color: var(--nagaya-pos); }
+.chip.warn { background: var(--nagaya-warn-bg); color: var(--nagaya-warn); }
+.chip.edited { cursor: pointer; }
 /* 标题当按钮用，但看着还得是标题。
-   **只中和浏览器给 button 的默认字体族**，别写 `font: inherit` ——
-   那个简写会把 text-subtitle1 的 16px 一并盖成容器的 14px，标题小一号 */
+   **只中和浏览器给 button 的默认字体族**，别写 `font: inherit` */
 .pick {
   display: inline-flex;
   align-items: center;
@@ -927,11 +1021,14 @@ function doCut() {
   color: inherit;
   cursor: pointer;
 }
+/* 翻单子那个菜单里，正在看的那一张 */
+.picked { background: var(--nagaya-accent-bg); }
 /* 本期固定费：和未出账那页的面板对齐到同一套尺寸 —— 行高 40、金额 16px、
    右边留 50px（那页那儿是展开箭头，这页没有，用内边距占出来） */
 .monthly-list .q-item {
   min-height: var(--nagaya-fee-row-h);
-  padding-right: var(--nagaya-fee-amount-gap);
+  /* 多出来的 10px ＝ 未出账那页输入框的内边距：数字在框里离右边 10px */
+  padding-right: calc(var(--nagaya-fee-amount-gap) + 10px);
 }
 /* 第二行起要把分隔线那 1px **加在行高之外**。
    未出账那页的行是 q-expansion-item，1px 落在外层、把那一格撑成 41；
@@ -945,18 +1042,29 @@ function doCut() {
   font-size: var(--nagaya-fee-amount-fs);
   font-variant-numeric: tabular-nums;
 }
-/* 自己那笔：这一屏最该一眼看到的东西 */
-.mine { font-weight: 600; }
+.section-head .amount { padding-right: 10px; }
+/* 自己那笔：这一屏最该一眼看到的东西。标签一行、结论一行，高度钉死 */
+.mine {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--nagaya-line);
+  font-weight: 600;
+}
 .mine-label {
+  height: 18px;
   font-size: var(--nagaya-fs-label);
   font-weight: 400;
+  line-height: 18px;
   color: var(--nagaya-ink-2);
 }
 .mine-figure {
+  height: 36px;
   font-size: var(--nagaya-fs-figure);
-  line-height: 1.15;
+  line-height: 36px;
   letter-spacing: -0.02em;
 }
+/* 一次要转给好几个人、或者只是说一句话：同一行里放下，字小一号 */
+.mine.multi .mine-figure { font-size: 20px; letter-spacing: 0; }
 .mine.owe { color: var(--nagaya-neg); }
 .mine.owed { color: var(--nagaya-pos); }
 /* 结清了是中性色：红＝还欠着，绿＝还有人欠你，而这一档两样都不是 ——
@@ -966,22 +1074,29 @@ function doCut() {
 /* 结清了的那张：数字划掉。颜色留着 —— 还看得出当初是应收还是应付 */
 .mine.done { text-decoration: line-through; }
 
+/* 转账方案：一笔一块浅底，两个头像中间一个箭头，一眼看出谁给谁 */
+.transfer {
+  background: var(--nagaya-fill);
+  border-radius: var(--nagaya-r-md);
+}
+.tr-amount { font-size: var(--nagaya-fs-figure-s); font-weight: 600; line-height: 1.3; }
+
 /* 主操作条：压在底部 Tab 之上 */
-.actions :deep(.q-btn) { min-height: 44px; }
+.actions :deep(.q-btn) { min-height: 48px; font-size: 15px; font-weight: 600; }
 /* 两块严格各占一半。用 grid 而不是 flex：flex 下两边算出来的 flex 一样，
    实测仍然是 188/156，内容宽度还在暗中起作用；grid 的 1fr 1fr 是确定的 */
 .actions > * { min-width: 0; }
 /* 已出的账单右边这一半：写状态，不做成禁用按钮 ——
    禁用按钮看着还是个按钮，会让人反复点它找反应 */
 .issued {
-  min-height: 44px;
-  border-radius: 4px;
-  background: #f2f2f5;
-  color: #9e9e9e;
+  min-height: 48px;
+  border-radius: 14px;
+  background: var(--nagaya-fill);
+  color: var(--nagaya-ink-4);
   /* 字号/字重/行高/图标间距全部照抄 q-btn 的实测值：外框早就各占一半了，
      里面不抄的话左右两块字一大一小、一粗一细，看着还是不一样大 */
-  font-size: 14px;
-  font-weight: 500;
+  font-size: 15px;
+  font-weight: 600;
   line-height: 24px;
 }
 .issued :deep(.q-icon) { margin-right: 12px; }
@@ -992,9 +1107,7 @@ function doCut() {
   gap: 8px;
   /* 页面收到 --nagaya-max-w 居中，这条压在它上面的操作栏也得跟着收，
      否则宽屏上按钮会跑到内容外面去 */
-  padding: 8px max(12px, calc((100% - var(--nagaya-max-w)) / 2));
-  background: #fff;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  padding: 8px max(16px, calc((100% - var(--nagaya-max-w)) / 2 + 16px)) 4px;
 }
 /* 下边距不用自己留：操作条在底栏里，Quasar 会把底栏总高算进页面容器 */
 .bill-text {

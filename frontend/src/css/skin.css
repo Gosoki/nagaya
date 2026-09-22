@@ -1,0 +1,220 @@
+/**
+ * 全站外观：顶栏、底栏、分段控件、卡片、列表、弹窗。
+ *
+ * tokens.css 定「颜色和尺寸是多少」，这份定「东西长什么样」。
+ * 两份都排在 Quasar 之后 import（main.ts），覆盖 Quasar 默认样式靠的是这个顺序。
+ * **这里不许出现色值** —— 一律取 tokens.css 的变量，深色模式才能一处切换。
+ *
+ * 形状语言（2026-09 改版）：
+ *   * 页面是一层浅灰底，内容一块块摆在圆角卡片上（iOS 的分组列表那一路）；
+ *   * 顶栏、底栏半透明 + 背景模糊，滚动时内容从底下透过去；
+ *   * 页签一律是「分段控件」：一条浅槽里滑着一块。记一笔那条的滑块是
+ *     实心的记账类型色 —— 选错类型的代价比选错页签大，值得更硬的提示。
+ */
+
+/* ------------------------------------------------------------------
+   顶栏 / 底栏
+   ------------------------------------------------------------------ */
+.app-bar {
+  background: var(--nagaya-bar-solid);
+  color: var(--nagaya-ink);
+}
+/* 模糊只在支持的浏览器上开；不支持的退回上面那个不透明底，字照样看得清 */
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .app-bar {
+    background: var(--nagaya-bar);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    backdrop-filter: saturate(180%) blur(20px);
+  }
+}
+/* 分隔用 0.5px 的影子线，不用 border：border 会算进高度，
+   而顶栏/底栏的高度 Quasar 要拿去推内容 */
+.q-header.app-bar { box-shadow: 0 0.5px 0 var(--nagaya-line); }
+.q-footer.app-bar { box-shadow: 0 -0.5px 0 var(--nagaya-line); }
+
+/* 底部三格导航。选中那格的图标后面垫一颗药丸 —— 光靠变色，
+   浅色主题下「藏青 vs 灰」在户外看不太出来 */
+.nav-tabs .q-tab {
+  min-height: 54px;
+  padding: 0 4px;
+}
+.nav-tabs .q-tab__content { padding: 6px 0 4px; }
+.nav-tabs .q-tab__icon {
+  width: 56px;
+  height: 28px;
+  border-radius: 14px;
+  font-size: 22px;
+  transition: background-color 0.2s;
+}
+.nav-tabs .q-tab--active .q-tab__icon { background: var(--nagaya-accent-bg); }
+.nav-tabs .q-tab__label {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+  margin-top: 3px;
+}
+.nav-tabs .q-tab--inactive { opacity: 1; color: var(--nagaya-ink-3); }
+
+/* ------------------------------------------------------------------
+   分段控件
+   顶栏里那几条（账单的「未出账/已出账」、更多的「流水/设置」、
+   记一笔的「支出/收入/转账/备忘」）。**高度一样**：52 ＝ 7 + 38 + 7，
+   三个分区之间切换时，底下的内容不会上下跳。
+   ------------------------------------------------------------------ */
+.bill-tabs,
+.kind-toggle {
+  /* 宽屏上跟着页面收窄居中 */
+  width: calc(100% - 24px);
+  max-width: calc(var(--nagaya-max-w) - 24px);
+  margin: 7px auto;
+  padding: 2px;
+  border-radius: 11px;
+  background: var(--nagaya-fill-2);
+}
+
+/* 页签那种（q-tabs）：白色滑块，字是主文字色 */
+.bill-tabs .q-tabs__content { width: 100%; }
+.bill-tabs .q-tab {
+  flex: 1 1 0;
+  min-height: 34px;
+  padding: 0 8px;
+  border-radius: 9px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--nagaya-ink-2);
+  transition: background-color 0.18s, box-shadow 0.18s, color 0.18s;
+}
+.bill-tabs .q-tab__label { font-size: 15px; font-weight: 500; }
+.bill-tabs .q-tab__indicator { display: none; }
+.bill-tabs .q-tab.q-tab--active {
+  background: var(--nagaya-surface);
+  color: var(--nagaya-ink) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+}
+html.dark .bill-tabs .q-tab.q-tab--active { background: var(--nagaya-surface-2); box-shadow: none; }
+.bill-tabs .q-tab--inactive { opacity: 1; }
+
+/* 记账类型那种（q-btn-toggle）：滑块是实心的类型色（toggle-color 给的），白字 */
+.kind-toggle { display: flex; gap: 2px; }
+.kind-toggle .q-btn {
+  flex: 1 1 0;
+  min-height: 34px;
+  padding: 0 4px;
+  border-radius: 9px !important;       /* 压过 q-btn-group 给首尾两段的切角 */
+  font-size: 15px;
+  font-weight: 500;
+  transition: background-color 0.18s, color 0.18s;
+}
+.kind-toggle .q-btn:not(.q-btn--active) { color: var(--nagaya-ink-2); }
+/* 选中那段加粗。未选中的几段是透明的，底由整条浅槽给 */
+.kind-toggle .q-btn--active { font-weight: 600; }
+/* 改一笔已有的账时它画在页面里，上下留点距离 */
+.q-page > .kind-toggle { margin-top: 10px; margin-bottom: 2px; }
+
+/* 行尾的小号二选一/三选一（语言、深浅色）：分段控件的缩小版 */
+.mini-seg {
+  padding: 2px;
+  gap: 2px;
+  border-radius: 9px;
+  background: var(--nagaya-fill-2);
+}
+.mini-seg .q-btn {
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 7px !important;
+  font-size: 13px;
+  font-weight: 500;
+}
+.mini-seg .q-btn:not(.q-btn--active) { color: var(--nagaya-ink-2); }
+
+/* ------------------------------------------------------------------
+   卡片
+   .bill-section 原来是「一块」：块与块之间用 8px 灰带断开。
+   现在每块是一张圆角白卡片，浮在浅灰页面上。
+   类名没改 —— 账单、固定费、设置里的各块都挂着它，E2E 也认它
+   ------------------------------------------------------------------ */
+.bill-section,
+.card {
+  margin: 12px 12px 0;
+  background: var(--nagaya-surface);
+  border-radius: var(--nagaya-r-lg);
+  box-shadow: var(--nagaya-shadow);
+  overflow: hidden;
+}
+/* 每页最后一块底下留出同样的 12px，别顶着底栏 */
+.q-page { padding-bottom: 12px; }
+
+/* 每块的标题条：比正文粗一档，不再是细细的 14px */
+.section-head .q-item__section--main {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--nagaya-ink);
+}
+
+/* ------------------------------------------------------------------
+   Quasar 组件的底色和线，统一接到 token 上（深色才切得过去）
+   ------------------------------------------------------------------ */
+.q-item,
+.q-list--dark,
+.q-item--dark { color: inherit; }
+/* 次要文字：浅色下 Quasar 写死 #757575 / 54% 黑，深色下是「当前色的 70%/80%」——
+   两边都接到 ink-3，对比度才是算过的那个数 */
+.q-item__label--caption,
+.q-list--dark .q-item__label--caption,
+.q-item--dark .q-item__label--caption { color: var(--nagaya-ink-3); }
+.q-item__section--side,
+.q-list--dark .q-item__section--side:not(.q-item__section--avatar),
+.q-item--dark .q-item__section--side:not(.q-item__section--avatar) { color: var(--nagaya-ink-3); }
+/* 头像那一列收窄：Quasar 默认给 56px，而这里的图标都是 30px 的圆，
+   剩下 26px 空着，名字离图标远得像两列 */
+.q-item__section--avatar { min-width: 46px; }
+/* 被点中（router-link-active / active）的行不借主色当字色 */
+.q-item--active { color: inherit; }
+.q-list--separator > .q-item-type + .q-item-type,
+.q-list--separator > .q-virtual-scroll__content > .q-item-type + .q-item-type,
+.q-list--dark.q-list--separator > .q-item-type + .q-item-type,
+.q-list--dark.q-list--separator > .q-virtual-scroll__content > .q-item-type + .q-item-type {
+  border-top-color: var(--nagaya-line);
+}
+.q-list--dark,
+.q-item--dark { border-color: var(--nagaya-line); }
+.q-separator,
+.q-separator--dark { background: var(--nagaya-line); }
+.q-expansion-item--expanded + .q-expansion-item--expanded > div > .q-item { border-top-color: var(--nagaya-line); }
+
+/* 弹窗、菜单：比卡片再浮一层 */
+.q-dialog .q-card,
+.q-menu {
+  background: var(--nagaya-surface-2);
+  color: var(--nagaya-ink);
+}
+.q-dialog .q-card { border-radius: 18px; }
+.q-menu {
+  border-radius: 12px;
+  box-shadow: var(--nagaya-shadow-up);
+}
+.q-dialog__backdrop { backdrop-filter: blur(2px); }
+
+/* 按钮：圆角放大一号，和卡片的 16px 呼应。圆形、药丸形的不动 */
+.q-btn:not(.q-btn--round):not(.q-btn--rounded) { border-radius: 10px; }
+.q-btn--outline::before { border-color: var(--nagaya-line-2); }
+/* 固定操作条上的主按钮（记入账、出账单）：大一号 */
+.actions .q-btn { border-radius: 14px; }
+
+/* 提示条：深色胶囊，和系统的 toast 一个样 */
+.q-notification {
+  border-radius: 14px;
+  box-shadow: var(--nagaya-shadow-up);
+}
+
+/* 日期选择器 */
+.q-date { background: var(--nagaya-surface-2); color: var(--nagaya-ink); }
+
+/* 下拉刷新那颗转圈 */
+.q-pull-to-refresh__puller {
+  background: var(--nagaya-surface-2);
+  color: var(--nagaya-accent);
+}
+
+/* 骨架屏的底 */
+.q-skeleton { background: var(--nagaya-fill-2); }

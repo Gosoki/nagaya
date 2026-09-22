@@ -96,10 +96,32 @@
               :model-value="auth.me.lang"
               dense unelevated no-caps
               toggle-color="primary"
+              class="mini-seg"
               :options="[{ label: '中文', value: 'zh' }, { label: '日本語', value: 'ja' }]"
               @update:model-value="(v: string) => save({ lang: v })"
             />
           </q-item-label>
+        </q-item-section>
+      </q-item>
+
+      <!-- 深浅色。存在这台设备上，不进账号（理由见 src/colorScheme.ts） -->
+      <q-item class="profile-row">
+        <q-item-section>
+          <q-item-label class="row items-center no-wrap">
+            <div class="col">{{ t('profile.scheme') }}</div>
+            <q-btn-toggle
+              v-model="scheme"
+              dense unelevated no-caps
+              toggle-color="primary"
+              class="mini-seg scheme-toggle"
+              :options="[
+                { label: t('profile.schemeAuto'), value: 'auto' },
+                { label: t('profile.schemeLight'), value: 'light' },
+                { label: t('profile.schemeDark'), value: 'dark' },
+              ]"
+            />
+          </q-item-label>
+          <q-item-label caption>{{ t('profile.schemeHint') }}</q-item-label>
         </q-item-section>
       </q-item>
 
@@ -162,6 +184,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 
 import { ApiError } from 'src/api/client'
+import { schemePref as scheme } from 'src/colorScheme'
 import { MEMBER_COLORS } from 'src/palette'
 import MemberAvatar from 'src/components/MemberAvatar.vue'
 import { useAuth } from 'src/stores/auth'
@@ -332,9 +355,9 @@ async function savePassword() {
   position: absolute;
   right: -2px;
   bottom: -2px;
-  background: #3d4785;
+  background: var(--q-primary);
   color: #fff;
-  border: 2px solid #fff;
+  border: 2px solid var(--nagaya-surface);
   border-radius: 50%;
   padding: 3px;
   box-sizing: content-box;
@@ -350,19 +373,21 @@ async function savePassword() {
 }
 /* 选中的那个：外面套一圈底色的环，深色浅色上都看得见 */
 .swatch.on {
-  box-shadow: 0 0 0 2px #fff inset, 0 0 0 2px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 0 0 2px var(--nagaya-surface) inset, 0 0 0 2px var(--nagaya-ink-2);
 }
 .field {
+  height: 36px;
   border: none;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: var(--nagaya-r-sm);
   outline: none;
-  background: transparent;
+  background: var(--nagaya-fill);
   font: inherit;
   font-size: 16px;           /* 16 是 iOS 的底线：再小一点，聚焦时整页会被放大 */
   color: inherit;
-  padding: 2px 2px 0;
+  padding: 0 10px;
   text-align: right;
   width: 150px;
 }
+.field:focus { box-shadow: inset 0 0 0 1.5px var(--nagaya-accent); }
 .field.full { width: 100%; text-align: left; }
 </style>

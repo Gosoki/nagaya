@@ -183,20 +183,22 @@ async function after() {
   background: var(--nagaya-accent);
   color: #fff;
 }
-/* 和「个人」那几个可填的框一套写法：固定宽 + 一条底线。
+/* 和「个人」那几个可填的框一套写法：固定宽 + 浅底圆角。
    原来写的是 flex:1 —— 旁边的标签是 Quasar 的 .col（flex-grow 10000），
-   剩余空间按 1:10000 分，这个框实际宽度约等于 0，又没底线，屏幕上就没了 */
+   剩余空间按 1:10000 分，这个框实际宽度约等于 0，屏幕上就没了 */
 .field {
   width: 150px;
+  height: 36px;
   border: none;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: var(--nagaya-r-sm);
   outline: none;
-  background: transparent;
+  background: var(--nagaya-fill);
   font: inherit;
   font-size: 16px;           /* 16 是 iOS 的底线：再小一点，聚焦时整页会被放大 */
   color: inherit;
   text-align: right;
-  padding: 2px 2px 0;
+  padding: 0 10px;
 }
+.field:focus { box-shadow: inset 0 0 0 1.5px var(--nagaya-accent); }
 .field::placeholder { color: var(--nagaya-ink-4); }
 </style>

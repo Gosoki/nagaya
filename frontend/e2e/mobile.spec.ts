@@ -1165,7 +1165,7 @@ test('结清了的账单：绿标就占状态那一格，自己那笔写「已�
   await expect(page.locator('.head .pick')).toContainText(settled.label)
   // 绿标就在日期那一行的右头 —— 原来它自己占一整行，右头写的是「请于每月 N 号前结清」
   const status = page.locator('.head .row').nth(1)
-  await expect(status.locator('.q-badge')).toHaveText('已结清')
+  await expect(status.locator('.chip.ok')).toHaveText('已结清')
   await expect(page.locator('.head'), '结算日提醒撤了').not.toContainText('号前结清')
   // 钱早就转过了：这一格不许再印一个看着还欠着的数字，而且不许用报警色
   await expect(page.locator('.mine')).toContainText('已结清')
@@ -1183,6 +1183,12 @@ test('结清了的账单：绿标就占状态那一格，自己那笔写「已�
   await expect(page.locator('.head .row').nth(1)).toContainText('未结清')
   await expect(page.locator('.mine')).toContainText('¥')
   expect(await headH(), '两张单子的头块该一样高').toBe(settledHead)
+
+  // 未出账那页也得一样高：两个页签来回切，下面「本期固定费」那块不许跳
+  await page.goto('/bill')
+  await page.locator('.bill-tabs .q-tab').first().click()
+  await expect(page.locator('.head')).toContainText('当前账单')
+  expect(await headH(), '未出账和已出账的头块该一样高').toBe(settledHead)
 })
 
 test('备忘：固定费那几项常驻，自己也能加；就在「记一笔」第四格', async ({ page }) => {

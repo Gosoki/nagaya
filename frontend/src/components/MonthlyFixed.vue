@@ -638,6 +638,9 @@ defineExpose({ reload: load })
 <style scoped>
 /* 标题条上的合计：跟下面每一行的金额同字号、同一条竖线 */
 .section-head .amount { font-size: var(--nagaya-fee-amount-fs); font-variant-numeric: tabular-nums; }
+/* 输入框里的数字离框右边 10px（框的内边距），合计往里让同样的 10px，
+   上下才是同一条竖线。已出账那页的只读列表也让了这 10px（BillView） */
+.section-head .amount { padding-right: 10px; }
 /* 金额列对齐：右边距 ＝ 行内边距 16 + 展开箭头 24 + 这一格的左内边距。
    要凑到 --nagaya-fee-amount-gap，这里就该留下减掉那 40px 的部分 */
 .wrap :deep(.q-expansion-item .q-item__section--side:last-child) {
@@ -645,34 +648,29 @@ defineExpose({ reload: load })
 }
 .amount-input {
   width: 116px;
+  height: 36px;
+  padding: 0 10px;
   border: none;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: var(--nagaya-r-sm);
   outline: none;
-  background: transparent;
+  background: var(--nagaya-fill);
   text-align: right;
+  font-family: inherit;
   font-size: var(--nagaya-fee-amount-fs);
   font-variant-numeric: tabular-nums;
-  /* **不能用 inherit**：会继承 Quasar 次级文字色 rgba(0,0,0,.54)，
-     跟 #c8c8c8 的占位只差一档。而「正常已录不显示标签」的全部理由
-     就是「实数本身看得出录了」—— 前提是它真的够黑 */
-  color: rgba(0, 0, 0, 0.87);
-  /* 行高压到和账单上「本期其他」一样。输入框比行矮 6px ——
-     当初写 44px 是因为行有 52px 高、上下各留出一条点了会误展开的带；
-     行矮下来之后那条带只剩几像素，真正的解法本来就是压行而不是撑框 */
-  height: calc(var(--nagaya-fee-row-h) - 4px);
-  /* 顶上这 2px 是用来抵消底下那条 1px 下划线的。
-     box-sizing 是 border-box，下划线占掉一行内容高度，文字在剩下的 33px 里居中，
-     于是整体上浮 1px —— 实测数字比已出账那页高 1px。补 2px 顶内边距把内容区
-     的中心往下挪 1px，框和下划线都不动 */
-  padding: 2px 2px 0;
+  /* **不能用 inherit**：会继承 Quasar 的次级文字色，跟占位只差一档。
+     而「正常已录不显示标签」的全部理由就是「实数本身看得出录了」—— 前提是它真的够黑 */
+  color: var(--nagaya-ink);
+  transition: box-shadow 0.15s;
 }
-/* 灰色占位＝上次的参考，不是值。改过的才变实色 */
-.amount-input::placeholder { color: #c8c8c8; }
+.amount-input:focus { box-shadow: inset 0 0 0 1.5px var(--nagaya-accent); }
+/* 灰色占位＝还没填，不是值。改过的才变实色 */
+.amount-input::placeholder { color: var(--nagaya-ink-5); }
 /* **没存上的样子不能借主色。** 原来是蓝下划线 + 加粗，看着像「存好了」，
    而这一屏标着「改完自动保存」—— 人扫一眼就退出去了，下次打开值没了。
    现在是红的：和旁边那句「{n} 项没存上」说同一件事 */
-.amount-input.dirty { border-bottom-color: #c10015; color: #c10015; }
-.amount-input.to-delete { color: #c10015; text-decoration: line-through; }
+.amount-input.dirty { box-shadow: inset 0 0 0 1.5px var(--nagaya-neg); color: var(--nagaya-neg); }
+.amount-input.to-delete { color: var(--nagaya-neg); text-decoration: line-through; }
 /* 块尾那一行。已出账那页是同高的空占位，高度写在同一个变量里 */
 .name-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* line-height 压到 1：12px 的状态字不许顶大行盒，行高交给 14px 名字的 strut 定 */

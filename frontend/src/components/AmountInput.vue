@@ -93,7 +93,7 @@ defineExpose({ focus })
   align-items: baseline;
   justify-content: center;
   gap: 6px;
-  padding: 18px 12px 10px;
+  padding: 12px 12px 6px;
   cursor: text;
 }
 .sym {
@@ -124,7 +124,7 @@ defineExpose({ focus })
   font-variant-numeric: tabular-nums;
   color: inherit;
 }
-.amount::placeholder { color: #d0d0d0; }
+.amount::placeholder { color: var(--nagaya-ink-5); }
 /* 替身和输入框共用 .amount 的字形，只是看不见也不占地方 */
 .ghost {
   position: absolute;

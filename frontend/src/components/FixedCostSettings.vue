@@ -242,8 +242,8 @@ function remove(c: Category) {
   height: 34px;
   border: none;
   border-radius: 6px;
-  background: #f2f2f5;
-  color: #555;
+  background: var(--nagaya-fill);
+  color: var(--nagaya-ink-2);
   cursor: pointer;
 }
 .icon-cell.on { background: var(--q-primary); color: #fff; }
@@ -256,7 +256,7 @@ function remove(c: Category) {
   padding: 0;
   cursor: pointer;
 }
-.color-cell.on { box-shadow: 0 0 0 2px #fff inset, 0 0 0 2px rgba(0, 0, 0, 0.55); }
+.color-cell.on { box-shadow: 0 0 0 2px var(--nagaya-surface) inset, 0 0 0 2px var(--nagaya-ink-2); }
 .name,
 .new-name {
   border: none;
@@ -268,6 +268,6 @@ function remove(c: Category) {
   color: inherit;
 }
 .new-name { padding: 6px 0; }
-.new-name::placeholder { color: #bbb; }
-.add-row { border-top: 1px solid rgba(0, 0, 0, 0.06); min-height: var(--nagaya-add-row-h); }
+.new-name::placeholder { color: var(--nagaya-ink-4); }
+.add-row { border-top: 1px solid var(--nagaya-line); min-height: var(--nagaya-add-row-h); }
 </style>

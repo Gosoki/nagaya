@@ -593,7 +593,7 @@ defineExpose({
 .head-row {
   padding-bottom: 4px;
   margin-bottom: 2px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);   /* 把表头和它管的那几列绑在一起 */
+  border-bottom: 1px solid var(--nagaya-line);   /* 把表头和它管的那几列绑在一起 */
   font-size: 11px;
   letter-spacing: 0.04em;
 }
@@ -775,23 +775,26 @@ defineExpose({
 }
 .num-input {
   width: 100%;
+  min-width: 0;
   border: none;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: var(--nagaya-r-sm);
   outline: none;
-  background: transparent;
+  background: var(--nagaya-fill);
   text-align: right;
+  font-family: inherit;
   font-size: 16px;           /* 16 是 iOS 的底线：再小一点，聚焦时整页会被放大 */
-  padding: 4px 2px;
-  height: 40px;              /* 行高 48，输入框占满大半 —— 拇指点得准 */
+  padding: 0 8px;
+  height: 38px;              /* 行高 52，输入框占满大半 —— 拇指点得准 */
   font-variant-numeric: tabular-nums;
   color: inherit;
 }
+.num-input:focus { box-shadow: inset 0 0 0 1.5px var(--nagaya-accent); }
 .num-input::placeholder { color: var(--nagaya-ink-4); }
 /* 开关亮着时数字跟着变红 —— 红圆点加一个黑数字，是两个半句话；
    一整格都红了，「这一格是减的」才是一眼的事，不用回头去看那颗按钮 */
 .num-input.neg {
   color: var(--nagaya-neg);
-  border-bottom-color: var(--nagaya-neg);
+  background: color-mix(in srgb, var(--nagaya-neg) 10%, transparent);
 }
 
 .total-bar { font-size: 15px; }

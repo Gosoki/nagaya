@@ -9,9 +9,9 @@
          得有一个东西替所有页面把 safe-area-inset-top 占掉，而这个东西必须是
          固定定位的顶栏本身（padding 加在 body/layout 上推不动 fixed 元素）。
          没内容时它的高度就是安全区本身：非刘海机上是 0，和以前一模一样；
-         刘海机上是一条白带子，正好垫在状态栏后面，黑字也才看得清。
+         刘海机上是一条和顶栏同色的带子，正好垫在状态栏后面，字也才看得清。
          Quasar 会量它的实际高度去顶下面的内容，所以页面不用各自再算一遍 -->
-    <q-header ref="headEl" class="bg-white text-dark">
+    <q-header ref="headEl" class="app-bar">
       <DraftBanner v-if="drafts.count" />
       <!-- **断网时屏幕上的数字是旧的，这件事必须说出来。**
            账单页就是三个人掏手机转账前盯的那一屏；室友刚填了水费、刚点了
@@ -33,7 +33,7 @@
          插槽的，而冷启动时（meta 命中本地缓存、不必等网络）页面会和布局在
          同一拍挂载 —— 底栏要是排在后面，那一刻插槽还不存在，Teleport 找不到
          目标，操作条整条渲染不出来。QLayout 算偏移看的是组件自己，不看 DOM 顺序 -->
-    <q-footer ref="footEl" class="bg-white text-grey-8 footer-safe">
+    <q-footer ref="footEl" class="app-bar footer-safe">
       <!-- 各页自己的固定操作条（「记入账」「出账单」）画在这儿 —— 见各页的 Teleport。
            **不再用「量底栏高度 + fixed 定位」那一套**：量早一拍（安全区还没生效、
            图标字体还没到）就会把操作条摆进底栏里，头一次进应用正好撞上这一拍。
@@ -50,7 +50,7 @@
         no-caps
         indicator-color="transparent"
         active-color="primary"
-        class="text-grey-6"
+        class="nav-tabs"
       >
         <q-tab name="add" icon="add_circle" :label="t('nav.add')" @click="go('add')" />
         <q-tab name="bill" icon="receipt" :label="t('nav.bill')" @click="go('bill')" />
@@ -415,15 +415,11 @@ onBeforeUnmount(() => document.removeEventListener('visibilitychange', onVisible
   /* 「加一条 / 加一项」那种收尾行的高度。备忘和固定费设置两处共用 */
   --nagaya-add-row-h: 50px;
 }
-/* 账单上的一「块」：固定费、本期其他、每人、转账方案各算一块。
-   块与块之间用 8px 的灰带断开 —— 1px 细线在手机上分不出「同一块里的两行」
-   和「两块之间」，整页会糊成一长条 */
-.bill-section { border-bottom: 8px solid var(--nagaya-bg-sunken); }
 /* 离线细带。颜色用 warning 一路：这不是错误，是「你看到的可能不是最新的」 */
 .stale-bar {
   min-height: 32px;
   padding: 4px 12px;
-  background: #fff4e0;
+  background: var(--nagaya-warn-bg);
   color: var(--nagaya-warn);
   font-size: 12px;
 }
@@ -454,8 +450,8 @@ onBeforeUnmount(() => document.removeEventListener('visibilitychange', onVisible
   gap: 4px;
   min-height: var(--nagaya-head-h);
   padding: 0 4px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-  font-size: 16px;
+  font-size: 17px;
+  font-weight: 600;
 }
 .q-page {
   max-width: var(--nagaya-max-w);
@@ -493,6 +489,5 @@ textarea { scroll-margin-top: calc(var(--nagaya-header-h) + 8px); }
 /* 刘海屏/手势条：底栏内缩到安全区以内，否则最后一个 tab 会被手势条压住 */
 .footer-safe {
   padding-bottom: env(safe-area-inset-bottom);
-  border-top: 1px solid rgba(0, 0, 0, 0.08);
 }
 </style>

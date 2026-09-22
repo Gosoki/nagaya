@@ -44,6 +44,8 @@
 
       <template v-for="group in grouped" :key="group.date">
         <div class="date-head">{{ group.date }}</div>
+        <!-- 一天一张卡片：那天出过的账单（如果有）在上，流水在下 -->
+        <div class="card day-card">
 
         <!-- 那天出过的账单：在流水里留个印子，点进去看每人该付多少 -->
         <q-list v-if="!anyFilter && statementsOn(group.date).length" separator>
@@ -87,11 +89,12 @@
                 </q-item-label>
               </q-item-section>
 
-              <q-item-section side class="text-weight-medium" :class="e.amount_jpy < 0 ? 'text-positive' : 'text-grey-9'">
+              <q-item-section side class="text-weight-medium num" :class="e.amount_jpy < 0 ? 'text-positive' : 'text-grey-9'">
                 {{ formatYen(e.amount_jpy) }}
               </q-item-section>
           </q-item>
         </q-list>
+        </div>
       </template>
     </q-pull-to-refresh>
     </template>
@@ -308,10 +311,11 @@ async function onRefresh(done: () => void) {
   /* 吸在页签条的**下沿**。写 0 的话它会滚到固定顶栏底下去，
      于是「翻到一半想换个筛法不该先滚回顶上」这句注释说的效果正好反过来 —— 
      实测要往回滚三千多像素才找得回来 */
-  top: calc(var(--nagaya-tabs-h) + env(safe-area-inset-top));
+  /* 用量出来的顶栏高度（含安全区、离线细带、草稿横幅），不用常数：
+     顶栏里多出一条带子时，常数会让筛选条钻到它底下去 */
+  top: var(--nagaya-header-h);
   z-index: 2;
   background: var(--nagaya-bg);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
 }
 .chip {
   display: inline-flex;
@@ -321,23 +325,23 @@ async function onRefresh(done: () => void) {
   height: 44px;
   padding: 0 8px 0 14px;
   border: none;
-  border-radius: 16px;
-  background: var(--nagaya-fill);
+  border-radius: var(--nagaya-r-pill);
+  background: var(--nagaya-surface);
+  box-shadow: var(--nagaya-shadow);
   color: var(--nagaya-ink-2);
   font-size: 13px;
   white-space: nowrap;
   cursor: pointer;
 }
-.chip.on { background: var(--nagaya-accent); color: #fff; }
+.chip.on { background: var(--q-primary); color: #fff; }
 
 .statement-row { background: var(--nagaya-accent-bg); }
+/* 日期是卡片上方的一行小字，不再是一条灰带 */
 .date-head {
-  padding: 10px 16px 4px;
+  padding: 16px 28px 6px;
   font-size: 12px;
+  font-weight: 500;
   color: var(--nagaya-ink-3);
-  background: var(--nagaya-bg-sunken);
-  position: sticky;
-  top: 0;
-  z-index: 1;
 }
+.day-card { margin-top: 0; }
 </style>

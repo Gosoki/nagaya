@@ -34,6 +34,9 @@
          刚调好的「Zen 少担 500」会悄悄变回均分，屏幕上一个字都不说 -->
     <div v-show="!showMemo" class="form-pane">
 
+    <!-- 两张卡片：上面一张是「这笔是什么」（备注、日期、金额、分类），
+         下面一张是「谁出的钱、怎么分」。 -->
+    <div class="card entry-card">
     <!-- 备注和日期摆在最上面：它们是「这笔是什么、哪天的」，
          先交代清楚再填钱，比夹在中间容易被忽略强 -->
     <div class="q-px-md">
@@ -62,11 +65,11 @@
 
     <!-- 「这笔已经出过账」的提示贴着金额放：改动最可能发生在金额上，
          提示离得越近越有用。原来顶在最上面，滚一下就看不见了 -->
-    <q-banner v-if="billedLabel" dense class="bg-blue-1 text-blue-9 edit-note">
+    <q-banner v-if="billedLabel" dense class="edit-note">
       {{ t('entry.editBilled', { label: billedLabel }) }}
     </q-banner>
 
-    <AmountInput ref="amountEl" v-model="amount" :color="kindInk" />
+    <AmountInput ref="amountEl" v-model="amount" :color="`var(--nagaya-kind-${kind})`" />
 
     <!-- 分类：大色块网格，一点即选。只有支出分类；收入和转账都没有 -->
     <div
@@ -88,9 +91,9 @@
         <span>{{ c.name }}</span>
       </button>
     </div>
+    </div>
 
-
-    <div class="q-px-md">
+    <div class="card q-px-md">
       <!-- 谁付的 / 转给谁 / 备注 三行统一行高，中间拉细分隔线 ——
            原来它们各自飘着，看上去像三段无关的文字，不像一个表单 -->
       <div class="fields">
@@ -243,7 +246,7 @@ import MemberPicker from 'src/components/MemberPicker.vue'
 import MemoPanel from 'src/components/MemoPanel.vue'
 import SplitEditor from 'src/components/SplitEditor.vue'
 import { useAuth } from 'src/stores/auth'
-import { KIND_COLOR, KIND_PALETTE } from 'src/theme'
+import { KIND_PALETTE } from 'src/theme'
 import { useDrafts } from 'src/stores/drafts'
 import { useLedger } from 'src/stores/ledger'
 import { useMemos } from 'src/stores/memos'
@@ -359,7 +362,6 @@ watch(kind, (now, before) => {
 })
 
 const kindPalette = computed(() => KIND_PALETTE[kind.value])
-const kindInk = computed(() => KIND_COLOR[kind.value])
 
 /** 收入在库里存负数（SPEC §5）；界面上只让人填正数，符号这里加 */
 const signedAmount = computed(() => (kind.value === 'income' ? -amount.value : amount.value))
@@ -719,8 +721,10 @@ function reset() {
 
 <style scoped>
 .edit-note {
-  margin: 0 16px 4px;
-  border-radius: 6px;
+  margin: 8px 16px 0;
+  border-radius: var(--nagaya-r-sm);
+  background: var(--nagaya-info-bg);
+  color: var(--nagaya-accent);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -728,15 +732,13 @@ function reset() {
    （导航 + 操作条）算进 q-page-container 的 padding-bottom */
 .label { font-size: 14px; }
 
-.fields { border-top: 1px solid rgba(0, 0, 0, 0.06); }
-/* 提到金额上面的那一行：上面紧挨着页签那条线了，自己只留下边线 */
-.top-field { border-bottom: 1px solid rgba(0, 0, 0, 0.06); }
+/* 卡片里第一行：备注和日期。下边一条细线把它和金额隔开 */
+.top-field { border-bottom: 1px solid var(--nagaya-line); }
 .field {
   min-height: 52px;                       /* 三行一样高，拇指点哪一行都一样 */
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  border-bottom: 1px solid var(--nagaya-line);
 }
-.fields .field:last-child { border-bottom: none; }
-.split-panel { padding-top: 4px; }
+.split-panel { padding: 4px 0 12px; }
 
 .cat-grid {
   display: grid;
@@ -744,15 +746,16 @@ function reset() {
      右边会空出一格，整排偏左，看着像上面的金额没居中 */
   grid-template-columns: repeat(4, 1fr);
   gap: 8px;
-  padding: 6px 16px 10px;
+  padding: 2px 12px 12px;
 }
+.cat:active { background: var(--nagaya-press); }
 .cat {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 4px;
-  min-height: 64px;                      /* 大色块，一点即中，不用瞄 */
+  min-height: 62px;                      /* 大色块，一点即中，不用瞄 */
   /* 底色只有选中那一格有（由 catStyle() 给实心分类色）。
      未选中既不描边也不铺底 —— 一排灰盒子难看，淡底也不要 */
   border: none;
@@ -767,17 +770,15 @@ function reset() {
 
 
 
-.actions :deep(.q-btn) { min-height: 44px; }
+.actions :deep(.q-btn) { min-height: 48px; font-size: 17px; font-weight: 600; }
 /* 「该填的还没填」这个信号要留着，所以长得和禁用一模一样（Quasar 的禁用态
    就是 0.6 透明度）—— 但它点得动，点了当场补金额 */
 .actions :deep(.q-btn.looks-off) { opacity: 0.6; }
-.date-hint { max-width: 290px; border-top: 1px solid rgba(0, 0, 0, 0.08); }
+.date-hint { max-width: 290px; border-top: 1px solid var(--nagaya-line); }
 /* 画在底栏里：不需要 fixed、不需要 z-index、也不用和底栏叠 1px 防缝 ——
-   它们本来就是同一个固定容器的上下两层。那条分隔线改画在下边 */
+   它们本来就是同一个固定容器的上下两层，底色也由底栏给（半透明 + 模糊） */
 .actions {
-  padding: 6px 16px 8px;
-  background: #fff;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  padding: 8px 16px 4px;
 }
 /* 操作栏本身横贯到底（那条上边线要通），但里面的按钮跟页面一样收窄居中 */
 .actions > * {

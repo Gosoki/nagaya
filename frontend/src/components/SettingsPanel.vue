@@ -201,7 +201,7 @@ function tapBuild() {
   } catch {
     return
   }
-  $q.notify({ message: t(on ? 'settings.debugOn' : 'settings.debugOff'), timeout: 1000 })
+  $q.notify({ message: on ? t('settings.debugOn') : t('settings.debugOff'), timeout: 1000 })
   setTimeout(() => location.reload(), 800)
 }
 const $q = useQuasar()
@@ -298,20 +298,25 @@ function saveList(s: Setting, raw: string) {
 .text,
 .list {
   border: none;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: var(--nagaya-r-sm);
   outline: none;
-  background: transparent;
+  background: var(--nagaya-fill);
   font: inherit;
-  font-size: 15px;            /* 低于 16px iOS 会在聚焦时放大整页 */
+  font-size: 16px;            /* 低于 16px iOS 会在聚焦时放大整页（原来写着这句、值却是 15） */
   color: inherit;
-  padding: 2px 2px 0;
+  padding: 0 10px;
 }
-.num { width: 64px; text-align: right; }
+.num,
+.text { height: 36px; }
+.num:focus,
+.text:focus,
+.list:focus { box-shadow: inset 0 0 0 1.5px var(--nagaya-accent); }
+.num { width: 72px; text-align: right; }
 .text { width: 150px; text-align: right; }
 .list {
   width: 100%;
   resize: none;
-  font-size: 13px;
-  margin-top: 4px;
+  padding: 8px 10px;
+  margin-top: 6px;
 }
 </style>

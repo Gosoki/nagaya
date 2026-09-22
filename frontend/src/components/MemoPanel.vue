@@ -225,7 +225,7 @@ function removeMemo(m: Memo) {
   font: inherit;
   font-size: 16px;           /* 16 是 iOS 的底线：再小一点，聚焦时整页会被放大 */
   line-height: 1.5;
-  color: rgba(0, 0, 0, 0.6);
+  color: var(--nagaya-ink-2);
 }
 .note::placeholder { color: var(--nagaya-ink-4); }
 .memo-title {
@@ -238,7 +238,7 @@ function removeMemo(m: Memo) {
   color: inherit;
 }
 .memo-title::placeholder { color: var(--nagaya-ink-4); }
-.add-row { border-top: 1px solid rgba(0, 0, 0, 0.06); min-height: var(--nagaya-add-row-h); }
+.add-row { border-top: 1px solid var(--nagaya-line); min-height: var(--nagaya-add-row-h); }
 .new-name {
   border: none;
   outline: none;

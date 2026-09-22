@@ -13,11 +13,23 @@
       name="viewport"
       content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
     />
-    <!-- **白，不是主题藏青。** iOS Safari 拿 theme-color 去填「页面内容之外」
-         那块区域 —— 键盘弹起时那块被撑得很大，底栏下面就是一整片深蓝，
-         看着像页面破了个洞（页面自己铺白底管不到它，那是浏览器的涂层）。
-         这个 app 通体是白的，填白才连成一片。 -->
-    <meta name="theme-color" content="#ffffff" />
+    <!-- **跟顶栏/底栏同色，不是主题藏青。** iOS Safari 拿 theme-color 去填
+         「页面内容之外」那块区域 —— 键盘弹起时那块被撑得很大，填藏青的话
+         底栏下面就是一整片深蓝，看着像页面破了个洞。深色模式下换成深色那一档
+         （下面那段脚本、以及 src/colorScheme.ts） -->
+    <meta name="theme-color" content="#f9f9fb" />
+    <!-- **首帧之前就定深浅色。** 等 JS 包下载完再切的话，深色用户每次打开
+         都先白一下再黑。规则和 src/colorScheme.ts 是同一条（同一个键）：
+         钉了就照钉的，没钉就跟系统 -->
+    <script>
+      try {
+        var p = localStorage.getItem('nagaya.scheme')
+        if (p === 'dark' || (p !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark')
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#18191c')
+        }
+      } catch (e) {}
+    </script>
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="長屋" />

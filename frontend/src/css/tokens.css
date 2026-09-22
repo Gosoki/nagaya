@@ -12,29 +12,52 @@
  * 覆盖 Quasar 工具类的规则靠的就是这个顺序。
  */
 :root {
+  color-scheme: light;
+
   /* ---------------------------------------------------------- 文字 */
   --nagaya-ink: #16181d;      /* 主文字、可改的数字            16.4:1 */
   --nagaya-ink-2: #5b6069;    /* 标签、日期、垫付人             6.3:1 */
   --nagaya-ink-3: #6e747e;    /* 12px 元信息、列头              4.7:1 */
   --nagaya-ink-4: #a1a7b0;    /* 占位符、禁用 —— 不承载信息，才允许低对比 */
+  --nagaya-ink-5: #c9ccd2;    /* 「还没填」的那个 0：必须一眼看出不是值 */
 
-  /* ---------------------------------------------------------- 底与线 */
-  --nagaya-bg: #ffffff;
-  --nagaya-bg-sunken: #f4f5f6;              /* 分区之间那条 8px 断带 */
+  /* ---------------------------------------------------------- 底与线
+     **两层底**：页面是一层浅灰（--nagaya-bg），内容一块块摆在白卡片上
+     （--nagaya-surface）。原来整页一片白、块与块之间靠 8px 灰带断开 ——
+     灰带在手机上读作「一条分隔线」，而不是「这是另一块东西」。
+     对比度是按**卡片底**算的：数字都印在卡片上 */
+  --nagaya-bg: #f2f3f7;                     /* 页面底（分组灰） */
+  --nagaya-surface: #ffffff;                /* 卡片、表单 */
+  --nagaya-surface-2: #ffffff;              /* 浮起来的：弹窗、菜单 */
+  --nagaya-bg-sunken: var(--nagaya-bg);     /* 旧名，等于页面底 */
+  /* 顶栏/底栏：半透明 + 背景模糊，内容从底下滚过去看得见一点影子。
+     不透明的那个值给 theme-color 和不支持模糊的浏览器用 */
+  --nagaya-bar: rgba(249, 249, 251, 0.92);
+  --nagaya-bar-solid: #f9f9fb;
   --nagaya-fill: rgba(22, 24, 29, 0.05);    /* 输入框底、药丸、chip */
   --nagaya-fill-2: rgba(22, 24, 29, 0.09);  /* 同上，需要再重一档时 */
   --nagaya-line: rgba(22, 24, 29, 0.1);     /* 行分隔线 */
   --nagaya-line-2: rgba(22, 24, 29, 0.18);  /* 输入下划线、描边 */
   --nagaya-press: rgba(22, 24, 29, 0.06);   /* :active 按压底 */
+  --nagaya-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.05);
+  --nagaya-shadow-up: 0 4px 16px rgba(16, 24, 40, 0.08);
 
   /* ---------------------------------------------------------- 语义色
-     这几个都是**在白底上**算过的；别直接拿 Quasar 的 negative/positive，
-     那两个是给色块当底色用的，当文字色时偏亮 */
+     这几个都是**在卡片底上**算过的；别直接拿 Quasar 的 negative/positive，
+     那两个是给色块当底色用的，当文字色时偏亮（下面有接管 text-positive 那几条） */
   --nagaya-accent: #3d4785;   /* 品牌 ＝ 链接 ＝ 选中           8.6:1 */
   --nagaya-accent-bg: rgba(61, 71, 133, 0.1);
   --nagaya-pos: #1f7a4d;      /* 应收 / 收入                    5.3:1 */
   --nagaya-neg: #b3261e;      /* 应付 / 差额                    6.5:1 */
   --nagaya-warn: #8a6100;     /* 未结清 / 离线                  5.5:1 */
+  --nagaya-warn-bg: #fff4e0;  /* 离线细带、出账后改过的提示 */
+  --nagaya-info-bg: #e8ecfb;  /* 「这笔已经出过账」那条提示 */
+
+  /* 三种账目的**字色**（金额大字、分类格子里的图标这种印在底上的）。
+     色块底色仍是 src/theme.ts 的 KIND_COLOR —— 那边是 hex，给头像和按钮铺底 */
+  --nagaya-kind-expense: #3d4785;
+  --nagaya-kind-income: #2f9e5f;
+  --nagaya-kind-settlement: #d98e04;
 
   /* ---------------------------------------------------------- 字号
      七级够用。**金额一律 tabular-nums**，否则同一列的数字左右跳 */
@@ -49,7 +72,58 @@
   /* ---------------------------------------------------------- 圆角 */
   --nagaya-r-sm: 8px;
   --nagaya-r-md: 12px;
+  --nagaya-r-lg: 16px;        /* 卡片 */
   --nagaya-r-pill: 999px;
+}
+
+/*
+  **深色。** 默认跟系统走，每个人可以在「设置 → 个人」里钉成浅色或深色
+  （存在这台设备上，见 src/colorScheme.ts）。html 上挂 .dark 就切过来 ——
+  那个类在 index.html 里首帧之前就挂好了，不会先白一下再黑。
+
+  不是把浅色反过来：深色下页面底最黑、卡片浅一档、弹窗再浅一档，
+  层级靠「越浮越亮」表达（浅色靠阴影）。字色各自重新算过对比度，
+  基准是卡片底 #1a1b1e，test/contrast.spec.ts 钉着。
+*/
+html.dark {
+  color-scheme: dark;
+
+  --nagaya-ink: #f1f2f4;      /*                                15.4:1 */
+  --nagaya-ink-2: #b3b7be;    /*                                 8.6:1 */
+  --nagaya-ink-3: #9398a0;    /*                                 5.9:1 */
+  --nagaya-ink-4: #62676f;
+  --nagaya-ink-5: #474a50;
+
+  --nagaya-bg: #0b0c0e;
+  --nagaya-surface: #1a1b1e;
+  --nagaya-surface-2: #26272b;
+  --nagaya-bar: rgba(24, 25, 28, 0.92);
+  --nagaya-bar-solid: #18191c;
+  --nagaya-fill: rgba(255, 255, 255, 0.07);
+  --nagaya-fill-2: rgba(255, 255, 255, 0.12);
+  --nagaya-line: rgba(255, 255, 255, 0.09);
+  --nagaya-line-2: rgba(255, 255, 255, 0.2);
+  --nagaya-press: rgba(255, 255, 255, 0.08);
+  --nagaya-shadow: none;
+  --nagaya-shadow-up: 0 4px 16px rgba(0, 0, 0, 0.5);
+
+  --nagaya-accent: #a3acf6;   /*                                 8.0:1 */
+  --nagaya-accent-bg: rgba(163, 172, 246, 0.14);
+  --nagaya-pos: #5fd097;      /*                                 9.0:1 */
+  --nagaya-neg: #ff8076;      /*                                 7.1:1 */
+  --nagaya-warn: #f2b84b;     /*                                 9.6:1 */
+  --nagaya-warn-bg: rgba(242, 184, 75, 0.14);
+  --nagaya-info-bg: rgba(163, 172, 246, 0.14);
+
+  --nagaya-kind-expense: #a3acf6;
+  --nagaya-kind-income: #5fd097;
+  --nagaya-kind-settlement: #f2b84b;
+
+  /* Quasar 这边：主色铺底的按钮在深色底上要亮一档才站得住（白字 5.4:1），
+     弹窗/菜单/卡片用 --q-dark，页面用 --q-dark-page */
+  --q-primary: #5664c8;
+  --q-dark: var(--nagaya-surface-2);
+  --q-dark-page: var(--nagaya-bg);
 }
 
 /* 等宽数位。金额、比例、任何会竖着排成一列的数字都该带上它 —— 不带的话
@@ -77,45 +151,13 @@
 .text-grey-9 {
   color: var(--nagaya-ink) !important;
 }
-
-/* ------------------------------------------------------------------
-   顶部页签条（账单的「未出账/已出账」、更多的「流水/备忘/设置」）。
-   **两处共用这一份**：原来只写在 BillTabs 的 scoped 块里，
-   而 EntriesTabs 也挂着 .bill-tabs 这个类名 —— 类名一样、样式够不着，
-   于是宽屏上账单那条跟着页面收窄居中、「更多」那条摊满整个窗口，
-   三个页签缩在中间只有 72px 宽。
-   ------------------------------------------------------------------ */
-.bill-tabs {
-  max-width: var(--nagaya-max-w);     /* 跟页面一样收窄居中，宽屏上别摊开 */
-  margin: 0 auto;
-  border-bottom: 1px solid var(--nagaya-line);
-}
-/* 跟记一笔那屏的顶栏一样高，也跟底部 Tab 那一栏呼应 */
-.bill-tabs .q-tab {
-  min-height: var(--nagaya-head-h);
-  font-size: 16px;
-}
-/* 页签把那一条**平分掉**。不写的话它们各按文字宽度排在中间，
-   两边空出一大片，和底下满宽的内容对不上 */
-.bill-tabs .q-tabs__content { width: 100%; }
-.bill-tabs .q-tab { flex: 1 1 0; }
-
-/* 记一笔那条「支出/收入/转账/备忘」。记新账时画在顶栏里（AddTabs），
-   改一笔已有的账时画在页面里 —— 两处共用这一份。
-   **底色必须不透明**：没选中的那几格本身是透明的，不铺底的话滚过去的内容
-   会从字底下透出来。宽屏上跟着页面收窄居中，和上面那排页签一个规矩 */
-.kind-toggle {
-  max-width: var(--nagaya-max-w);
-  margin: 0 auto;
-  background: var(--nagaya-bg);
-  border-bottom: 1px solid var(--nagaya-line);
-}
-/* 顶到屏幕边缘的东西不做圆角：首尾两段默认带 3px，贴着边看就是两个豁口 */
-.kind-toggle .q-btn {
-  border-radius: 0;
-  min-height: var(--nagaya-head-h);
-  font-size: 16px;
-}
+/* 语义色的**字**也接管：Quasar 的 positive/negative/warning 是铺底用的，
+   印成字偏亮（白底上的 #2f9e5f 只有 3.4:1），深色底上主色的字更是看不见。
+   铺底（bg-*、按钮的 color 属性）不受影响 —— 那几条走的是 background */
+.text-positive { color: var(--nagaya-pos) !important; }
+.text-negative { color: var(--nagaya-neg) !important; }
+.text-warning { color: var(--nagaya-warn) !important; }
+html.dark .text-primary { color: var(--nagaya-accent) !important; }
 
 /*
   **输入框一律 ≥16px。** iOS 的规矩：聚焦一个字号小于 16px 的输入框，
@@ -172,6 +214,9 @@ a,
        它单独放行（MainLayout 按路由挂 .bounce-ok）
 */
 html,
-body { background: var(--nagaya-bg); }
+body {
+  background: var(--nagaya-bg);
+  color: var(--nagaya-ink);
+}
 html { overscroll-behavior-y: none; }
 html.bounce-ok { overscroll-behavior-y: auto; }

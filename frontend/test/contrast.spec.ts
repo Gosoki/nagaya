@@ -66,3 +66,41 @@ describe('文字对比度', () => {
     expect(ratio(token('ink-3'), white)).toBeGreaterThanOrEqual(4.5)
   })
 })
+
+/**
+ * 深色那一套（html.dark 里那一块）。基准是深色的**卡片底**：数字都印在卡片上。
+ * 深色下最容易出事的是「浅色值原样留着」—— 藏青的字印在近黑的底上只有 2:1。
+ */
+describe('深色模式的文字对比度', () => {
+  const block = css.match(/html\.dark\s*\{([\s\S]*?)\n\}/)
+  it('tokens.css 里有 html.dark 那一块', () => {
+    expect(block, '没找到 html.dark { … }').not.toBeNull()
+  })
+  const dark = (name: string): string => {
+    const m = block![1]!.match(new RegExp(`--nagaya-${name}:\\s*([^;]+);`))
+    expect(m, `html.dark 里没有 --nagaya-${name}`).not.toBeNull()
+    return m![1]!.trim()
+  }
+
+  it.each([
+    ['ink', 4.5],
+    ['ink-2', 4.5],
+    ['ink-3', 4.5],
+    ['accent', 4.5],
+    ['pos', 4.5],
+    ['neg', 4.5],
+    ['warn', 4.5],
+    ['kind-expense', 4.5],
+    ['kind-income', 4.5],
+    ['kind-settlement', 4.5],
+  ])('深色卡片底上的 --nagaya-%s 至少 %s:1', (name, min) => {
+    const got = ratio(dark(name as string), dark('surface'))
+    expect(Math.round(got * 100) / 100, `${name} 只有 ${got.toFixed(2)}:1`).toBeGreaterThanOrEqual(
+      min as number,
+    )
+  })
+
+  it('占位符那一档可以低，但不许低到看不见（≥ 2:1）', () => {
+    expect(ratio(dark('ink-4'), dark('surface'))).toBeGreaterThanOrEqual(2)
+  })
+})
