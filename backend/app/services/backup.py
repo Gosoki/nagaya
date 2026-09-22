@@ -173,8 +173,12 @@ def _verify(path: Path, low: dict[str, int], high: dict[str, int]) -> dict[str, 
     只说明 SQLite 写完了，不说明写出来的东西能打开、有表、有账。
     """
     try:
-        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-    except sqlite3.Error as e:
+        # **用 as_uri() 不要手拼**：`file:{path}?mode=ro` 没做百分号转义，
+        # 路径里带 `#`（fragment）或 `?`（query）时，打开的根本不是刚写出来的那个文件 ——
+        # 于是每一份备份都被判成损坏、当场删掉，一份都留不下。
+        # resolve() 那一下是必须的：as_uri() 对相对路径直接抛 ValueError
+        con = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+    except (sqlite3.Error, ValueError) as e:
         raise BackupError("backup_corrupt", f"备份文件打不开：{e}", path=str(path)) from e
     try:
         ok = con.execute("PRAGMA integrity_check").fetchone()
@@ -340,7 +344,7 @@ def status(session: Session) -> dict[str, Any]:
         "path": str(backup_dir(session)),
         "error": None, "last_at": None, "last_name": None, "last_bytes": None,
         "count": 0, "keep": int(settings_svc.get(session, "backup_keep") or 0),
-        "last_ok": None,
+        "last_ok": None, "age_hours": None,
         "every_hours": every, "stale": True, "same_disk": None,
     }
     try:
@@ -369,8 +373,21 @@ def status(session: Session) -> dict[str, Any]:
         out["last_at"] = at.isoformat(timespec="seconds")
         out["last_name"] = newest.name
         out["last_bytes"] = newest.stat().st_size
-        age = (dt.datetime.now(JST).replace(tzinfo=None) - at).total_seconds() / 3600
+
+        # 「多久以前」**不能只信文件名**。名字一旦漂到未来（系统时钟被调过、
+        # 从别处拷进来一份、或者单调命名连着往后推），age 恒为负 →
+        # run_if_due 永远觉得「刚备过」→ 自动备份从此停摆，而面板上是一行
+        # 没有任何警告色的「上次备份 …」。
+        # 取 min(名字时间, mtime)：mtime 会被 rsync / 同步盘改成 now，
+        # 纯用它会让老备份看起来很新（漏备）；取 min 只可能让备份显得更老，
+        # 方向上永远安全 —— 顶多多备一份。
+        mtime = dt.datetime.fromtimestamp(newest.stat().st_mtime)
+        age = (dt.datetime.now(JST).replace(tzinfo=None) - min(at, mtime)).total_seconds() / 3600
+        out["age_hours"] = age
         out["stale"] = age > (every or 24) * 2
+        if at - dt.datetime.now(JST).replace(tzinfo=None) > dt.timedelta(days=1):
+            # 名字超前一天以上：说出来。不说的话备份已经停了而屏幕上一切正常
+            out["error"] = out["error"] or "backup_clock_skew"
 
     src = source_path(session)
     if src is not None and src.exists():
@@ -384,9 +401,8 @@ def run_if_due(session: Session) -> dict[str, Any] | None:
     if every <= 0:
         return None
     st = status(session)
-    if st["error"] is None and st["last_at"] is not None:
-        age = (dt.datetime.now(JST).replace(tzinfo=None)
-               - dt.datetime.fromisoformat(st["last_at"])).total_seconds() / 3600
-        if age < every:
-            return None
+    # 用 status 算好的 age_hours，别再各算各的 —— 两处口径一分叉，
+    # 「面板说没问题、备份其实停了」这种事就又回来了
+    if st["error"] is None and st["age_hours"] is not None and st["age_hours"] < every:
+        return None
     return run(session)

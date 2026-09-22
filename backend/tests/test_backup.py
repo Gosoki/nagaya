@@ -11,6 +11,7 @@ from __future__ import annotations
 import datetime as dt
 import os
 import sqlite3
+import time
 from pathlib import Path
 
 import pytest
@@ -366,3 +367,85 @@ def test_concurrent_backups_do_not_destroy_each_other(tmp_path: Path) -> None:
     for p in (tmp_path / "bk").iterdir():
         if backup_svc.NAME_RE.match(p.name):
             backup_svc.verify_file(p)                # 每一份都得是完整的库
+
+
+def _seeded(tmp_path: Path) -> tuple[Path, Path, object]:
+    """在 tmp 里备一份 seed 库 + 一份备份，返回 (data 目录, 备份目录, 跑子进程的函数)。"""
+    import subprocess
+    import sys as _sys
+
+    root = Path(__file__).resolve().parents[1]
+    data = tmp_path / "data"
+    data.mkdir()
+    env = {**os.environ, "NAGAYA_DB": str(data / "nagaya.db")}
+    def run(*a: str):
+        return subprocess.run([_sys.executable, *a], cwd=root, env=env,
+                              capture_output=True, text=True)
+    assert run("-m", "tools.seed_dev").returncode == 0
+    made = run("-c", (
+        "import sys;sys.path.insert(0,'.')\n"
+        "from sqlmodel import Session\n"
+        "from app.db import engine\n"
+        "from app.services import settings as sv, backup as bk\n"
+        f"s=Session(engine);sv.set_(s,'backup_path',{str(tmp_path / 'bk')!r});print(bk.run(s)['name'])"
+    ))
+    assert made.returncode == 0, made.stderr
+    return data, tmp_path / "bk", run
+
+
+def test_restore_works_when_the_ledger_is_gone(tmp_path: Path) -> None:
+    """**库不在的时候恢复工具必须还能跑** —— 那正是唯一需要它的那天。
+
+    原来它要先开 Session 读设置才知道备份在哪，于是「库被删」「换新机器」两种
+    最需要恢复的场合都是 40 行 traceback，而且**顺手在 data/ 下建出一个空账本**：
+    人在慌的时候看到的是一堆栈和一个凭空出现的空库。
+    """
+    data, bk, run = _seeded(tmp_path)
+    for p in data.glob("nagaya.db*"):
+        p.unlink()
+
+    listed = run("-m", "tools.restore", f"--dir={bk}", "--list")
+    assert listed.returncode == 0, listed.stderr
+    assert "44 笔" in listed.stdout
+
+    done = run("-m", "tools.restore", f"--dir={bk}", "--yes")
+    assert done.returncode == 0, done.stderr
+    assert not list(data.glob("replaced-*")), "库本来就不在，不该凭空挪出一个空壳"
+    con = sqlite3.connect(f"file:{data / 'nagaya.db'}?mode=ro", uri=True)
+    assert list(con.execute("PRAGMA integrity_check"))[0][0] == "ok"
+    assert list(con.execute("select count(*) from entry"))[0][0] == 44
+    con.close()
+
+
+def test_restoring_twice_keeps_both_copies_of_the_old_ledger(tmp_path: Path) -> None:
+    """「现有的库挪走不删」这张安全网，在第二次恢复时**不许**被自己抹掉。
+
+    挪走的目录名原来按**备份**的时刻取，于是同一份连着恢复两次（以为刚才没成功、
+    或者忘了停服务想重来）会算出同一个目录名，而 shutil.move 到一个已存在的文件
+    是静默覆盖 —— 第二次抹掉的正是第一次好心留下的那本真账本。
+    """
+    data, _, run = _seeded(tmp_path)
+    add = run("-c", (
+        "import sys,datetime as dt;sys.path.insert(0,'.')\n"
+        "from sqlmodel import Session, select\n"
+        "from app.db import engine\n"
+        "from app.models import Member, Category, EntryKind\n"
+        "from app.services import ledger\n"
+        "s=Session(engine);m=s.exec(select(Member)).first();c=s.exec(select(Category)).first()\n"
+        "[ledger.create_entry(s,actor_id=m.id,kind=EntryKind.expense,on=dt.date(2026,9,22),"
+        "amount=7777,payer_id=m.id,category_id=c.id) for _ in range(3)]"
+    ))
+    assert add.returncode == 0, add.stderr
+
+    for _ in range(2):
+        time.sleep(1.1)                       # 名字精确到秒，隔开才看得出是两个目录
+        assert run("-m", "tools.restore", "--yes").returncode == 0
+
+    kept = sorted(data.glob("replaced-*"))
+    assert len(kept) == 2, f"两次恢复该留下两份，实际 {[p.name for p in kept]}"
+    counts = []
+    for d in kept:
+        con = sqlite3.connect(f"file:{d / 'nagaya.db'}?mode=ro", uri=True)
+        counts.append(list(con.execute("select count(*) from entry where amount_jpy=7777"))[0][0])
+        con.close()
+    assert 3 in counts, "只存在于活账本里的那 3 笔被抹掉了 —— 后悔药没了"
