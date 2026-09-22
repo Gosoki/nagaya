@@ -46,4 +46,4 @@ const options = computed(() => [
 ])
 </script>
 
-<!-- .kind-toggle 的样式在 src/css/tokens.css 里 —— 编辑一笔账时页面里那条共用同一份 -->
+<!-- .kind-toggle 的样式在 src/css/skin.css 里（分段控件）—— 编辑一笔账时页面里那条共用同一份 -->

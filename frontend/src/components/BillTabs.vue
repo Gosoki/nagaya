@@ -28,4 +28,4 @@ const { t } = useI18n()
 const bills = useBills()
 </script>
 
-<!-- .bill-tabs 的样式在 src/css/tokens.css 里 —— 「更多」那组页签共用同一份 -->
+<!-- .bill-tabs 的样式在 src/css/skin.css 里（分段控件）—— 「更多」那组页签共用同一份 -->

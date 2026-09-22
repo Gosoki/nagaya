@@ -180,7 +180,9 @@ async function after() {
   bottom: -4px;
   padding: 3px;
   border-radius: 50%;
-  background: var(--nagaya-accent);
+  /* 铺底用 --q-primary，不用 --nagaya-accent：后者在深色下是给「字」提亮过的
+     浅紫，白色相机图标压在上面发虚（和个人设置那颗一样） */
+  background: var(--q-primary);
   color: #fff;
 }
 /* 和「个人」那几个可填的框一套写法：固定宽 + 浅底圆角。

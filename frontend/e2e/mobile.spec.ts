@@ -413,7 +413,7 @@ test('完整闭环：出账单 → 点「确认已完成」→ 那个人归零',
   const firstCard = page.locator('.q-card').first()
   const pair = (await firstCard.locator('.text-caption').first().textContent())!.trim()
   const who = pair.split(/\s+/)[0]!
-  const amount = Number((await firstCard.locator('.text-subtitle1').textContent())!.replace(/[^\d]/g, ''))
+  const amount = Number((await firstCard.locator('.tr-amount').textContent())!.replace(/[^\d]/g, ''))
   expect(amount, '转账卡片上没读到金额，多半是选择器过期了').toBeGreaterThan(0)
 
   // 按钮上写的是「确认已完成」—— 它是个动作，不是状态标签
@@ -788,11 +788,11 @@ test('支出 / 收入 / 转账 / 备忘 四等分，选中的是实心色块且�
   )
   expect(new Set(widths).size, '四段宽度应当一样').toBe(1)
 
-  // 顶到屏幕边缘，不许有圆角
+  // 分段控件（2026-09 改版）：四段同一个圆角，首尾不许被 q-btn-group 切成半边
   const radii = await segs.evaluateAll((els) =>
     els.map((e) => getComputedStyle(e).borderRadius),
   )
-  expect([...new Set(radii)], '顶部四段不该有圆角').toEqual(['0px'])
+  expect(new Set(radii).size, '四段圆角应当一样').toBe(1)
 
   // 量的是**选中那一段的背景色** —— 量金额的颜色没用，那是另一条线，
   // 把 toggle-color 写死也照样能绿。
@@ -1147,7 +1147,7 @@ test('结账按钮只在「此刻还欠着」时出现，而且说得出还差�
       .toContainText(`¥${left.toLocaleString('en-US')}`)
     // 按钮预填的也得是还差的数，不是全额
     await card.getByRole('button', { name: '确认已完成' }).click()
-    await expect(page.locator('.q-dialog input')).toHaveValue(String(left))
+    await expect(page.locator('.q-dialog input')).toHaveValue(left.toLocaleString('en-US'))
     await page.getByRole('button', { name: '取消' }).click()
   } finally {
     await page.request.delete(`/api/entries/${made.id}`, { headers })
@@ -1566,11 +1566,17 @@ test('出账后改一笔：那张账单要打出「被改过」，而且复制�
   await page.goto('/bill')
   await page.getByRole('tab', { name: '已出账' }).click()
   await expect(page.locator('.head .pick')).toContainText(st.label)
-  // **这条横幅是「不锁历史但改动必须可见」唯一的凭证** —— 它被 class="hidden" 罩住过一次
-  const banner = page.locator('.q-banner').filter({ hasText: '出账后被改过' })
-  await expect(banner).toBeVisible()
-  await expect(banner).toContainText('6,000')     // 当初
-  await expect(banner).toContainText('9,000')     // 现在
+  // **「不锁历史但改动必须可见」的凭证** —— 原来是一条横幅（被 class="hidden" 罩住过一次），
+  // 2026-09 改成头卡片第二行里一颗橙色的签，点开看全文（两页头卡片才等高）
+  const chip = page.locator('.head .chip.edited')
+  await expect(chip).toBeVisible()
+  await expect(chip).toHaveText(/出账后改过/)
+  await chip.click()
+  const dialog = page.locator('.q-dialog')
+  await expect(dialog).toContainText('出账后被改过')
+  await expect(dialog).toContainText('6,000')     // 当初
+  await expect(dialog).toContainText('9,000')     // 现在
+  await dialog.getByRole('button', { name: '确定' }).click()
 
   // 复制出去的那份才是「用户手里那份」，屏幕上有的它也得有
   await page.getByRole('button', { name: '复制账单' }).click()

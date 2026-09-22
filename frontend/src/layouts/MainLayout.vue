@@ -418,10 +418,6 @@ onBeforeUnmount(() => document.removeEventListener('visibilitychange', onVisible
   --nagaya-head-h: 52px;
   /* 顶栏真实高度（含安全区）。0 只是首帧兜底，挂载后 measureHeader() 写回来 */
   --nagaya-header-h: 0px;
-  /* 页签条（流水/备忘/设置、未出账/已出账）的实际高度。
-     页面里的吸顶元素要吸在它**下沿**，不是吸到 0 —— 吸到 0 就等于钻进
-     固定顶栏底下，一滚就整条看不见了 */
-  --nagaya-tabs-h: calc(var(--nagaya-head-h) + 1px);   /* 52 的页签 + 1px 下边线 */
   /* 「本期固定费」那一块的尺寸。同一块东西有两套实现 —— 未出账那页是可编辑面板，
      已出账那页是只读列表 —— 两边长得必须一样。数写在这儿一份，免得又各自走散 */
   /* 48 不是 40：这五个格子是每个月真要动手打字的地方，而输入框比行矮 4px。
@@ -460,7 +456,6 @@ onBeforeUnmount(() => document.removeEventListener('visibilitychange', onVisible
   padding-top: 16px;
   padding-bottom: 4px;
 }
-.section-head .q-item__section--main { font-size: 14px; font-weight: 500; }
 
 /* 二级页面的返回条。原来三个页面各写各的，最矮的只有 42px，挤在一起显得小气 */
 .page-head {

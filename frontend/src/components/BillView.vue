@@ -37,15 +37,14 @@
           <div class="mine-figure"><q-skeleton type="text" width="45%" height="28px" /></div>
         </div>
       </div>
-      <div class="bill-section q-px-md q-pb-md">
-        <q-skeleton type="text" width="30%" height="18px" class="q-my-sm" />
-        <q-skeleton
-          v-for="n in 5"
-          :key="n"
-          type="rect"
-          :height="'var(--nagaya-fee-row-h)'"
-          class="q-mb-xs"
-        />
+      <!-- 固定费那块也按真实结构摆：44 的标题条 + 五行 48、行间 1px 线 -->
+      <div class="bill-section">
+        <div class="section-head row items-center q-px-md">
+          <q-skeleton type="text" width="30%" height="18px" />
+        </div>
+        <div v-for="n in 5" :key="n" class="skel-row row items-center q-px-md">
+          <q-skeleton type="rect" height="36px" class="full-width" />
+        </div>
       </div>
       <div class="bill-section q-pa-md">
         <q-skeleton v-for="n in 3" :key="n" type="rect" height="56px" class="q-mb-sm" />
@@ -114,7 +113,7 @@
         <div class="head-meta row items-center no-wrap">
           <div class="ellipsis">
             <template v-if="bill.covers_from">
-              {{ t('bill.coversRange', { from: bill.covers_from, to: bill.covers_to }) }}
+              {{ t('bill.coversRange', { from: shortDay(bill.covers_from), to: shortDay(bill.covers_to) }) }}
             </template>
           </div>
           <q-space />
@@ -153,7 +152,13 @@
           :class="[minePart.tone, { done: !bill.is_draft && myLeft === 0, multi: minePart.multi }]"
         >
           <div class="mine-label">{{ minePart.label }}</div>
-          <div class="mine-figure num ellipsis">{{ minePart.figure }}</div>
+          <!-- 要转给好几个人：一笔一行（两行 × 18px 正好还是 36px，头卡片不变高）。
+               并成一行加省略号的话，第二个人的金额在 375 宽就被截没了 ——
+               人照着第一个名字转完钱，就以为这期结清了 -->
+          <div v-if="minePart.lines" class="mine-figure lines num">
+            <div v-for="(ln, i) in minePart.lines" :key="i" class="ellipsis">{{ ln }}</div>
+          </div>
+          <div v-else class="mine-figure num ellipsis">{{ minePart.figure }}</div>
         </div>
       </div>
 
@@ -494,6 +499,11 @@ const cutResult = ref<Bill | null>(null)
 
 const nameOf = (id: number) => meta.byId[id]?.display_name ?? String(id)
 
+/** 头卡片上的日期：今年的省掉年份（8/30），窄屏和日文下第二行才放得下两头 */
+const thisYear = todayJst().slice(0, 4)
+const shortDay = (d: string | null) =>
+  !d ? '' : d.slice(0, 4) === thisYear ? `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}` : d
+
 /** 自己在这张账单上的那一行 */
 const showCutResult = computed({
   get: () => cutResult.value !== null,
@@ -628,7 +638,14 @@ function effClosing(b: Bill, row: { member_id: number; closing: number }): numbe
  * 比别的档矮 20px —— 在未出账和已出账之间来回切，下面整块跟着上下跳。
  * tone 也在这儿定：结清了是中性色，不能沿用「欠钱」那个红。
  */
-type MinePart = { label: string; figure: string; tone: 'owe' | 'owed' | 'settled'; multi?: boolean }
+type MinePart = {
+  label: string
+  figure: string
+  tone: 'owe' | 'owed' | 'settled'
+  multi?: boolean
+  /** 要转给好几个人时一笔一行 */
+  lines?: string[]
+}
 const minePart = computed<MinePart>(() => {
   const row = mine.value
   const b = bill.value
@@ -680,6 +697,8 @@ const minePart = computed<MinePart>(() => {
     return {
       label: t('bill.youPayListLabel'),
       figure: pay.map((x) => `${nameOf(x.tr.to_id)} ${formatYen(x.left)}`).join('  ·  '),
+      // 三个人合租最多欠两个人；万一更多，头两行照印，剩下的看下面的转账方案
+      lines: pay.slice(0, 2).map((x) => `${nameOf(x.tr.to_id)} ${formatYen(x.left)}`),
       tone: 'owe',
       multi: true,
     }
@@ -1071,6 +1090,8 @@ function doCut() {
   color: inherit;
   cursor: pointer;
 }
+.skel-row { height: var(--nagaya-fee-row-h); }
+.skel-row + .skel-row { height: calc(var(--nagaya-fee-row-h) + 1px); border-top: 1px solid var(--nagaya-line); }
 /* 翻单子那个菜单里，正在看的那一张 */
 .picked { background: var(--nagaya-accent-bg); }
 /* 本期固定费：和未出账那页的面板对齐到同一套尺寸 —— 行高 40、金额 16px、
@@ -1113,8 +1134,10 @@ function doCut() {
   line-height: 36px;
   letter-spacing: -0.02em;
 }
-/* 一次要转给好几个人、或者只是说一句话：同一行里放下，字小一号 */
+/* 只是说一句话（不在这张单子上）：同一行里放下，字小一号 */
 .mine.multi .mine-figure { font-size: 20px; letter-spacing: 0; }
+/* 要转给好几个人：一笔一行，两行加起来还是 36px */
+.mine .mine-figure.lines { font-size: 15px; line-height: 18px; letter-spacing: 0; }
 .mine.owe { color: var(--nagaya-neg); }
 .mine.owed { color: var(--nagaya-pos); }
 /* 结清了是中性色：红＝还欠着，绿＝还有人欠你，而这一档两样都不是 ——
@@ -1129,7 +1152,12 @@ function doCut() {
   background: var(--nagaya-fill);
   border-radius: var(--nagaya-r-md);
 }
-.tr-amount { font-size: var(--nagaya-fs-figure-s); font-weight: 600; line-height: 1.3; }
+.tr-amount { font-size: var(--nagaya-fs-figure-s); font-weight: 600; line-height: 1.3; white-space: nowrap; }
+/* 窄屏（或者日文）：头像对收起来 —— 名字那行已经写着 A → B，
+   留着它的话金额会被「确认已完成」压住，要转多少读不出来 */
+@media (max-width: 399px) {
+  .transfer .pair { display: none; }
+}
 
 /* 主操作条：压在底部 Tab 之上 */
 .actions :deep(.q-btn) { min-height: 48px; font-size: 15px; font-weight: 600; }

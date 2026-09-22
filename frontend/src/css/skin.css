@@ -105,9 +105,11 @@ html.dark .bill-tabs .q-tab.q-tab--active { background: var(--nagaya-surface-2);
   font-weight: 500;
   transition: background-color 0.18s, color 0.18s;
 }
-.kind-toggle .q-btn:not(.q-btn--active) { color: var(--nagaya-ink-2); }
+/* 选中/没选中认 aria-pressed（q-btn-toggle 自己写的）。**不认 .q-btn--active** ——
+   那是 Quasar 的「按下」态：按住哪一格哪一格变粗，松手又还原，整条跟着跳 */
+.kind-toggle .q-btn[aria-pressed='false'] { color: var(--nagaya-ink-2); }
 /* 选中那段加粗。未选中的几段是透明的，底由整条浅槽给 */
-.kind-toggle .q-btn--active { font-weight: 600; }
+.kind-toggle .q-btn[aria-pressed='true'] { font-weight: 600; }
 /* 改一笔已有的账时它画在页面里，上下留点距离 */
 .q-page > .kind-toggle { margin-top: 10px; margin-bottom: 2px; }
 
@@ -125,7 +127,7 @@ html.dark .bill-tabs .q-tab.q-tab--active { background: var(--nagaya-surface-2);
   font-size: 13px;
   font-weight: 500;
 }
-.mini-seg .q-btn:not(.q-btn--active) { color: var(--nagaya-ink-2); }
+.mini-seg .q-btn[aria-pressed='false'] { color: var(--nagaya-ink-2); }
 
 /* ------------------------------------------------------------------
    卡片
@@ -211,8 +213,13 @@ html.dark .bill-tabs .q-tab.q-tab--active { background: var(--nagaya-surface-2);
   box-shadow: var(--nagaya-shadow-up);
 }
 
-/* 日期选择器 */
+/* 日期选择器。日子那一格保持正圆 —— 上面那条全局圆角会把它们变成圆角方块 */
 .q-date { background: var(--nagaya-surface-2); color: var(--nagaya-ink); }
+.q-date__calendar-item .q-btn { border-radius: 50% !important; }
+
+/* 深色下主色的「字」被提亮了（text-primary → accent），而勾选框的勾是白的：
+   浅紫底上的白勾只有 2:1。勾选框的底改回铺底那一档主色 */
+html.dark .q-checkbox__inner--truthy.text-primary { color: var(--q-primary) !important; }
 
 /* 下拉刷新那颗转圈 */
 .q-pull-to-refresh__puller {

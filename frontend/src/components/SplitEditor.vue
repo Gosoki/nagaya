@@ -670,6 +670,8 @@ defineExpose({
   background: var(--nagaya-neg);
   color: #fff;
 }
+/* 深色下 --nagaya-neg 是给「字」提亮过的浅红，白杠压在上面发虚：杠改用卡片底色 */
+html.dark .sign.on { color: var(--nagaya-surface); }
 .sign.on::after { display: none; }
 .share-col { text-align: right; font-variant-numeric: tabular-nums; font-size: 15px; }
 
