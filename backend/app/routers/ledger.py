@@ -6,8 +6,9 @@ from sqlmodel import Session, select
 from app.auth import current_member
 from app.db import get_session
 from app.errors import not_found
-from app.models import Member, Statement
-from app.schemas import BalancesOut, StatementOut
+from app.models import Member, Statement, today_jst
+from app.routers.entries import to_entry_out
+from app.schemas import BalancesOut, ConfirmIn, EntryOut, StatementOut
 from app.services import bill as bill_svc
 from app.services import ledger as ledger_svc
 
@@ -93,6 +94,32 @@ def statement_bill(
     if st is None:
         raise not_found("statement")
     return bill_svc.build_bill(session, st)
+
+
+@router.post("/bill/confirm", response_model=EntryOut, status_code=status.HTTP_201_CREATED)
+def confirm_transfer(
+    body: ConfirmIn,
+    session: Session = Depends(get_session),
+    member: Member = Depends(current_member),
+):
+    """账单上点「确认已完成」。和直接 POST 一笔转账的区别：先核对「此刻还差多少」，
+    对不上（有人刚记过、或者对话框被连点）就 409，不重复记（见 bill.confirm_transfer）"""
+    st = None
+    if body.statement_id is not None:
+        st = session.get(Statement, body.statement_id)
+        if st is None:
+            raise not_found("statement")
+    entry = bill_svc.confirm_transfer(
+        session,
+        statement=st,
+        from_id=body.from_id,
+        to_id=body.to_id,
+        amount=body.amount,
+        expect_left=body.expect_left,
+        on=body.date or today_jst(),
+        actor_id=member.id,
+    )
+    return to_entry_out(session, entry)
 
 
 @router.post("/statements", response_model=StatementOut, status_code=status.HTTP_201_CREATED)

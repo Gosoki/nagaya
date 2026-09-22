@@ -200,5 +200,16 @@ class SettingOut(SQLModel):
     max: Optional[int] = None
 
 
+class ConfirmIn(SQLModel):
+    """账单上点「确认已完成」。expect_left 是打开对话框那一刻看到的「还差多少」"""
+
+    statement_id: Optional[int] = None
+    from_id: int
+    to_id: int
+    amount: int
+    expect_left: int
+    date: Optional[dt.date] = None
+
+
 class SettingIn(SQLModel):
     value: Any

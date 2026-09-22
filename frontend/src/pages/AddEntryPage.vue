@@ -233,12 +233,13 @@ function coldTouchLaunch(): boolean {
 
 <script setup lang="ts">
 import { useQuasar } from 'quasar'
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
 import { ApiError, api } from 'src/api/client'
 import { jstDateOf, todayJst } from 'src/date'
+import { digitsOf } from 'src/digits'
 import { formatYen } from 'src/i18n'
 import type { Entry, EntryKind } from 'src/api/types'
 import AmountInput from 'src/components/AmountInput.vue'
@@ -270,6 +271,31 @@ const payerId = ref<number | null>(null)
 const toMemberId = ref<number | null>(null)
 const title = ref('')
 const date = ref(todayJst())
+/**
+ * 「今天」是哪天。**不能在创建时取一次就定死**：这一屏是 PWA 的落地页，
+ * 常年挂在后台，过了午夜再切回来，日期还是昨天、按钮上却写着「今天」，
+ * 记进去的就是昨天的账。每分钟、以及每次切回前台都对一下
+ */
+const today = ref(todayJst())
+function tickToday() {
+  const now = todayJst()
+  if (now === today.value) return
+  // 停在「今天」上的日期跟着走；自己挑过的日期不动。改已有的账从来不动
+  if (editingId.value === null && date.value === today.value) date.value = now
+  today.value = now
+}
+let todayTimer = 0
+function onVisibleToday() {
+  if (document.visibilityState === 'visible') tickToday()
+}
+onMounted(() => {
+  todayTimer = window.setInterval(tickToday, 60_000)
+  document.addEventListener('visibilitychange', onVisibleToday)
+})
+onBeforeUnmount(() => {
+  clearInterval(todayTimer)
+  document.removeEventListener('visibilitychange', onVisibleToday)
+})
 const busy = ref(false)
 
 /** 路由带了 id ＝ 在改一笔已经记下的账（已出账的也算）。空 ＝ 记新的一笔 */
@@ -397,10 +423,7 @@ const minDate = computed(() => (ledger.prevCutAt ? jstDateOf(ledger.prevCutAt) :
 const dateAllowed = (d: string) =>
   editingId.value !== null || !minDate.value || d.replace(/\//g, '-') >= minDate.value
 
-const dateLabel = computed(() => {
-  const today = todayJst()
-  return date.value === today ? t('common.today') : date.value.slice(5)
-})
+const dateLabel = computed(() => (date.value === today.value ? t('common.today') : date.value.slice(5)))
 
 /**
  * 除了金额，别的都齐了没有。
@@ -425,10 +448,10 @@ const asking = ref(false)
 const askAmount = ref('')
 const askNote = ref('')
 /** 框里打的那串数字。只认数字，和大金额框一个规矩 */
-const askValue = computed(() => Number(askAmount.value.replace(/\D/g, '')) || 0)
+const askValue = computed(() => Number(digitsOf(askAmount.value)) || 0)
 // 边打边加千分位，和上面那个大金额框一样 —— 三千二和三万二在没有逗号时很容易看错
 watch(askAmount, (v) => {
-  const digits = v.replace(/\D/g, '')
+  const digits = digitsOf(v)
   const shown = digits ? Number(digits).toLocaleString('en-US') : ''
   if (shown !== v) askAmount.value = shown
 })
@@ -449,7 +472,8 @@ function onPrimary() {
 }
 
 function confirmAsk() {
-  if (askValue.value <= 0) return
+  // 框已经在收起了还在点（连点两下「记入账」）：第二下不算，否则记两笔
+  if (!asking.value || askValue.value <= 0) return
   amount.value = askValue.value
   title.value = askNote.value.trim()
   asking.value = false
@@ -539,10 +563,12 @@ function goBack() {
 }
 
 async function saveEdit() {
-  if (!canSave.value || payerId.value === null || editingId.value === null) return
-  if (!(await ensureCategory())) return
+  // busy 一进门就占上：「这笔是什么」那个问框也在这段路上，
+  // 等它问完再占的话，这期间连点就是两次提交
+  if (busy.value || !canSave.value || payerId.value === null || editingId.value === null) return
   busy.value = true
   try {
+    if (!(await ensureCategory())) return
     await ledger.update(editingId.value, version.value, {
       kind: kind.value,
       date: date.value,
@@ -553,7 +579,8 @@ async function saveEdit() {
       title: title.value,
       rule: kind.value === 'settlement' ? null : rule.value,
     })
-    await ledger.refresh()
+    // 改上了就是改上了：后面这次刷新失败（断网）不许报成「没存上」
+    await ledger.refresh().catch(() => {})
     $q.notify({ type: 'positive', message: t('entry.saved'), timeout: 1200 })
     goBack()
   } catch (e) {
@@ -670,36 +697,39 @@ async function ensureCategory(): Promise<boolean> {
 }
 
 async function save() {
-  if (!canSave.value || payerId.value === null) return
-  if (!(await ensureCategory())) return
+  // busy 一进门就占上（理由见 saveEdit）
+  if (busy.value || !canSave.value || payerId.value === null) return
   busy.value = true
-  const payload = {
+  try {
+    if (!(await ensureCategory())) return
+    const payload = {
       kind: kind.value,
       date: date.value,
       amount_jpy: signedAmount.value,
-      payer_id: payerId.value,
+      payer_id: payerId.value!,
       to_member_id: kind.value === 'settlement' ? toMemberId.value : null,
       category_id: kind.value === 'expense' ? categoryId.value : null,
       title: title.value,
       rule: kind.value === 'settlement' ? null : rule.value,
-  }
-  try {
-    await ledger.create(payload)
-    $q.notify({ type: 'positive', message: t('entry.saved'), timeout: 1200 })
-    reset()
-  } catch (e) {
-    // 只有「连不上服务器」才转存草稿。金额方向错、账期已关这类是**服务器明确拒绝**，
-    // 存成草稿只会让人以后反复补交同一笔失败的账（D15）
-    if (e instanceof ApiError && e.code === 'network') {
-      drafts.add(payload)
-      $q.notify({ type: 'warning', message: t('draft.savedOffline'), timeout: 2500 })
+    }
+    try {
+      await ledger.create(payload)
+      $q.notify({ type: 'positive', message: t('entry.saved'), timeout: 1200 })
       reset()
-    } else {
-      $q.notify({
-        type: 'negative',
-        message: e instanceof ApiError ? e.text : String(e),
-        timeout: 4000,
-      })
+    } catch (e) {
+      // 只有「连不上服务器」才转存草稿。金额方向错、账期已关这类是**服务器明确拒绝**，
+      // 存成草稿只会让人以后反复补交同一笔失败的账（D15）
+      if (e instanceof ApiError && e.code === 'network') {
+        drafts.add(payload)
+        $q.notify({ type: 'warning', message: t('draft.savedOffline'), timeout: 2500 })
+        reset()
+      } else {
+        $q.notify({
+          type: 'negative',
+          message: e instanceof ApiError ? e.text : String(e),
+          timeout: 4000,
+        })
+      }
     }
   } finally {
     busy.value = false

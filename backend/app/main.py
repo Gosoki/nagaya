@@ -37,7 +37,7 @@ from app.services.ledger import LedgerError
 log = logging.getLogger("nagaya")
 
 #: 这些错误是「用户输入不对」，不是 500。个别要用 409 让前端知道该刷新。
-CONFLICT_CODES = {"version_conflict"}
+CONFLICT_CODES = {"version_conflict", "transfer_changed"}
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):

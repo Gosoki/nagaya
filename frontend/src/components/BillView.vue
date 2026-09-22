@@ -447,6 +447,7 @@ import { useRouter } from 'vue-router'
 
 import { ApiError, api } from 'src/api/client'
 import type { Bill, BillTransfer, Entry, Statement } from 'src/api/types'
+import { toHalfWidth } from 'src/digits'
 import { escapeHtml } from 'src/html'
 import { FALLBACK } from 'src/palette'
 import MemberAvatar from 'src/components/MemberAvatar.vue'
@@ -519,10 +520,12 @@ function leftOf(tr: BillTransfer, i: number): number {
   const b = bill.value
   if (!b) return 0
   const rest = tr.amount - (b.settled_paid?.[i] ?? 0)
-  const live = (b.live_transfers ?? []).find(
-    (x) => x.from_id === tr.from_id && x.to_id === tr.to_id,
-  )?.amount
-  return Math.max(0, Math.min(rest, live ?? rest))
+  // **实时方案里没有这一对 ＝ 此刻不欠。** 原来这里退回成「方案剩余额」，
+  // 于是已经换了条路结清（或者被后来的账净额化掉）的那一对，按钮照样亮、
+  // 大字照样叫人转钱 —— 正是上面那段话要防的事。后端 bill.pair_left 同一口径
+  const live =
+    (b.live_transfers ?? []).find((x) => x.from_id === tr.from_id && x.to_id === tr.to_id)?.amount ?? 0
+  return Math.max(0, Math.min(rest, live))
 }
 
 /** 卡片上那行小字：转了多少、还差多少、或者「已经不用转了」 */
@@ -833,15 +836,23 @@ async function copyBill() {
  * 一整笔。屏幕上没有任何地方提示过。
  */
 function confirmReceived(tr: BillTransfer, index: number) {
+  if (busy.value !== null) return
   const left = leftOf(tr, index)
+  const statementId = bill.value?.is_draft ? null : (bill.value?.statement_id ?? null)
+  // 「确定」连点两下，onOk 会跑两遍 —— 第二遍直接丢掉
+  let fired = false
   $q.dialog({
     title: t('bill.done'),
     message: t('bill.doneHint', { from: nameOf(tr.from_id), to: nameOf(tr.to_id) }),
-    prompt: { model: String(left || tr.amount), type: 'number' },
+    // **不用 type=number**：那样「10,000」会被当成没填，「10.000」会记成 ¥10。
+    // 文本框 + 数字键盘，千分位和空格下面自己擦
+    prompt: { model: left.toLocaleString('en-US'), type: 'text', inputmode: 'numeric' },
     cancel: true,
   }).onOk(async (value: string) => {
+    if (fired) return
+    fired = true
     // 先把逗号和空格擦掉：整屏的金额都写成 ¥10,000，照着屏幕打回去是最自然的动作
-    const amount = Math.floor(Number(String(value).replace(/[,，\s]/g, '')))
+    const amount = Math.floor(Number(toHalfWidth(String(value)).replace(/[,，.．\s]/g, '')))
     if (!Number.isFinite(amount) || amount <= 0) {
       // **不许静默 return。** 对话框已经关了、页面一个字不变，和「刚才没点上」
       // 长得一模一样 —— 而这个函数上面那段注释说的正是那个状态会让人再按一次、
@@ -854,30 +865,44 @@ function confirmReceived(tr: BillTransfer, index: number) {
       // 转账发生在出账之后，所以它进的是**下一张**草稿 —— 这是对的：
       // 账单是对「出账那一刻」的陈述，之后收到的钱属于下一轮。
       // 但记账的入口留在这张单子上，因为方案就在这儿。
-      await ledger.create({
-        kind: 'settlement',
+      await ledger.confirmTransfer({
+        statement_id: statementId,
+        from_id: tr.from_id,
+        to_id: tr.to_id,
+        amount,
+        expect_left: left,
         date: todayJst(),
-        amount_jpy: amount,
-        payer_id: tr.from_id,
-        to_member_id: tr.to_id,
-      })
-      await load()
-      // 「记上了」这件事必须看得见。没有这一句的话，部分还款在这一屏上
-      // 完全没有反馈 —— 人只会再按一次
-      $q.notify({
-        type: 'positive',
-        timeout: 3000,
-        message: t('bill.doneRecorded', {
-          from: nameOf(tr.from_id),
-          to: nameOf(tr.to_id),
-          amount: formatYen(amount),
-        }),
       })
     } catch (e) {
-      $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e) })
-    } finally {
+      // 有人刚记过这一笔（另一方也点了、或者另一台设备）：不重复记，
+      // 重取之后把「现在还差多少」说出来
+      if (e instanceof ApiError && e.code === 'transfer_changed') {
+        await load().catch(() => {})
+        const now = Number((e.detail as { left?: number } | undefined)?.left ?? 0)
+        $q.notify({
+          type: 'warning',
+          timeout: 5000,
+          message: now > 0 ? t('bill.transferChanged', { left: formatYen(now) }) : t('bill.transferDoneElsewhere'),
+        })
+      } else {
+        $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e) })
+      }
       busy.value = null
+      return
     }
+    // **记上了就是记上了。** 后面那次重取失败（断网）不许报成「没记上」——
+    // 那样人会再按一次，又是一笔
+    $q.notify({
+      type: 'positive',
+      timeout: 3000,
+      message: t('bill.doneRecorded', {
+        from: nameOf(tr.from_id),
+        to: nameOf(tr.to_id),
+        amount: formatYen(amount),
+      }),
+    })
+    await load().catch(() => {})
+    busy.value = null
   })
 }
 

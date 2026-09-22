@@ -63,7 +63,14 @@
     <!-- 布局诊断条：设置页版本号连点 5 下才会出现，平时不渲染 -->
     <LayoutProbe v-if="debugLayout" />
     <q-page-container>
-      <router-view v-if="meta.members.length" />
+      <!-- 「记一笔」和「改一笔」是**同一个页面组件**两条路由：不给 key 的话，
+           从编辑页点底栏「记一笔」，Vue 会复用那个实例 —— onMounted 不重跑，
+           表单里还摆着刚才那笔旧账，按「记入账」就把它又记了一遍。
+           只给编辑页单独的 key：账单那几条路由（/bill/:id 进来会被改写回 /bill）
+           不能因为地址变了就整页重建 -->
+      <router-view v-if="meta.members.length" v-slot="{ Component, route: r }">
+        <component :is="Component" :key="r.name === 'entry-edit' ? `edit-${r.params.id}` : String(r.name)" />
+      </router-view>
       <!-- 起不来就得说出来。原来只有一个转圈：拉不到基础数据时它会一直转下去，
            人只能看着一个永远不会停的动画 —— 而这恰好是断网时的默认下场 -->
       <div v-else-if="bootFailed" class="column flex-center q-pa-xl text-center" style="height: 60vh">
@@ -370,6 +377,10 @@ watch(
 function onVisible() {
   if (document.visibilityState !== 'visible') return
   void meta.load().catch(() => {})
+  // 挂在后台的这段时间，室友可能记了账、出了账 —— 流水和账单原来从不重取，
+  // 一直要到整页刷新才看得到
+  void ledger.refresh().catch(() => {})
+  bills.refreshViews()
   // 从后台切回来，iOS 同样可能按旧视口摆 fixed 元素
   remeasure()
 }

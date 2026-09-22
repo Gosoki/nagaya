@@ -547,6 +547,72 @@ class BillError(ValueError):
         self.detail = detail
 
 
+# ------------------------------------------------- 「确认已完成」
+
+#: 「算此刻还差多少 → 记账」必须是一步。服务是单进程（README 部署那一行），
+#: 一把进程内的锁就够 —— 和 _carry_lock 同一个做法
+_confirm_lock = threading.Lock()
+
+
+def pair_left(session: Session, statement: Statement | None, from_id: int, to_id: int) -> int:
+    """这张单子上 from → to 那一笔**此刻**还该转多少。和前端 BillView 的 leftOf 同一口径：
+
+      * 「这一笔还剩多少」＝ 方案额 − 出账后已经转过的；
+      * 「这一对此刻还欠多少」＝ 实时方案里同一对的金额，**不在实时方案里就是 0** ——
+        出账之后大家换了条路结清（现金、并单转、经第三人），这一对就再也不会走钱。
+    两头取小。方案里没有这一对也是 0。
+    """
+    b = build_bill(session, statement)
+    for i, t in enumerate(b["transfers"]):
+        if t["from_id"] == from_id and t["to_id"] == to_id:
+            paid = b["settled_paid"][i] if i < len(b["settled_paid"]) else 0
+            live = next(
+                (x["amount"] for x in b["live_transfers"] if x["from_id"] == from_id and x["to_id"] == to_id),
+                0,
+            )
+            return max(0, min(t["amount"] - paid, live))
+    return 0
+
+
+def confirm_transfer(
+    session: Session,
+    *,
+    statement: Statement | None,
+    from_id: int,
+    to_id: int,
+    amount: int,
+    expect_left: int,
+    on: dt.date,
+    actor_id: int | None,
+) -> Entry:
+    """在账单上点「确认已完成」＝ 记一笔 from → to 的转账。
+
+    原来前端直接 POST 一笔转账，后端什么都不查：转出方和转入方**各点一次**
+    （两个人都觉得该由自己来点），或者对话框的「确定」被连点两下，
+    账本里就多出一笔一模一样的钱 —— 实测 B 从欠 10,000 变成倒被欠 9,000。
+
+    现在前端要带上「我打开对话框时看到还差多少」（expect_left）。锁里按同一口径
+    重算，**对不上就不记**：有人刚记过一笔（或者另一台设备刚点过），
+    这边拿到 409 和新的数，重取之后让人自己看一眼。金额本身不设上限 ——
+    真多转了就该照实记，差额自然成了反方向的债。
+    """
+    with _confirm_lock:
+        left = pair_left(session, statement, from_id, to_id)
+        if left != expect_left:
+            raise BillError("transfer_changed", "transfer progress changed", left=left)
+        if left == 0:
+            raise BillError("transfer_changed", "nothing left to transfer", left=0)
+        return ledger.create_entry(
+            session,
+            actor_id=actor_id,
+            kind=EntryKind.settlement,
+            on=on,
+            amount=amount,
+            payer_id=from_id,
+            to_member_id=to_id,
+        )
+
+
 # ------------------------------------------------- 当前草稿账单上的「固定费」
 
 

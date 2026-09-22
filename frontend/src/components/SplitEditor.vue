@@ -124,6 +124,7 @@
             placeholder="0"
             :value="adjDisplay(m.id)"
             @input="onAdjInput(m.id, $event)"
+            @compositionend="onAdjInput(m.id, $event)"
           />
         </div>
 
@@ -169,6 +170,7 @@ import { useI18n } from 'vue-i18n'
 import type { Member } from 'src/api/types'
 import MemberAvatar from 'src/components/MemberAvatar.vue'
 import { SplitError, split } from 'src/core/split'
+import { digitsOf, toHalfWidth } from 'src/digits'
 import { formatYen } from 'src/i18n'
 import { useMeta } from 'src/stores/meta'
 
@@ -505,8 +507,9 @@ function normalize(raw: string): { text: string; value: number } {
   // （数字是右对齐的，点中间就等于点到了减号前面），接着打出来的是「1500-」——
   // 只认开头的话这一笔就成了正数，而屏幕上那个减号还在，看着像是生效了。
   // 减号会出现在这个框里只有一个原因：人想要负数。
-  const neg = raw.includes('-')
-  const d = raw.replace(/\D/g, '')
+  const half = toHalfWidth(raw)
+  const neg = half.includes('-')
+  const d = digitsOf(half)
   const n = d ? Number(d) : 0
   const sign = neg ? '-' : ''
   return { text: d ? sign + n.toLocaleString('en-US') : sign, value: neg ? -n : n }
@@ -515,7 +518,8 @@ function normalize(raw: string): { text: string; value: number } {
 function onAdjInput(id: number, e: Event) {
   // 框里打进来的没有符号（符号在旁边那个按钮上），所以要把当前的符号接回去。
   // 硬件键盘直接打了减号的也算 —— 那条路上的人不会去点按钮
-  const raw = (e.target as HTMLInputElement).value
+  if ((e as InputEvent).isComposing) return      // 输入法拼字中，等 compositionend
+  const raw = toHalfWidth((e.target as HTMLInputElement).value)
   write(id, (adjNeg(id) || raw.includes('-') ? '-' : '') + raw)
 }
 

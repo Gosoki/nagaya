@@ -91,6 +91,7 @@
               @click.stop
               @focus="($event.target as HTMLInputElement).select()"
               @input="onInput(row, $event)"
+              @compositionend="onInput(row, $event)"
               @blur="saveQueued(row)"
             />
           </q-item-section>
@@ -141,6 +142,7 @@ import { ApiError, api } from 'src/api/client'
 import type { Category, MonthlyData, MonthlyRow } from 'src/api/types'
 import MemberPicker from 'src/components/MemberPicker.vue'
 import SplitEditor from 'src/components/SplitEditor.vue'
+import { digitsOf } from 'src/digits'
 import { formatYen } from 'src/i18n'
 import { useAuth } from 'src/stores/auth'
 import { useBills } from 'src/stores/bills'
@@ -215,7 +217,7 @@ const payerName = (row: Row) => {
 }
 
 const formatPlain = (n: number) => n.toLocaleString('en-US')
-const valueOf = (row: Row) => Number(row.text.replace(/\D/g, '')) || 0
+const valueOf = (row: Row) => Number(digitsOf(row.text)) || 0
 
 /**
  * 重新拉数据。**保留还没保存的输入。**
@@ -345,7 +347,8 @@ function openCategoryEntries(row: Row) {
 }
 
 function onInput(row: Row, e: Event) {
-  const digits = (e.target as HTMLInputElement).value.replace(/\D/g, '')
+  if ((e as InputEvent).isComposing) return      // 输入法拼字中，等 compositionend
+  const digits = digitsOf((e.target as HTMLInputElement).value)
   const n = Math.min(Number(digits || 0), 99_999_999)
   row.text = digits ? formatPlain(n) : ''
   row.dirty = true

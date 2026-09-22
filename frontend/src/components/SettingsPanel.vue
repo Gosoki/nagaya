@@ -117,7 +117,7 @@
                 type="text"
                 inputmode="numeric"
                 :value="s.value === null ? '' : String(s.value)"
-                @blur="saveNumber(s, ($event.target as HTMLInputElement).value)"
+                @blur="saveNumber(s, $event.target as HTMLInputElement)"
               />
               <!-- 一行文字 -->
               <input
@@ -169,6 +169,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { ApiError, api } from 'src/api/client'
+import { toHalfWidth } from 'src/digits'
 import BackupCard from 'src/components/BackupCard.vue'
 import FixedCostSettings from 'src/components/FixedCostSettings.vue'
 import AppearanceCard from 'src/components/AppearanceCard.vue'
@@ -272,15 +273,30 @@ async function save(s: Setting, value: unknown) {
   }
 }
 
-function saveNumber(s: Setting, raw: string) {
-  const text = raw.trim()
+/**
+ * 数字框失焦就存。**认不出是数就不存、框里退回原值** —— 原来全角数字或者
+ * 一串字母会被 `replace(/[^\d-]/g, '')` 洗成空串，`Number('')` 是 0，
+ * 于是「备份间隔」这种设置悄悄变成了 0。存失败时也退回原值：
+ * 框里留着一个没生效的数，看着就像存上了
+ */
+async function saveNumber(s: Setting, el: HTMLInputElement) {
+  const text = toHalfWidth(el.value).replace(/[,\s]/g, '')
+  // 按**当前**那份重画：存成功后 meta 里换成了新对象，手上这个 s 还是旧值
+  const shown = () => {
+    const now = meta.settings.find((x) => x.key === s.key)?.value ?? null
+    el.value = now === null ? '' : String(now)
+  }
   if (!text) {
-    if (s.type === 'int_or_null') void save(s, null)
+    if (s.type === 'int_or_null') await save(s, null)
+    shown()
     return
   }
-  const n = Number(text.replace(/[^\d-]/g, ''))
-  if (!Number.isFinite(n)) return
-  void save(s, n)
+  if (!/^-?\d+$/.test(text)) {
+    shown()
+    return
+  }
+  await save(s, Number(text))
+  shown()
 }
 
 function saveList(s: Setting, raw: string) {

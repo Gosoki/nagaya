@@ -261,6 +261,18 @@ export const useBills = defineStore('bills', () => {
     detail.value = null
   }
 
+  /**
+   * 从后台切回来：挂着的这段时间室友可能记了账、甚至出了一张新的。
+   * 缓存过的几张都后台校正一遍（不清空，屏幕不白）。'current' 顺带重取单子列表。
+   * 固定费面板那份不在这儿刷：人可能正停在某一格上改金额，别把它冲掉
+   */
+  function refreshViews(): void {
+    const cks = Object.keys(views.value)
+    if (!cks.length) return
+    run('current', true).catch(() => {})
+    for (const ck of cks) run(ck as BillKey, true).catch(() => {})
+  }
+
   /** 预热另外两页 + 固定费面板，第一次切过去就不用等 */
   function warm(): void {
     for (const key of ['draft', 'current'] as const) run(key).catch(() => {})
@@ -269,6 +281,6 @@ export const useBills = defineStore('bills', () => {
 
   return {
     tab, detail, statements, views, monthly, pending, lastError,
-    cacheKey, loadStatements, loadMonthly, ensure, reload, refreshCached, invalidate, warm,
+    cacheKey, loadStatements, loadMonthly, ensure, reload, refreshCached, refreshViews, invalidate, warm,
   }
 })
