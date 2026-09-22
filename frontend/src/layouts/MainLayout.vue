@@ -11,7 +11,7 @@
          没内容时它的高度就是安全区本身：非刘海机上是 0，和以前一模一样；
          刘海机上是一条白带子，正好垫在状态栏后面，黑字也才看得清。
          Quasar 会量它的实际高度去顶下面的内容，所以页面不用各自再算一遍 -->
-    <q-header class="bg-white text-dark">
+    <q-header ref="headEl" class="bg-white text-dark">
       <DraftBanner v-if="drafts.count" />
       <!-- **断网时屏幕上的数字是旧的，这件事必须说出来。**
            账单页就是三个人掏手机转账前盯的那一屏；室友刚填了水费、刚点了
@@ -159,7 +159,9 @@ function refetch() {
  * 量一次就都没有了：拿到的 height 本来就含它自己的安全区内边距。
  */
 const footEl = ref<{ $el: HTMLElement } | null>(null)
+const headEl = ref<{ $el: HTMLElement } | null>(null)
 let footWatch: ResizeObserver | null = null
+let headWatch: ResizeObserver | null = null
 
 function measureFooter() {
   const el = footEl.value?.$el
@@ -171,14 +173,41 @@ function measureFooter() {
   if (h > 0) document.documentElement.style.setProperty('--nagaya-footer-h', `${h}px`)
 }
 
+/**
+ * 顶栏的真实高度（含刘海安全区）。它随页面变：记一笔那屏只有安全区，
+ * 账单/更多那两屏还要加一条页签。
+ *
+ * **拿来挡键盘。** iOS 弹键盘时会把聚焦的输入框滚进可视区，而它默认会一直
+ * 滚到页面最顶 —— 也就是钻到这条固定顶栏底下，金额那个大数字被切掉一截。
+ * 量出来写进 --nagaya-header-h，再由 scroll-padding-top 告诉浏览器
+ * 「滚到这儿就够了」。用量的不用写死：写死的话记一笔那屏会多让出一截空白。
+ */
+function measureHeader() {
+  const el = headEl.value?.$el
+  if (!el) return
+  document.documentElement.style.setProperty(
+    '--nagaya-header-h',
+    `${Math.ceil(el.getBoundingClientRect().height)}px`,
+  )
+}
+
 onMounted(() => {
   measureFooter()
-  if (typeof ResizeObserver !== 'undefined' && footEl.value?.$el) {
+  measureHeader()
+  if (typeof ResizeObserver === 'undefined') return
+  if (footEl.value?.$el) {
     footWatch = new ResizeObserver(measureFooter)
     footWatch.observe(footEl.value.$el)
   }
+  if (headEl.value?.$el) {
+    headWatch = new ResizeObserver(measureHeader)
+    headWatch.observe(headEl.value.$el)
+  }
 })
-onBeforeUnmount(() => footWatch?.disconnect())
+onBeforeUnmount(() => {
+  footWatch?.disconnect()
+  headWatch?.disconnect()
+})
 
 // 名字和图标是这屋自己设的，而页签标题/小图/主屏清单都不是 Vue 管的 DOM，
 // meta 一到手就手动贴上去（见 src/appearance.ts）
@@ -204,6 +233,8 @@ onMounted(boot)
   --nagaya-max-w: 480px;
   /* 顶栏统一高度：页签、返回条都用它，和底部 Tab（57px）呼应 */
   --nagaya-head-h: 52px;
+  /* 顶栏真实高度（含安全区）。0 只是首帧兜底，挂载后 measureHeader() 写回来 */
+  --nagaya-header-h: 0px;
   /* 页签条（流水/备忘/设置、未出账/已出账）的实际高度。
      页面里的吸顶元素要吸在它**下沿**，不是吸到 0 —— 吸到 0 就等于钻进
      固定顶栏底下，一滚就整条看不见了 */
@@ -269,13 +300,22 @@ onMounted(boot)
 /* 刘海屏/灵动岛：顶栏往下让出安全区 */
 .q-header { padding-top: env(safe-area-inset-top); }
 /*
+  **聚焦时滚到哪儿为止。** iOS 弹键盘会把聚焦的框滚进可视区，默认一直滚到
+  页面最顶 —— 那儿正是固定顶栏和状态栏，金额那个大数字被切掉一截。
+  scroll-padding 是给滚动容器（这里是整页）划的「别往这儿放」的边。
+*/
+html {
+  scroll-padding-top: calc(var(--nagaya-header-h) + 8px);
+  scroll-padding-bottom: calc(var(--nagaya-footer-h) + 90px);   /* 底下那条固定操作栏 */
+}
+/*
   **聚焦时别被顶栏和状态栏盖住。** iOS 弹键盘时会把聚焦的输入框滚到布局视口
   最顶上，而那儿正是状态栏和固定顶栏所在 —— 金额框就是这么被吃掉的。
   scroll-margin-top 告诉浏览器「滚到这儿就够了」，Safari 14.5 起支持。
 */
 input,
 textarea {
-  scroll-margin-top: calc(var(--nagaya-head-h) + env(safe-area-inset-top) + 8px);
+  scroll-margin-top: calc(var(--nagaya-header-h) + 8px);
   scroll-margin-bottom: calc(var(--nagaya-footer-h) + 90px);
 }
 </style>
