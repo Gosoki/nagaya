@@ -33,4 +33,16 @@ describe('报错文案', () => {
   it('认不出的 code 退回后端那句话', () => {
     expect(new ApiError('never_seen_this', '后端说了点什么').text).toContain('后端说了点什么')
   })
+
+  it('设置项的键名要说人话，不许把 backup_keep 摆到界面上', () => {
+    const e = new ApiError('setting_out_of_range', 'x', { key: 'backup_keep', min: 1, max: 30 })
+    expect(e.text).toContain('备份留几份')
+    expect(e.text).not.toContain('backup_keep')
+  })
+
+  it('FastAPI 的 422 不能显示成「[object Object]」', () => {
+    const e = new ApiError('bad_request', 'amount_jpy: Input should be a valid integer', {}, 422)
+    expect(e.text).not.toContain('[object Object]')
+    expect(e.text.length).toBeGreaterThan(4)
+  })
 })

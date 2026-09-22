@@ -51,6 +51,8 @@ export default {
     removeKeepsEntry: '今期に記録済みの {amount} は請求書に残ります。',
     removed: '「{name}」を削除しました',
     removedKeeps: '削除済み（今期の分は残ります）',
+    removedBare: '削除済み',
+    historicAmountOnly: '過去の請求書では金額の変更のみ —— 空にしたり新規に入れたりすると今期の下書きに入り、この請求書からは消えます',
     noneBilled: 'この請求書に固定費はありません',
   },
   bill: {
@@ -192,6 +194,8 @@ export default {
     setting_invalid: '設定「{key}」の値が不正です',
     setting_out_of_range: '設定「{key}」は {min}〜{max} の範囲で指定してください',
     bad_rule: 'この分担ルールは使えません',
+    bad_request: 'リクエストの形式が合いません。ページが古い可能性があります —— 更新してください',
+    bad_rule_shape: '按分ルールの形式が不正です（「メンバー → 数値」で指定してください）',
     avatar_empty: 'ファイルを受け取れませんでした',
     avatar_too_big: '画像は {limit_mb}MB までです',
     avatar_not_image: 'この画像は読み込めません',

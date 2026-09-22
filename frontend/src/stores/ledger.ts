@@ -52,7 +52,7 @@ export const useLedger = defineStore('ledger', () => {
     entries.value = [saved, ...entries.value]
     // 账单那几页缓存着，记完这笔它们就旧了。后台刷，不清空 ——
     // 清空的话下次点过去又要白屏等一遍。**失败也不冒泡**：这笔已经记上了
-    useBills().refreshCached()
+    useBills().refreshCached(saved)
     return saved
   }
 
@@ -60,21 +60,21 @@ export const useLedger = defineStore('ledger', () => {
   async function update(id: number, version: number, payload: Partial<EntryPayload>): Promise<Entry> {
     const saved = await api.patch<Entry>(`/api/entries/${id}?version=${version}`, payload)
     entries.value = entries.value.map((e) => (e.id === id ? saved : e))
-    useBills().refreshCached()
+    useBills().refreshCached(saved)
     return saved
   }
 
   async function remove(entry: Entry) {
     await api.del(`/api/entries/${entry.id}`)
     entries.value = entries.value.filter((e) => e.id !== entry.id)
-    useBills().refreshCached()
+    useBills().refreshCached(entry)
   }
 
   /** 撤销刚才那次删除。后端一直是软删，只是以前前端没接这个入口 */
   async function restore(id: number): Promise<Entry> {
     const back = await api.post<Entry>(`/api/entries/${id}/restore`)
     entries.value = [back, ...entries.value.filter((e) => e.id !== id)]
-    useBills().refreshCached()
+    useBills().refreshCached(back)
     return back
   }
 

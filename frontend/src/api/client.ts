@@ -32,9 +32,27 @@ export class ApiError extends Error {
     const key = `errors.${this.code}`
     const t = i18n.global.t
     if (this.code !== 'unknown' && i18n.global.te(key)) {
-      return t(key, this.detail as Record<string, unknown>)
+      return t(key, this.params())
     }
     return t('errors.unknown', { message: this.message })
+  }
+
+  /**
+   * 插进文案里的那几个值。
+   *
+   * `detail.key` 要特殊照顾一下：它是**设置项的内部键名**（backup_keep、
+   * backup_every_hours 这种英文），而 setting_invalid / setting_out_of_range
+   * 两句文案会把它原样插进去 —— 于是日文界面上冒出一句
+   * 「設定「backup_keep」の値が不正です」。界面别处显示这些设置时走的是
+   * `settings.label.*`，这里跟着走同一张表
+   */
+  private params(): Record<string, unknown> {
+    const detail = { ...this.detail }
+    if (typeof detail.key === 'string') {
+      const path = `settings.label.${detail.key}`
+      if (i18n.global.te(path)) detail.key = i18n.global.t(path)
+    }
+    return detail as Record<string, unknown>
   }
 }
 
@@ -80,6 +98,16 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   if (res.status === 204) return undefined as T
   const data = await res.json().catch(() => null)
   if (!res.ok) {
+    // FastAPI 自己的请求校验（422）不走 {code, message, detail} 那套：
+    // detail 是一个**数组**，里面每项是 {type, loc, msg, input}。
+    // 不单独接的话 message 取到的就是这个数组，界面上显示成「出错了：[object Object]」。
+    // 到这一步说明前端发出去的形状后端不认 —— 多半是装在桌面上的那份 PWA 旧了
+    if (res.status === 422 && Array.isArray(data?.detail)) {
+      const why = data.detail
+        .map((d: { loc?: unknown[]; msg?: string }) => `${(d.loc ?? []).slice(1).join('.')}: ${d.msg ?? ''}`)
+        .join('; ')
+      throw new ApiError('bad_request', why, {}, 422)
+    }
     const code = data?.code ?? 'unknown'
     // detail 只有是对象时才是「命名参数」。HTTPException 返的 detail 是一句话，
     // 当参数用会把文案插成空的

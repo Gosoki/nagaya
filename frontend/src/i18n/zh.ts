@@ -51,6 +51,8 @@ export default {
     removeKeepsEntry: '本期已录的 {amount} 会留在账单上。',
     removed: '已删掉「{name}」',
     removedKeeps: '已删掉，这笔还在',
+    removedBare: '已删掉',
+    historicAmountOnly: '旧账单上的固定费只能改金额 —— 清空或新填都会落进当前草稿，这张单子上的那笔反而会不见',
     noneBilled: '这张账单上没有固定费',
   },
   bill: {
@@ -192,6 +194,8 @@ export default {
     setting_invalid: '「{key}」这个设置的值不对',
     setting_out_of_range: '「{key}」要在 {min}〜{max} 之间',
     bad_rule: '这条分摊规则用不了',
+    bad_request: '这次请求后端看不懂，多半是这台上的页面旧了 —— 刷新一下再试',
+    bad_rule_shape: '分摊规则的格式不对（那几项要写成「谁 → 数字」）',
     avatar_empty: '没收到文件',
     avatar_too_big: '图片不能超过 {limit_mb}MB',
     avatar_not_image: '这个文件不是图片',

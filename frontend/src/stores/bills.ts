@@ -88,6 +88,17 @@ export const useBills = defineStore('bills', () => {
    */
   let ticket = 0
   const written = new Map<string, number>()
+  /**
+   * 第几代数据。出账（invalidate）把它 +1。
+   *
+   * 清缓存清不掉**已经发出去的请求**：出账那一刻正好有一发 'draft' 在路上，
+   * 它回来的是出账之前的草稿 —— 里面正是刚刚被归进新账单的那批账。
+   * 缓存清了、`written` 也清了，于是它畅通无阻地写进 views['draft']，
+   * 而「未出账」那页看到的就是一份已经出过账的草稿，还可点可改。
+   * 之后谁也不会再纠正它（没有人知道它是旧的），刷新页面才好。
+   * 拿代号一比就认得出来：不是这一代的，结果直接扔掉。
+   */
+  let generation = 0
 
   /**
    * 路由 key → 缓存 key。
@@ -105,10 +116,12 @@ export const useBills = defineStore('bills', () => {
   let statementsTask: Promise<Statement[]> | null = null
   function loadStatements(): Promise<Statement[]> {
     if (statementsTask) return statementsTask
+    const gen = generation
     statementsTask = api
       .get<Statement[]>('/api/statements')
       .then((rows) => {
-        statements.value = rows
+        // 出账之后回来的旧列表里没有刚出的那一张，写进去会让 'current' 认错单子
+        if (gen === generation) statements.value = rows
         return rows
       })
       .finally(() => {
@@ -117,7 +130,7 @@ export const useBills = defineStore('bills', () => {
     return statementsTask
   }
 
-  async function fetchView(key: BillKey, slot: string, my: number): Promise<void> {
+  async function fetchView(key: BillKey, slot: string, my: number, gen: number): Promise<void> {
     // 「已出账」每次都把列表重取一遍：别人出了新的一张，这儿得跟上
     if (key === 'current' || statements.value === null) await loadStatements()
     const ck = cacheKey(key)
@@ -136,6 +149,8 @@ export const useBills = defineStore('bills', () => {
     if (seq.get(slot) !== my) return
     // 这份缓存已经被一张更新的票写过了（多半来自另一个槽）—— 同样不许盖
     if ((written.get(ck) ?? 0) > my) return
+    // 出账把整个缓存作废了，而我是出账之前发出去的 —— 拿回来的是上一代的账
+    if (gen !== generation) return
     written.set(ck, my)
     views.value = { ...views.value, [ck]: { bill, entries } }
   }
@@ -159,7 +174,7 @@ export const useBills = defineStore('bills', () => {
     const my = (ticket += 1)
     seq.set(slot, my)
     pending.value += 1
-    const task = fetchView(key, slot, my).finally(() => {
+    const task = fetchView(key, slot, my, generation).finally(() => {
       if (inflight.get(slot) === task) inflight.delete(slot)
       pending.value -= 1
     })
@@ -193,8 +208,16 @@ export const useBills = defineStore('bills', () => {
    * 记了一笔 / 改了一笔之后：把**已经缓存过的**几张在后台刷一遍。
    * 不清缓存 —— 清了下次进去又白屏，而白屏正是要治的毛病。
    */
-  function refreshCached(): void {
+  function refreshCached(touched?: Entry): void {
+    // 出过账的单子只有两种事动得了它：**改/删它里头的账**，和**记一笔转账**
+    // （「已结清」认的是出账之后的转账）。新记一笔支出/收入落的是草稿，
+    // 跟它一个数字都不沾 —— 而在 5 年的库上重算一张旧单子要 70ms 上下，
+    // 翻过几张就刷几张，每记一笔都来一轮。
+    // 不知道动了什么（没传参数）时照旧全刷：宁可白刷，不能让数字发旧
+    const all =
+      touched === undefined || touched.statement_id !== null || touched.kind === 'settlement'
     for (const ck of Object.keys(views.value)) {
+      if (!all && ck !== 'draft') continue
       run(ck as BillKey, true).catch(() => {})
     }
   }
@@ -208,6 +231,7 @@ export const useBills = defineStore('bills', () => {
    * monthly 以前不在这组清理里，漏了整整一块。
    */
   function invalidate(): void {
+    generation += 1          // 在路上的那几发就此作废，回来也不许写
     views.value = {}
     written.clear()          // 缓存都丢了，「谁写过它」的记录也跟着作废
     monthly.value = {}

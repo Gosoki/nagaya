@@ -200,7 +200,12 @@ const fallbackPayerId = computed(
  * 账本当场错一整笔房租的钱，而屏幕上一点提示都没有。
  */
 function payerOf(row: Row): number | null {
-  return row.payer_id ?? row.default_payer_id ?? fallbackPayerId.value
+  if (row.payer_id !== null) return row.payer_id
+  // 翻旧账单时，已录的那几行**宁可不显示垫付人，也别显示一个猜的**：
+  // 后面两级回退给的是「今天的默认垫付人」，跟当初谁真掏的钱没关系 ——
+  // 而这一屏正是靠这个名字告诉人「这笔房租是谁垫的」
+  if (historic.value && row.entry_id !== null) return null
+  return row.default_payer_id ?? fallbackPayerId.value
 }
 
 const payerName = (row: Row) => {
@@ -261,8 +266,12 @@ async function hydratePayers() {
   const ids = rows.value.filter((r) => r.entry_id !== null).map((r) => r.entry_id)
   if (!ids.length) return
   const shared = bills.views[cacheKey.value]?.entries
-  const entries =
-    shared ?? (await api.get<{ id: number; payer_id: number }[]>('/api/entries?limit=200'))
+  // 借不到就自己取 —— 但必须**跟当前这张单子对齐**。原来打的是全局最近 200 笔，
+  // 翻半年前那张单子时一条都对不上，于是每一行的垫付人都退回「今天的默认垫付人」
+  const url = historic.value
+    ? `/api/entries?statement_id=${props.statementId}&limit=1000`
+    : '/api/entries?unbilled_only=true&limit=1000'
+  const entries = shared ?? (await api.get<{ id: number; payer_id: number }[]>(url))
   const byId = new Map(entries.map((e) => [e.id, e.payer_id]))
   for (const r of rows.value) {
     if (r.entry_id !== null) r.payer_id = byId.get(r.entry_id) ?? null
@@ -365,26 +374,31 @@ const willDelete = (row: Row) => row.entry_id !== null && valueOf(row) === 0
  * 五行里重复五次「已录」只是噪音。只有需要你注意的才说话。
  */
 function stateText(row: Row): string {
-  // 已经删掉、只是本期这笔钱还挂着的那种。不说的话，点完「删掉这一项」
-  // 这一行还杵在那儿，看上去就是没删掉 —— 而钱确实必须留着（它在账单合计里）
-  if (row.archived) return t('monthly.removedKeeps')
+  // 三条状态共用行头那**一个格子**，所以按「要不要用户动手」排，不是按判起来顺手排。
+  // archived 原来抢在最前面，把下面两条要动手的全顶掉了 —— 而它恰恰是三条里唯一
+  // 纯陈述的那条（钱留着是对的，不用管）。不说它也不行：点完「删掉这一项」
+  // 这一行还杵在那儿，看上去就是没删掉
   // 只报「还有几笔没显示出来」。原来那句写全了整个来龙去脉，四十来个字，
   // 在 40px 高、右边还杵着输入框的一行里根本放不下，被省略号截掉大半 ——
   // 而这句话现在是个入口，点进去就看得到全部
   if (row.entry_count > 1) return t('monthly.duplicate', { n: row.entry_count - 1 })
   if (willDelete(row)) return t('monthly.willDelete')
+  // 钱也已经删掉了就别再写「这笔还在」
+  if (row.archived) {
+    return row.entry_id !== null ? t('monthly.removedKeeps') : t('monthly.removedBare')
+  }
   return ''                                       // 已录不出声；没录的也不出声，空框＝0
 }
 const stateClass = (row: Row) =>
   row.entry_count > 1
     ? 'text-warning'
-    : row.archived
-      ? 'text-grey-6'
-      : willDelete(row)
+    : willDelete(row)
       ? 'text-negative'
-      : row.entry_id !== null
-        ? 'text-positive'
-        : 'text-grey-6'
+      : row.archived
+        ? 'text-grey-6'
+        : row.entry_id !== null
+          ? 'text-positive'
+          : 'text-grey-6'
 
 /** 还没存上的行数（存失败才会 >0）。和 saveRow 用同一个判据 */
 const dirtyCount = computed(() => rows.value.filter((r) => r.dirty).length)
@@ -428,9 +442,18 @@ async function saveRow(row: Row) {
   if (!row.rule_valid) {
     $q.notify({
       type: 'negative',
-      message: `${row.name}: ${t('split.notBalanced', { n: formatPlain(row.rule_diff) })}`,
+      message: `${row.name}: ${t('split.notBalanced', { n: formatYen(row.rule_diff) })}`,
       timeout: 5000,
     })
+    return
+  }
+  // **翻旧账单时只许改金额。** 清空走 DELETE、重打走 POST，而 POST 建出来的是
+  // statement_id=NULL 的新账目 —— 落进**当前草稿**，旧单子上那笔就此消失，
+  // 屏幕上这一行却显示成「改好了」。组件顶上那句注释一直是这么写的，代码没兑现
+  if (historic.value && (willDelete(row) || row.entry_id === null)) {
+    row.text = row.amount === null ? '' : formatPlain(row.amount)
+    row.dirty = false
+    $q.notify({ type: 'warning', message: t('monthly.historicAmountOnly'), timeout: 5000 })
     return
   }
   const value = valueOf(row)
@@ -486,7 +509,18 @@ async function saveRow(row: Row) {
       row.dirty = false          // 空着又没录过：没什么可存的
       return
     }
-    if (data.value) data.value.total += (row.amount ?? 0) - before
+    if (data.value) {
+      data.value.total += (row.amount ?? 0) - before
+      // 缓存里的 rows 也得跟着改。只改 total 的话，缓存里躺着的是
+      // 「合计是新的、每一行还是旧的」—— 而 onMounted 正是拿它做首屏：
+      // 金额框空着、合计却有钱
+      const cached = data.value.rows.find((r) => r.category_id === row.category_id)
+      if (cached) {
+        cached.amount = row.amount
+        cached.entry_id = row.entry_id
+        cached.version = row.version
+      }
+    }
     row.dirty = false
     row.rule_override = null
     emit('saved')                // 账单总额/转账方案跟着刷新
@@ -523,7 +557,7 @@ onBeforeUnmount(flush)
 function removeItem(row: Row) {
   const extra =
     row.amount !== null
-      ? ` ${t('monthly.removeKeepsEntry', { amount: formatPlain(row.amount) })}`
+      ? ` ${t('monthly.removeKeepsEntry', { amount: formatYen(row.amount) })}`
       : ''
   $q.dialog({
     title: t('monthly.removeItem'),
