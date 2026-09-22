@@ -195,7 +195,13 @@ class Statement(SQLModel, table=True):
 
 
 class Bundle(SQLModel, table=True):
-    """光熱費套餐：一次录入电/煤/水/网多项，挂同一个 bundle 方便一起看、一起改。"""
+    """光熱費套餐：一次录入电/煤/水/网多项，挂同一个 bundle 方便一起看、一起改。
+
+    **M3 的坑，现在还没人写它** —— 没有端点能建 Bundle，前端也从不设 bundle_id，
+    所以 entry.bundle_id 至今恒为 null。留着是因为 SPEC §5 就是这么规划的
+    （M3：光熱費套餐 / 复制上月 / 模板），不是忘了删。
+    真做的时候记得：ledger._check_refs 已经会验 bundle_id 存在性了。
+    """
 
     __tablename__ = "bundle"
 
@@ -235,6 +241,8 @@ class Entry(SQLModel, table=True):
         description="原始规则，为了编辑时能把界面还原回去。真正的钱以 entry_share 为准",
     )
     note: str = ""
+    #: 收据照片。**M4 的坑**（SPEC §9「M4（可选）：统计图表、收据拍照…」），
+    #: 现在全项目没有一处读写它，EntryOut 也没带 —— 不是忘了删
     receipt_path: Optional[str] = None
 
     created_by: Optional[int] = Field(default=None, foreign_key="member.id")
@@ -260,7 +268,12 @@ class EntryShare(SQLModel, table=True):
 
 
 class Template(SQLModel, table=True):
-    """模板：房租这种固定额一键生成；光熱費套餐存 items_json。"""
+    """模板：房租这种固定额一键生成；光熱費套餐存 items_json。
+
+    **M3 的坑，一行代码都还没写** —— 没有端点、没有界面、表是空的。
+    留着是因为 SPEC §5 就是这么规划的（M3：光熱費套餐 / 复制上月 / 模板），
+    不是忘了删。
+    """
 
     __tablename__ = "template"
 
