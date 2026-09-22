@@ -139,3 +139,20 @@ a,
 .q-notifications__list--bottom {
   bottom: calc(var(--nagaya-footer-h) + 90px);
 }
+
+/*
+  **拉过头不许露出藏青带。**
+
+  iOS Safari 会给「超出内容那一块」上色，取的是 theme-color（我们的藏青）。
+  键盘弹起时可滚区域被 WebKit 撑高，手指一拉就把那块拉出来 —— 底栏底下
+  凭空多出一大片深蓝，看着像页面破了个洞。
+
+  两道保险：
+    1. 根元素自己铺白底，Safari 取色时就近取到的是白，不是主题色
+    2. 直接关掉纵向的弹性滚动（下面那条 html 规则）；流水那页靠下拉刷新，
+       它单独放行（MainLayout 按路由挂 .bounce-ok）
+*/
+html,
+body { background: var(--nagaya-bg); }
+html { overscroll-behavior-y: none; }
+html.bounce-ok { overscroll-behavior-y: auto; }

@@ -209,6 +209,14 @@ onBeforeUnmount(() => {
   headWatch?.disconnect()
 })
 
+// 只有流水那页要留着弹性滚动 —— 它的下拉刷新站在「拉到顶还能再拉一截」
+// 这个动作上。别的页一律关掉：键盘弹起时拉过头会露出一条藏青带（见 tokens.css）
+watch(
+  () => route.name,
+  (name) => document.documentElement.classList.toggle('bounce-ok', name === 'entries'),
+  { immediate: true },
+)
+
 // 名字和图标是这屋自己设的，而页签标题/小图/主屏清单都不是 Vue 管的 DOM，
 // meta 一到手就手动贴上去（见 src/appearance.ts）
 watch(
