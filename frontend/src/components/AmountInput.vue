@@ -16,6 +16,7 @@
       type="text"
       inputmode="numeric"
       enterkeyhint="done"
+      :aria-label="t('entry.amountLabel')"
       :placeholder="'0'"
       :style="{ width: width }"
       :value="display"

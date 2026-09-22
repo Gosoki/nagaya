@@ -7,7 +7,7 @@
     {{ t('draft.pending', { n: drafts.count }) }}
     <template #action>
       <q-btn flat dense no-caps :loading="busy" :label="t('draft.submit')" @click="submit" />
-      <q-btn flat dense no-caps :label="t('draft.discard')" @click="discard" />
+      <q-btn flat dense no-caps :disable="busy" :label="t('draft.discard')" @click="discard" />
     </template>
   </q-banner>
 </template>

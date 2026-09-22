@@ -73,3 +73,15 @@ def test_pair_not_in_plan_has_nothing_left(client: TestClient, auth, members) ->
     r = client.post("/api/bill/confirm", json=body, headers=auth)
     assert r.status_code == 409
     assert r.json()["detail"]["left"] == 0
+
+
+def test_same_client_key_records_only_once(client: TestClient, auth, members) -> None:
+    """离线草稿补交：请求其实到过后端、只是响应丢了 —— 带同一个键再来，不许记第二笔。"""
+    a = members[0]
+    body = {"kind": "expense", "date": SEP, "amount_jpy": 1_200, "payer_id": a.id,
+            "client_key": "k-0123456789abcdef"}
+    first = client.post("/api/entries", json=body, headers=auth)
+    again = client.post("/api/entries", json=body, headers=auth)
+    assert first.status_code == again.status_code == 201
+    assert first.json()["id"] == again.json()["id"]
+    assert len([e for e in client.get("/api/entries", headers=auth).json() if e["amount_jpy"] == 1_200]) == 1

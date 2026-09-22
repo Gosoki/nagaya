@@ -122,7 +122,7 @@ export const useBills = defineStore('bills', () => {
   function loadStatements(): Promise<Statement[]> {
     if (statementsTask) return statementsTask
     const gen = generation
-    statementsTask = api
+    const task: Promise<Statement[]> = api
       .get<Statement[]>('/api/statements')
       .then((rows) => {
         // 出账之后回来的旧列表里没有刚出的那一张，写进去会让 'current' 认错单子
@@ -130,9 +130,11 @@ export const useBills = defineStore('bills', () => {
         return rows
       })
       .finally(() => {
-        statementsTask = null
+        // 只清自己：出账时 invalidate 已经换上了新的一发，别把它置空
+        if (statementsTask === task) statementsTask = null
       })
-    return statementsTask
+    statementsTask = task
+    return task
   }
 
   async function fetchView(key: BillKey, slot: string, my: number, gen: number): Promise<void> {
@@ -254,6 +256,12 @@ export const useBills = defineStore('bills', () => {
    */
   function invalidate(): void {
     generation += 1          // 在路上的那几发就此作废，回来也不许写
+    // 在飞的请求也不许再被复用：出账时「已出账」那页的预热还在路上，
+    // 出完账 ensure('current') 会直接复用它 —— 它回来的是出账前的列表，
+    // 写入被 generation 挡掉，于是这一页停在「还没出过账单」
+    inflight.clear()
+    seq.clear()
+    statementsTask = null
     views.value = {}
     written.clear()          // 缓存都丢了，「谁写过它」的记录也跟着作废
     monthly.value = {}

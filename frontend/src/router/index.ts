@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import { getToken, setUnauthorizedHandler } from 'src/api/client'
+import { applyUpdateIfReady } from 'src/update'
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -66,4 +67,6 @@ router.afterEach(() => {
   } catch {
     /* ignore */
   }
+  // 有新版等着就趁这次切页换上（切页本来就丢当前页的状态，不额外丢东西）
+  applyUpdateIfReady()
 })

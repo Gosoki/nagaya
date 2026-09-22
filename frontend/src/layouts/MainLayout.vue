@@ -176,7 +176,13 @@ const online = useOnline()
 /** 屏幕上的数字靠不靠得住：断网，或者最近一次取数失败了 */
 const stale = computed(() => !online.value || Boolean(bills.lastError))
 function refetch() {
-  bills.reload(bills.tab === 'draft' ? 'draft' : 'current').catch(() => {})
+  // 重取**屏幕上正在显示的那一张**：翻着旧账单时原来刷的是最新那张 ——
+  // 细带消失了，屏幕上那张却还是断网前的数
+  if (bills.tab === 'draft') bills.reload('draft').catch(() => {})
+  else if (bills.detail !== null) {
+    bills.reload(`st:${bills.detail}`).catch(() => {})
+    bills.reload('current').catch(() => {})
+  } else bills.reload('current').catch(() => {})
   void meta.load().catch(() => {})
   void ledger.refresh().catch(() => {})
 }
@@ -377,6 +383,8 @@ watch(
 function onVisible() {
   if (document.visibilityState !== 'visible') return
   void meta.load().catch(() => {})
+  // 上次冷启动时没认出自己是谁（服务器那会儿没起来）：这次顺手再认一遍
+  if (!auth.me) void auth.restore()
   // 挂在后台的这段时间，室友可能记了账、出了账 —— 流水和账单原来从不重取，
   // 一直要到整页刷新才看得到
   void ledger.refresh().catch(() => {})

@@ -70,7 +70,21 @@ export function setUnauthorizedHandler(fn: () => void) {
   onUnauthorized = fn
 }
 
+/** 还在路上的写请求有几个。新版换页之前要等它们落地（见 src/update.ts） */
+let writing = 0
+export const pendingWrites = (): number => writing
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  if (method === 'GET') return send<T>(method, path, body)
+  writing += 1
+  try {
+    return await send<T>(method, path, body)
+  } finally {
+    writing -= 1
+  }
+}
+
+async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {}
   const token = getToken()
   if (token) headers.Authorization = `Bearer ${token}`

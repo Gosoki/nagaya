@@ -60,6 +60,10 @@ export default defineConfig({
               cacheName: 'nagaya-shell',
               networkTimeoutSeconds: 3,      // 服务器不在就别干等
               expiration: { maxEntries: 16 },
+              // 网络不通、这个地址也没在 nagaya-shell 里缓存过（刚装到主屏后的
+              // 第一次离线启动、或者头一回离线点进某个深链）：退回预缓存里
+              // **同一版**的壳，而不是一张浏览器的断网页。离线草稿那条路靠的就是能打开
+              precacheFallback: { fallbackURL: 'index.html' },
             },
           },
         ],

@@ -190,6 +190,8 @@ export interface EntryPayload {
   member_ids?: number[] | null
   rule?: Record<string, unknown> | null
   bundle_id?: number | null
+  /** 幂等键：离线草稿补交时带着同一个，后端认出来就不再记第二遍 */
+  client_key?: string
 }
 
 /** 备份现在什么情况。**全部现场探**，不是读一条存下来的结论 —— 存的那种会过期 */

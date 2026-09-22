@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import threading
 from typing import Sequence
 
 from fastapi import APIRouter, Depends, Query, status
@@ -9,7 +10,7 @@ from sqlmodel import Session, select
 from app.auth import current_member
 from app.db import get_session
 from app.errors import not_found
-from app.models import Category, Entry, EntryShare, Member, Statement
+from app.models import Category, Entry, EntryShare, Member, RequestKey, Statement
 from app.schemas import EntryIn, EntryOut, EntryPatch
 from app.services import ledger
 
@@ -103,13 +104,34 @@ def get_entry(
     return to_entry_out(session, entry)
 
 
+#: 「查幂等键 → 记账 → 写幂等键」必须是一步：两条带同一个键的请求并发进来
+#: （补交时网又抖了一下、前端重试）不能各记一笔。服务是单进程，进程锁就够
+_create_lock = threading.Lock()
+
+
 @router.post("", response_model=EntryOut, status_code=status.HTTP_201_CREATED)
 def create_entry(
     body: EntryIn,
     session: Session = Depends(get_session),
     member: Member = Depends(current_member),
 ):
-    entry = ledger.create_entry(
+    if body.client_key is None:
+        return to_entry_out(session, _create(session, body, member))
+    with _create_lock:
+        seen = session.get(RequestKey, body.client_key)
+        if seen is not None:
+            # 这笔早就记上了（多半是上次响应丢在路上）：原样还给它，不再记一遍
+            old = session.get(Entry, seen.entry_id)
+            if old is not None:
+                return to_entry_out(session, old)
+        entry = _create(session, body, member)
+        session.add(RequestKey(key=body.client_key, entry_id=entry.id))
+        session.commit()
+        return to_entry_out(session, entry)
+
+
+def _create(session: Session, body: EntryIn, member: Member) -> Entry:
+    return ledger.create_entry(
         session,
         actor_id=member.id,
         kind=body.kind,
@@ -125,7 +147,6 @@ def create_entry(
         note=body.note,
         bundle_id=body.bundle_id,
     )
-    return to_entry_out(session, entry)
 
 
 @router.patch("/{entry_id}", response_model=EntryOut)

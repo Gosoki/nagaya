@@ -11,25 +11,12 @@ import './css/skin.css'
 
 import App from './App.vue'
 import { installColorScheme } from './colorScheme'
+import { watchForUpdate } from './update'
 import { detectLang, i18n, quasarLang } from './i18n'
 import { router } from './router'
 
-/**
- * 新版 service worker 一接管就整页重载。
- *
- * SW 里写了 skipWaiting + clientsClaim，新版会立刻上岗 —— 但**已经打开的这一页
- * 仍然跑着旧 JS**，要等下一次导航才换。装到主屏之后尤其要命：从多任务里恢复
- * 不算一次导航，人可能连着好几天看的都是旧界面，改了什么都看不到。
- *
- * 首装那一次不重载：那时页面本来就是新的，刷一下纯属白闪。
- */
-const hadController = Boolean(navigator.serviceWorker?.controller)
-let reloading = false
-navigator.serviceWorker?.addEventListener('controllerchange', () => {
-  if (!hadController || reloading) return
-  reloading = true
-  location.reload()
-})
+// 新版 service worker 接管之后什么时候换页面：见 src/update.ts
+watchForUpdate()
 
 const app = createApp(App)
   // 不给 lang 的话所有弹框的按钮都是英文的 CANCEL / OK，

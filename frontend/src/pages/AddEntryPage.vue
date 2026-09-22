@@ -239,6 +239,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { ApiError, api } from 'src/api/client'
 import { jstDateOf, todayJst } from 'src/date'
+import { newClientKey } from 'src/clientKey'
 import { digitsOf } from 'src/digits'
 import { formatYen } from 'src/i18n'
 import { statementLabel } from 'src/statement'
@@ -248,6 +249,7 @@ import MemberPicker from 'src/components/MemberPicker.vue'
 import MemoPanel from 'src/components/MemoPanel.vue'
 import SplitEditor from 'src/components/SplitEditor.vue'
 import { KIND_PALETTE } from 'src/theme'
+import { useAuth } from 'src/stores/auth'
 import { useDrafts } from 'src/stores/drafts'
 import { useLedger } from 'src/stores/ledger'
 import { useMemos } from 'src/stores/memos'
@@ -261,6 +263,7 @@ const meta = useMeta()
 const ledger = useLedger()
 const memos = useMemos()
 const drafts = useDrafts()
+const auth = useAuth()
 
 /** 改一笔已有的账时，类型是那笔账自己的 —— 不能去动记新账那边存着的选择 */
 const editKind = ref<EntryKind>('expense')
@@ -588,6 +591,11 @@ async function saveEdit() {
     $q.notify({ type: 'positive', message: t('entry.saved'), timeout: 1200 })
     goBack()
   } catch (e) {
+    if (e instanceof ApiError && e.code === 'version_conflict') {
+      busy.value = false
+      void resolveConflict()
+      return
+    }
     $q.notify({
       type: 'negative',
       message: e instanceof ApiError ? e.text : String(e),
@@ -596,6 +604,50 @@ async function saveEdit() {
   } finally {
     busy.value = false
   }
+}
+
+/**
+ * 保存时撞上版本冲突：别人在我打开这一页之后改过这一笔（或者它被出账带走了）。
+ *
+ * 原来只说一句「请刷新后重试」，可这一页不会自己重取 —— 再按多少次都是同一个 409，
+ * 只能退出去重进，刚填的全没了。现在取回服务器上的最新版，把**别人改了什么**
+ * 摆出来，让人自己挑：用我这份覆盖（后写的算数），还是换成别人改完的样子
+ */
+async function resolveConflict() {
+  const id = editingId.value
+  if (id === null) return
+  let latest: Entry
+  try {
+    latest = await api.get<Entry>(`/api/entries/${id}`)
+  } catch (err) {
+    $q.notify({ type: 'negative', message: err instanceof ApiError ? err.text : String(err) })
+    return
+  }
+  const before = loaded.value
+  const changes: string[] = []
+  if (before) {
+    if (before.amount_jpy !== latest.amount_jpy) {
+      changes.push(`${t('entry.amountLabel')} ${formatYen(Math.abs(before.amount_jpy))} → ${formatYen(Math.abs(latest.amount_jpy))}`)
+    }
+    if (before.payer_id !== latest.payer_id) {
+      const name = (mid: number) => meta.byId[mid]?.display_name ?? String(mid)
+      changes.push(`${t('entry.payer')} ${name(before.payer_id)} → ${name(latest.payer_id)}`)
+    }
+    if (before.date !== latest.date) changes.push(`${t('entry.conflictDate')} ${before.date} → ${latest.date}`)
+  }
+  $q.dialog({
+    title: t('entry.conflictTitle'),
+    message: t('entry.conflictBody', { changes: changes.join('、') || t('entry.conflictOther') }),
+    cancel: true,
+    persistent: true,
+  })
+    .onOk(() => {
+      // 用我这份覆盖：只换版本号，屏幕上填的一个字不动，再存一次
+      version.value = latest.version
+      loaded.value = latest
+      void saveEdit()
+    })
+    .onCancel(() => void loadForEdit(id))
 }
 
 /**
@@ -717,6 +769,8 @@ async function save() {
       category_id: kind.value === 'expense' ? categoryId.value : null,
       title: title.value,
       rule: kind.value === 'settlement' ? null : rule.value,
+      // 响应丢在路上时这笔会转成离线草稿，补交带着同一个键 —— 后端认得出，不记第二遍
+      client_key: newClientKey(),
     }
     try {
       await ledger.create(payload)
@@ -726,7 +780,7 @@ async function save() {
       // 只有「连不上服务器」才转存草稿。金额方向错、账期已关这类是**服务器明确拒绝**，
       // 存成草稿只会让人以后反复补交同一笔失败的账（D15）
       if (e instanceof ApiError && e.code === 'network') {
-        drafts.add(payload)
+        drafts.add(payload, auth.me?.id ?? null)
         $q.notify({ type: 'warning', message: t('draft.savedOffline'), timeout: 2500 })
         reset()
       } else {

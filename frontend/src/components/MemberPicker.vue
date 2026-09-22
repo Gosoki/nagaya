@@ -10,6 +10,8 @@
       :class="{ on: modelValue === m.id }"
       :style="modelValue === m.id ? { background: m.color } : {}"
       :data-label="short(m.display_name)"
+      :aria-label="m.display_name"
+      :title="m.display_name"
       @click="emit('update:modelValue', m.id)"
     >
       <span class="label">{{ short(m.display_name) }}</span>
@@ -20,11 +22,23 @@
 <script setup lang="ts">
 import type { Member } from 'src/api/types'
 
-defineProps<{ modelValue: number | null; members: Member[] }>()
+const props = defineProps<{ modelValue: number | null; members: Member[] }>()
 const emit = defineEmits<{ 'update:modelValue': [number] }>()
 
-/** 名字短就整个显示。硬截两个字会把 Kan / Zen 变成「Ka」「Ze」，难看又难认 */
-const short = (name: string) => (name.length <= 4 ? name : name.slice(0, 3))
+/**
+ * 按钮上印几个字。名字短就整个显示（硬截两个字会把 Kan / Zen 变成「Ka」「Ze」）。
+ * 长的从 3 个字起截，**和别人撞了就再多给一个字** —— 原来一律截 3 个，
+ * 「Alexander / Alexandra」在「谁付的」里是两个一模一样的「Ale」
+ */
+function short(name: string): string {
+  if (name.length <= 4) return name
+  const others = props.members.map((m) => m.display_name).filter((n) => n !== name)
+  for (let n = 3; n < name.length; n++) {
+    const head = name.slice(0, n)
+    if (!others.some((o) => o.slice(0, n) === head)) return head
+  }
+  return name
+}
 </script>
 
 <style scoped>

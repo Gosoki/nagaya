@@ -3,15 +3,16 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, Depends
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from app.auth import current_member
 from app.core.rules import RuleError, expand
 from app.core.split import SplitError, split
 from app.db import get_session
 from app.errors import AppError, not_found
-from app.models import Category, Member
+from app.models import Category, Member, today_jst
 from app.schemas import SettingIn, SettingOut
+from app.services import ledger as ledger_svc
 from app.services import settings as settings_svc
 from app.services.backup import resolve_backup_path as backup_dir_for
 from app.settings_spec import SETTINGS_SPEC
@@ -55,7 +56,7 @@ def update_setting(
     key: str,
     body: SettingIn,
     session: Session = Depends(get_session),
-    _: Member = Depends(current_member),
+    me: Member = Depends(current_member),
 ):
     if key not in SETTINGS_SPEC:
         raise not_found("setting")
@@ -112,12 +113,25 @@ def update_setting(
         # 而是等到下一次「记一笔」时才 500 —— 那时人正在记账，也看不出跟设置有关
         if not isinstance(value, dict):
             raise _bad(key, "object")
+        # 全局兜底规则不可能是定额：定额要和每一笔的总额对得上，而它要套在任意金额上
+        if value.get("mode") == "exact":
+            raise AppError("bad_rule", f"{key} cannot be exact", key=key, why="exact")
         try:
-            ids = [m.id for m in session.exec(select(Member).order_by(Member.display_order))]
-            split(expand(value, ids), 1000, order=[str(i) for i in ids], payer=str(ids[0]) if ids else None)
+            # 拿**今天在籍的人**、几个不同的金额各试一次：只拿 1000 试一次的话，
+            # 整除的那几种情况把坏规则放了过去（比如余数规则写坏了，1000/2 人不报）
+            ids = [m.id for m in ledger_svc.active_members(session, today_jst())]
+            order = [str(i) for i in ids]
+            for amount in (1, 999, 1_001, 100_003):
+                split(expand(value, ids), amount, order=order, payer=order[0] if order else None)
         except (RuleError, SplitError) as e:
             raise AppError("bad_rule", f"{key} rule unusable: {e}", key=key, why=str(e)) from e
 
+    # 留痕：余数归谁、兜底规则、默认垫付人这些一改，之后每一笔都换一种分法。
+    # set_ 自己 commit，审计那一行跟着它一起进库
+    ledger_svc.audit_config(
+        session, me.id, "update", "setting", None,
+        {"key": key, "value": settings_svc.get(session, key)}, {"key": key, "value": value},
+    )
     settings_svc.set_(session, key, value)
     return SettingOut(
         key=key, value=value, type=spec["type"], hidden=bool(spec.get("hidden")),

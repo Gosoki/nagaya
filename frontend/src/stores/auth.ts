@@ -55,13 +55,16 @@ export const useAuth = defineStore('auth', () => {
       cacheMe(me.value)
       setLang(me.value.lang)
     } catch (e) {
-      if (e instanceof ApiError && e.code === 'network') {
-        me.value = cachedMe()          // 只是没连上 —— 先用上次认识的那个人
-        if (me.value) setLang(me.value.lang)
-      } else {
+      if (e instanceof ApiError && e.status === 401) {
         // 401：client.ts 已经清了 token 并把人踢回登录页，这里跟着清干净
         me.value = null
         cacheMe(null)
+      } else {
+        // 没连上、或者服务器那边 5xx（重启中、反代 502）—— token 没说不行，
+        // 先用上次认识的那个人。原来除了断网一律当 token 失效，身份被清掉，
+        // 「确认已完成」和个人设置凭空消失，要整页刷新才回来
+        me.value = cachedMe()
+        if (me.value) setLang(me.value.lang)
       }
     } finally {
       ready.value = true

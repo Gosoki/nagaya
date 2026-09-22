@@ -8,7 +8,10 @@
   进来之后立刻把地址收回 /bill，免得地址栏和屏幕上说的不是一回事。
 -->
 <template>
-  <q-page v-touch-swipe.capture.mouse.mouseCapture.horizontal="onSwipe" class="page">
+  <!-- 横滑翻页**不走捕获阶段**：原来带着 .capture，最外层先把手势抢走，
+       固定费展开区里的比例轮子（点亮之后左右拨）一拨就翻到了「已出账」。
+       现在点亮的轮子在自己身上把 touchstart 截下（SplitEditor），别处照样能翻 -->
+  <q-page v-touch-swipe.mouse.horizontal="onSwipe" class="page">
     <BillView :view-key="shown" />
   </q-page>
 </template>

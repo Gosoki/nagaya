@@ -5,12 +5,14 @@
 
 from __future__ import annotations
 
+import json
+
 import datetime as dt
 from typing import Any, Iterable, Sequence
 
-from sqlalchemy import func
+from sqlalchemy import func, union_all
 from sqlalchemy import update as sa_update
-from sqlmodel import Session, select
+from sqlmodel import Session, SQLModel, select
 
 from app.core.rules import expand, mkey, participants, pick_rule
 from app.core.split import split
@@ -262,25 +264,26 @@ def balances(session: Session) -> dict[int, int]:
     正数＝别人欠我，负数＝我欠别人。全体之和恒等于 0 —— 这是最强的自检。
     软删的账不算。
     """
-    paid: dict[int, int] = {
-        row[0]: int(row[1] or 0)
-        for row in session.exec(
-            select(Entry.payer_id, func.sum(Entry.amount_jpy))
-            .where(Entry.deleted_at.is_(None))
-            .group_by(Entry.payer_id)
-        )
-    }
-    owed: dict[int, int] = {
-        row[0]: int(row[1] or 0)
-        for row in session.exec(
-            select(EntryShare.member_id, func.sum(EntryShare.amount_jpy))
-            .join(Entry, Entry.id == EntryShare.entry_id)
-            .where(Entry.deleted_at.is_(None))
-            .group_by(EntryShare.member_id)
+    # **垫付和应担在同一条 SQL 里数完**（和 bill._opening 同一个写法）。分成两条
+    # SELECT 的话它们不在同一个快照上：别人正好在两条之间记了一笔，这边数到了
+    # 他垫的钱、没数到他应担的份，算出一本不平的账 —— 已出账那页的实时方案
+    # （plan_simplified）会当场抛 unbalanced，GET 直接 500
+    deltas = union_all(
+        select(Entry.payer_id.label("mid"), Entry.amount_jpy.label("delta")).where(
+            Entry.deleted_at.is_(None)
+        ),
+        select(EntryShare.member_id.label("mid"), (-EntryShare.amount_jpy).label("delta"))
+        .join(Entry, Entry.id == EntryShare.entry_id)
+        .where(Entry.deleted_at.is_(None)),
+    ).subquery()
+    net: dict[int, int] = {
+        mid: int(total or 0)
+        for mid, total in session.exec(
+            select(deltas.c.mid, func.sum(deltas.c.delta)).group_by(deltas.c.mid)
         )
     }
     member_ids = [m.id for m in session.exec(select(Member).order_by(Member.display_order, Member.id))]
-    return {m: paid.get(m, 0) - owed.get(m, 0) for m in member_ids}
+    return {m: net.get(m, 0) for m in member_ids}
 
 
 # ------------------------------------------------------------------ 留痕
@@ -313,6 +316,36 @@ def _audit(
             after_json=after,
         )
     )
+
+
+def audit_config(
+    session: Session,
+    actor_id: int | None,
+    action: str,
+    table: str,
+    target_id: int | None,
+    before: SQLModel | dict[str, Any] | None,
+    after: SQLModel | dict[str, Any] | None,
+    *,
+    drop: tuple[str, ...] = (),
+) -> None:
+    """成员、分类、设置这类**会影响分钱的配置**也留痕（不 commit，跟着调用方的那次）。
+
+    原来审计只盖 entry：谁把房租的默认分摊改了、谁把某人的搬出日往前挪了一个月、
+    谁把「余数归谁」换了 —— 这些都会让之后的每一笔账换一种分法，却查不到是谁动的。
+    `drop` 里的字段不进日志（密码哈希、头像这种）。
+    """
+
+    def plain(x: SQLModel | dict[str, Any] | None) -> dict[str, Any] | None:
+        if x is None:
+            return None
+        # 先排除再序列化：头像是二进制，交给 JSON 序列化会直接抛错
+        data = json.loads(x.model_dump_json(exclude=set(drop))) if isinstance(x, SQLModel) else dict(x)
+        for key in drop:
+            data.pop(key, None)
+        return data
+
+    _audit(session, actor_id, action, table, target_id, plain(before), plain(after))
 
 
 # ------------------------------------------------------------------ 改 / 删

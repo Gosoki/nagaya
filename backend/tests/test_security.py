@@ -91,3 +91,28 @@ def test_display_order_is_bounded(client: TestClient, auth) -> None:
     """2^63-1 的排序号会让之后「新建」溢出，翻成一个误导人的 404。"""
     r = client.post("/api/memos", json={"title": "x", "display_order": 2**63 - 1}, headers=auth)
     assert r.status_code == 422
+
+
+def test_config_changes_are_audited(client: TestClient, auth, members, session) -> None:
+    """成员、分类、设置的改动也留痕（审计 integrity-6）；密码哈希和头像不进日志。"""
+    from sqlmodel import select
+
+    from app.models import AuditLog
+
+    a = members[0]
+    client.patch(f"/api/members/{members[1].id}", json={"display_name": "B2"}, headers=auth)
+    r = client.post("/api/categories", json={"name": "网费", "monthly": True}, headers=auth)
+    client.patch(f"/api/categories/{r.json()['id']}", json={"same_as_last": True}, headers=auth)
+    client.put("/api/settings/remainder_to", json={"value": "order"}, headers=auth)
+    # 改密码放最后：一改旧 token 就作废了
+    client.patch(f"/api/members/{a.id}", json={"password": "newpass1", "old_password": "pw123456"}, headers=auth)
+
+    logs = list(session.exec(select(AuditLog).where(AuditLog.target_table != "entry")))
+    tables = [(x.target_table, x.action) for x in logs]
+    assert ("member", "update") in tables
+    assert ("member", "password") in tables
+    assert ("category", "create") in tables and ("category", "update") in tables
+    assert ("setting", "update") in tables
+    for x in logs:
+        blob = str(x.before_json) + str(x.after_json)
+        assert "password_hash" not in blob and "avatar'" not in blob

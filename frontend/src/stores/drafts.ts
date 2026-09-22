@@ -12,6 +12,7 @@ import { computed, ref } from 'vue'
 
 import { ApiError } from 'src/api/client'
 import type { EntryPayload } from 'src/api/types'
+import { useAuth } from 'src/stores/auth'
 import { useLedger } from 'src/stores/ledger'
 
 const KEY = 'nagaya.drafts'
@@ -20,6 +21,12 @@ export interface Draft {
   id: string
   savedAt: string
   payload: EntryPayload
+  /**
+   * 谁存的。**草稿按人隔离**：退出登录不清草稿（里面是真填过的钱），
+   * 但下一个登录这台设备的人不该看见、补交或丢弃上一位的。
+   * 老版本存的没有这个字段 —— 那几条谁登录都给看，和原来一样
+   */
+  memberId?: number | null
 }
 
 function read(): Draft[] {
@@ -40,13 +47,23 @@ function write(list: Draft[]) {
 }
 
 export const useDrafts = defineStore('drafts', () => {
+  const auth = useAuth()
   const items = ref<Draft[]>(read())
-  const count = computed(() => items.value.length)
+  /** 当前登录的这个人的草稿（加上没记名的老草稿） */
+  const mine = computed(() =>
+    items.value.filter((d) => d.memberId === undefined || d.memberId === (auth.me?.id ?? null)),
+  )
+  const count = computed(() => mine.value.length)
 
-  function add(payload: EntryPayload) {
+  function add(payload: EntryPayload, memberId: number | null) {
     items.value = [
       ...items.value,
-      { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, savedAt: new Date().toISOString(), payload },
+      {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        savedAt: new Date().toISOString(),
+        payload,
+        memberId,
+      },
     ]
     write(items.value)
   }
@@ -56,8 +73,10 @@ export const useDrafts = defineStore('drafts', () => {
     write(items.value)
   }
 
+  /** 丢弃**自己的**草稿。别人的留着不动 */
   function clear() {
-    items.value = []
+    const drop = new Set(mine.value.map((d) => d.id))
+    items.value = items.value.filter((d) => !drop.has(d.id))
     write(items.value)
   }
 
@@ -77,7 +96,9 @@ export const useDrafts = defineStore('drafts', () => {
     let ok = 0
     let offline = 0
     const rejected: string[] = []
-    for (const draft of [...items.value]) {
+    for (const draft of [...mine.value]) {
+      // 补交进行中被丢弃了（点了「丢弃」、或者别的入口清过）：不许再交出去
+      if (!items.value.some((d) => d.id === draft.id)) continue
       try {
         // 走 ledger.create 而不是自己打接口：**「写完要刷哪几份缓存」只该有一处定义**。
         // 自己打的话账单缓存一份都不刷，而这个横幅在 /bill 上也挂着 ——
@@ -93,5 +114,5 @@ export const useDrafts = defineStore('drafts', () => {
     return { ok, offline, rejected }
   }
 
-  return { items, count, add, remove, clear, submitAll }
+  return { items, mine, count, add, remove, clear, submitAll }
 })

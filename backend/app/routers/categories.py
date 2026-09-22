@@ -10,6 +10,7 @@ from app.db import get_session
 from app.errors import AppError, not_found, reject_nulls
 from app.models import Category, Member
 from app.schemas import CategoryIn, CategoryOut
+from app.services import ledger
 
 router = APIRouter(prefix="/api/categories", tags=["categories"])
 
@@ -65,7 +66,7 @@ def list_categories(
 def create_category(
     body: CategoryIn,
     session: Session = Depends(get_session),
-    _: Member = Depends(current_member),
+    me: Member = Depends(current_member),
 ):
     # strip 之后再判空：三个空格原来是收的，库里就多一个看不见名字的分类
     body.name = (body.name or "").strip() or None
@@ -74,6 +75,8 @@ def create_category(
     _check(session, body)
     row = Category(**body.model_dump(exclude_none=True))
     session.add(row)
+    session.flush()
+    ledger.audit_config(session, me.id, "create", "category", row.id, None, row)
     session.commit()
     session.refresh(row)
     return row
@@ -84,7 +87,7 @@ def update_category(
     category_id: int,
     body: CategoryIn,
     session: Session = Depends(get_session),
-    _: Member = Depends(current_member),
+    me: Member = Depends(current_member),
 ):
     row = session.get(Category, category_id)
     if row is None:
@@ -99,9 +102,11 @@ def update_category(
     data = body.model_dump(exclude_unset=True)
     reject_nulls(data, ("name", "icon", "color", "monthly", "display_order",
                         "archived", "same_as_last", "note"))
+    before = row.model_copy()
     for key, value in data.items():
         setattr(row, key, value)
     session.add(row)
+    ledger.audit_config(session, me.id, "update", "category", row.id, before, row)
     session.commit()
     session.refresh(row)
     return row

@@ -373,7 +373,7 @@
           no-caps
           icon="content_copy"
           :label="t('bill.copy')"
-          @click="copyBill"
+          @click="copyBill()"
         />
         <q-btn
           v-if="bill.is_draft"
@@ -422,7 +422,7 @@
              那两行转账方案就此消失，得自己滚到页底再找一次「复制账单」 -->
         <q-card-actions align="right">
           <q-btn v-close-popup flat no-caps color="grey-7" :label="t('common.confirm')" />
-          <q-btn unelevated no-caps color="primary" :label="t('bill.copy')" @click="copyBill" />
+          <q-btn unelevated no-caps color="primary" :label="t('bill.copy')" @click="copyBill(cutResult)" />
         </q-card-actions>
       </q-card>
     </q-dialog>
@@ -432,7 +432,7 @@
       <q-card style="width: 92vw">
         <q-card-section class="text-caption text-grey-7">{{ t('bill.copyFallback') }}</q-card-section>
         <q-card-section>
-          <pre class="bill-text">{{ billText }}</pre>
+          <pre class="bill-text">{{ fallbackText }}</pre>
         </q-card-section>
       </q-card>
     </q-dialog>
@@ -488,6 +488,8 @@ const bill = computed(() => view.value?.bill ?? null)
 const draftEntries = computed(() => view.value?.entries ?? [])
 const busy = ref<number | null>(null)
 const showFallback = ref(false)
+/** 手动复制那个框里摆的字：刚才要复制的那一张，不一定是屏幕上这张 */
+const fallbackText = ref('')
 const cutResult = ref<Bill | null>(null)
 
 const nameOf = (id: number) => meta.byId[id]?.display_name ?? String(id)
@@ -514,10 +516,13 @@ function leftOf(tr: BillTransfer, i: number): number {
 
 /** 卡片上那行小字：转了多少、还差多少、或者「已经不用转了」 */
 function noteOf(tr: BillTransfer, i: number): string {
-  const b = bill.value
-  if (!b || b.settled_transfers[i]) return ''
+  return bill.value ? noteFor(bill.value, tr, i) : ''
+}
+/** 同上，但指名是哪一张 —— 出账完成那个弹窗复制的是**新出的那张**，不是屏幕上这张 */
+function noteFor(b: Bill, tr: BillTransfer, i: number): string {
+  if (b.settled_transfers[i]) return ''
   const paid = b.settled_paid?.[i] ?? 0
-  const left = leftOf(tr, i)
+  const left = leftOfPlan(b, tr, i)
   if (left === 0) return t('bill.planPairDone')
   if (paid > 0) return t('bill.planProgress', { paid: formatYen(paid), left: formatYen(left) })
   if (left !== tr.amount) return t('bill.planLeft', { left: formatYen(left) })
@@ -531,11 +536,9 @@ const noteClassOf = (tr: BillTransfer, i: number) =>
  * 或者后来的账把债权重新净额化了。这时候得说一句，否则那张永远挂着「未结清」
  * 而没人知道为什么。
  */
-const superseded = computed(() => {
-  const b = bill.value
-  if (!b || b.is_draft) return false
-  return b.transfers.some((tr, i) => !b.settled_transfers[i] && leftOf(tr, i) === 0)
-})
+const supersededIn = (b: Bill) =>
+  !b.is_draft && b.transfers.some((tr, i) => !b.settled_transfers[i] && leftOfPlan(b, tr, i) === 0)
+const superseded = computed(() => (bill.value ? supersededIn(bill.value) : false))
 
 /**
  * 方案被接手时那句话。**得带上「那我现在到底欠多少」** ——
@@ -595,11 +598,24 @@ const mineText = computed(() => {
     })
   }
 
-  // 方案里没有我这条边：只说这张单子上我是什么状态
-  if (row.closing === 0) return t('bill.youSettled')
-  if (row.closing > 0) return t('bill.youReceive', { amount: formatYen(row.closing) })
-  return t('bill.youOwe', { amount: formatYen(Math.abs(row.closing)) })
+  // 方案里没有我这条边：只说这张单子上我是什么状态（按此刻，见 effClosing）
+  const eff = effClosing(b, row)
+  if (eff === 0) return t('bill.youSettled')
+  if (eff > 0) return t('bill.youReceive', { amount: formatYen(eff) })
+  return t('bill.youOwe', { amount: formatYen(Math.abs(eff)) })
 })
+
+/**
+ * 方案里没有我这条边时，我在这张单子上**此刻**还差多少。和 leftOf 同一个「两头取小」：
+ *   * 不超过这张单子自己的数 —— 翻七月那张，不该跳出今天的欠款；
+ *   * 此刻已经两清（或者方向反过来了）就是 0 —— 原来直接印这张单子的 closing，
+ *     钱早就转过了，大字还写着「你应付 ¥X」
+ */
+function effClosing(b: Bill, row: { member_id: number; closing: number }): number {
+  const live = Number(b.live_closing?.[String(row.member_id)] ?? row.closing)
+  if (Math.sign(live) !== Math.sign(row.closing)) return 0
+  return Math.sign(row.closing) * Math.min(Math.abs(row.closing), Math.abs(live))
+}
 
 /**
  * 最显眼那行字，拆成「标签 + 数字」两段。
@@ -649,11 +665,12 @@ const minePart = computed<MinePart>(() => {
     return settled
   }
   if (!b.transfers.some((tr) => tr.from_id === me || tr.to_id === me)) {
-    if (row.closing === 0) return settled
+    const eff = effClosing(b, row)
+    if (eff === 0) return settled
     return {
-      label: row.closing > 0 ? t('bill.youReceiveLabel') : t('bill.youOweLabel'),
-      figure: formatYen(Math.abs(row.closing)),
-      tone: row.closing > 0 ? 'owed' : 'owe',
+      label: eff > 0 ? t('bill.youReceiveLabel') : t('bill.youOweLabel'),
+      figure: formatYen(Math.abs(eff)),
+      tone: eff > 0 ? 'owed' : 'owe',
     }
   }
   // 要转给好几个人：**得全列出来**（原来只取第一条、却把欠款总额安在那个人头上）。
@@ -746,10 +763,13 @@ onMounted(() => {
 })
 watch(viewKey, () => bills.ensure(viewKey.value).catch(() => {}))
 
-/** 贴进 LINE 的纯文本。在前端拼，所以自动跟随界面语言（SPEC §7.5）。 */
-const billText = computed(() => {
-  const b = bill.value
-  if (!b) return ''
+/**
+ * 贴进 LINE 的纯文本。在前端拼，所以自动跟随界面语言（SPEC §7.5）。
+ * **指名是哪一张**：出账完成那个弹窗里的「复制」要的是刚出的那张（cutResult），
+ * 而屏幕上这时正在重取 —— 原来复制的是屏幕上的视图，取数那几百毫秒里是空串，
+ * 还照样提示「已复制」
+ */
+function textOf(b: Bill): string {
   const lines: string[] = []
   const head = b.is_draft ? t('bill.draft') : statementLabel(b)
   lines.push(`【${head}】 ${t('bill.total')} ${formatYen(b.total_expense)}`)
@@ -789,19 +809,25 @@ const billText = computed(() => {
       // **进度得跟着一起贴出去。** 这份文本才是「群里那份」，而屏幕上有绿勾、
       // 它没有 —— 于是已经还清的人在群里看到自己名下白纸黑字还欠着，再转一次
       const done = b.settled_transfers[i]
-      const note = done ? `  ${t('bill.planDone')}` : noteOf(tr, i) ? `  ${noteOf(tr, i)}` : ''
+      const n = noteFor(b, tr, i)
+      const note = done ? `  ${t('bill.planDone')}` : n ? `  ${n}` : ''
       lines.push(`  ${nameOf(tr.from_id)} → ${nameOf(tr.to_id)}  ${formatYen(tr.amount)}${note}`)
     }
   } else {
     lines.push(t('bill.planEmpty'))
   }
-  if (superseded.value) lines.push(t('bill.planSuperseded'))
+  if (supersededIn(b)) lines.push(t('bill.planSuperseded'))
   return lines.join('\n')
-})
+}
+const billText = computed(() => (bill.value ? textOf(bill.value) : ''))
 
-async function copyBill() {
+/** 复制某一张。不给就是屏幕上这张；文字是空的（还在取数）就什么都不做，不报「已复制」 */
+async function copyBill(of?: Bill | null) {
+  const text = of ? textOf(of) : billText.value
+  if (!text) return
+  fallbackText.value = text
   try {
-    await navigator.clipboard.writeText(billText.value)
+    await navigator.clipboard.writeText(text)
     $q.notify({ type: 'positive', message: t('bill.copied'), timeout: 1500 })
     cutResult.value = null       // 出账完成那个弹窗：复制完它的事就办完了
 

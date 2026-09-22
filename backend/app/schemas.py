@@ -119,6 +119,8 @@ class EntryIn(SQLModel):
     member_ids: Optional[list[int]] = None
     rule: Optional[dict[str, Any]] = None
     bundle_id: Optional[int] = None
+    #: 幂等键（见 models.RequestKey）。同一个键只记一次，不落在 entry 上
+    client_key: Optional[str] = Field(default=None, min_length=8, max_length=64)
 
     _amount_not_bool = field_validator("amount_jpy", mode="before")(_no_bool_amount)
 

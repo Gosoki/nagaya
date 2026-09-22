@@ -79,7 +79,12 @@
           @focus="arm(m.id)"
           @keydown.left.prevent="step(m.id, -1)"
           @keydown.right.prevent="step(m.id, 1)"
+          @keydown.down.prevent="step(m.id, -1)"
+          @keydown.up.prevent="step(m.id, 1)"
+          @keydown.home.prevent="step(m.id, -WEIGHT_CHOICES.length)"
+          @keydown.end.prevent="step(m.id, WEIGHT_CHOICES.length)"
           @scroll="onRoll(m.id, $event)"
+          @touchstart="armed === m.id && $event.stopPropagation()"
         >
           <button
             v-for="n in WEIGHT_CHOICES"
@@ -119,6 +124,7 @@
           <input
             class="num-input"
             :class="{ neg: adjNeg(m.id) }"
+            :aria-label="`${m.display_name} ${t('split.adjustment')}`"
             type="text"
             inputmode="numeric"
             placeholder="0"
@@ -719,9 +725,10 @@ defineExpose({
   padding: 0 36px;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
-  /* **只接管横向手势**。不写的话手指在这一格上竖着划，页面不动，
-     人会以为卡住了 —— 而这一格正好在屏幕中间，最容易被当成滚动区 */
-  touch-action: pan-x;
+  /* **横向归轮子、竖向归页面**，只去掉双击放大和捏合。原来写的是 pan-x ——
+     那等于「竖着划在这儿不算数」：手指落在这一格上往上推，页面一动不动，
+     而这一格正好在屏幕中间，最容易被当成滚动区（注释原来写反了） */
+  touch-action: pan-x pan-y;
   /* 没激活时只露中间那一格 —— 看上去就是个安静的数字，不像个能滑的条 */
   -webkit-mask-image: linear-gradient(to right, transparent 33%, #000 33%, #000 67%, transparent 67%);
   mask-image: linear-gradient(to right, transparent 33%, #000 33%, #000 67%, transparent 67%);

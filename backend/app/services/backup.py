@@ -96,7 +96,12 @@ def _source_bytes(session: Session) -> int:
 # ---------------------------------------------------------------- 预检
 
 def _prepare_dir(session: Session) -> Path:
-    directory = backup_dir(session)
+    try:
+        # 解析也放进来：库里要是已经存了坏路径（NUL 之类，老版本没拦），
+        # resolve() 抛的是 ValueError —— 不接住的话设置页的备份状态直接 500
+        directory = backup_dir(session)
+    except (OSError, ValueError) as e:
+        raise BackupError("backup_dir_missing", f"备份目录用不了（{e}）", path="", parent="") from e
     try:
         existed = directory.is_dir()
         # **只建最后一级**（parents=False）。填成 /Volumes/移动盘/backups 而盘没插时，
@@ -341,11 +346,18 @@ def _newest(directory: Path) -> Path | None:
     files = sorted(p for p in directory.iterdir() if NAME_RE.match(p.name))
     return files[-1] if files else None
 
+def _safe_path(session: Session) -> str:
+    try:
+        return str(backup_dir(session))
+    except (OSError, ValueError):
+        return str(settings_svc.get(session, "backup_path") or "")
+
+
 def status(session: Session) -> dict[str, Any]:
     """现在这一刻备份能不能做、上一份是什么时候 —— 全部现场探，不读存下来的结论。"""
     every = int(settings_svc.get(session, "backup_every_hours") or 0)
     out: dict[str, Any] = {
-        "path": str(backup_dir(session)),
+        "path": _safe_path(session),
         "error": None, "last_at": None, "last_name": None, "last_bytes": None,
         "count": 0, "keep": int(settings_svc.get(session, "backup_keep") or 0),
         "last_ok": None, "age_hours": None,
@@ -389,7 +401,9 @@ def status(session: Session) -> dict[str, Any]:
         # 取 min(名字时间, mtime)：mtime 会被 rsync / 同步盘改成 now，
         # 纯用它会让老备份看起来很新（漏备）；取 min 只可能让备份显得更老，
         # 方向上永远安全 —— 顶多多备一份。
-        mtime = dt.datetime.fromtimestamp(newest.stat().st_mtime)
+        # mtime 按**日本时间**解读，和文件名、now 同一个口径。不带时区的 fromtimestamp
+        # 用的是服务器本地时区 —— 部署在 UTC 的容器里，每份备份都显得比实际老 9 小时
+        mtime = dt.datetime.fromtimestamp(newest.stat().st_mtime, JST).replace(tzinfo=None)
         age = (dt.datetime.now(JST).replace(tzinfo=None) - min(at, mtime)).total_seconds() / 3600
         out["age_hours"] = age
         out["stale"] = age > (every or 24) * 2
@@ -410,7 +424,11 @@ def run_if_due(session: Session) -> dict[str, Any] | None:
         return None
     st = status(session)
     # 用 status 算好的 age_hours，别再各算各的 —— 两处口径一分叉，
-    # 「面板说没问题、备份其实停了」这种事就又回来了
-    if st["error"] is None and st["age_hours"] is not None and st["age_hours"] < every:
+    # 「面板说没问题、备份其实停了」这种事就又回来了。
+    # 时钟偏差只是一句提醒，不是「备份坏了」：age_hours 已经按 min(名字, mtime)
+    # 取了安全的那一头，照它判到没到期就行。原来当成出错，每小时备一份，
+    # 30 份保留只盖得住 30 个小时
+    healthy = st["error"] in (None, "backup_clock_skew")
+    if healthy and st["age_hours"] is not None and st["age_hours"] < every:
         return None
     return run(session)

@@ -189,6 +189,24 @@ class Category(SQLModel, table=True):
     )
 
 
+class RequestKey(SQLModel, table=True):
+    """「记一笔」的幂等键：前端每次记账带一个随机串，同一个串只记一次。
+
+    离线草稿的毛病在这儿：请求其实已经到了后端、账也记上了，只是响应在回程丢了
+    （电梯里、地铁换乘）—— 前端只看到「连不上」，把这笔存成草稿，补交时再记一遍，
+    账本里就是两笔一模一样的钱。补交时带着同一个键，后端认出来直接还给它原来那笔。
+
+    **新表，不给已有的表加列**：create_all 建得出新表（D18 之前的约定只管加列），
+    老备份里没有这张表也照样恢复得回来（restore 对缺表只提示）。
+    """
+
+    __tablename__ = "request_key"
+
+    key: str = Field(primary_key=True, max_length=64)
+    entry_id: int = Field(foreign_key="entry.id")
+    created_at: dt.datetime = Field(default_factory=now_utc)
+
+
 class AppIcon(SQLModel, table=True):
     """这屋自己的 App 图标（主屏那个、页签那个小的）。只有一行，id 恒为 1。
 

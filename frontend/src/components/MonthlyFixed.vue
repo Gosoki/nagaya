@@ -84,6 +84,7 @@
             <input
               class="amount-input"
               :class="{ dirty: row.dirty, 'to-delete': willDelete(row) }"
+              :aria-label="row.name"
               type="text"
               inputmode="numeric"
               placeholder="0"
@@ -110,7 +111,7 @@
           </div>
           <SplitEditor
             :amount="valueOf(row)"
-            :members="meta.activeMembersSelfFirst"
+            :members="rowMembers.get(row.category_id) ?? meta.activeMembersSelfFirst"
             :payer-id="payerOf(row)"
             :entry-id="row.entry_id"
             :seed-rule="row.rule"
@@ -139,7 +140,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 
 import { ApiError, api } from 'src/api/client'
-import type { Category, MonthlyData, MonthlyRow } from 'src/api/types'
+import type { Category, Member, MonthlyData, MonthlyRow } from 'src/api/types'
 import MemberPicker from 'src/components/MemberPicker.vue'
 import SplitEditor from 'src/components/SplitEditor.vue'
 import { todayJst } from 'src/date'
@@ -184,6 +185,26 @@ const router = useRouter()
 
 const data = ref<MonthlyData | null>(null)
 const rows = ref<Row[]>([])
+
+/**
+ * 每一行分摊给谁。**已录的那一笔按它自己的参与人**（规则里点了名的那几个人），
+ * 没录的按今天在籍的人 —— 和记一笔那屏改旧账时同一个写法（AddEntryPage.splitMembers）。
+ * 原来一律用今天在籍的人：有人月中搬走之后回来改一下这期的电费，
+ * 一碰分摊就把他从这笔里剔掉了，而他明明住到了月底
+ */
+const rowMembers = computed(() => {
+  const out = new Map<number, Member[]>()
+  for (const r of rows.value) {
+    if (r.entry_id === null || !r.rule) continue
+    const named = (r.rule.exact ?? r.rule.weights) as Record<string, unknown> | undefined
+    const list = Object.keys(named ?? {})
+      .map((k) => meta.byId[Number(k)])
+      .filter((m): m is Member => Boolean(m))
+      .sort((a, b) => a.display_order - b.display_order || a.id - b.id)
+    if (list.length) out.set(r.category_id, list)
+  }
+  return out
+})
 const busy = ref(false)
 
 /** 没给这一项定过、也没有全局设置时的兜底（全局那位得今天还住在这儿） */
@@ -492,7 +513,11 @@ async function saveRow(row: Row) {
         {
           amount_jpy: value,
           ...(row.rule_override
-            ? { rule: row.rule_override, member_ids: meta.activeMembers.map((m) => m.id) }
+            ? {
+                rule: row.rule_override,
+                // 和预览同一批人：这一笔**自己的**参与人，不是今天在籍的人
+                member_ids: (rowMembers.value.get(row.category_id) ?? meta.activeMembers).map((m) => m.id),
+              }
             : {}),
         },
       )
