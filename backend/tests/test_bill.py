@@ -15,7 +15,13 @@ from sqlmodel import Session, select
 
 from app.models import Category, EntryKind, Statement, jst_date, now_utc
 from app.services import settings as settings_svc
-from app.services.bill import BillError, build_bill, cut_statement, entries_of
+from app.services.bill import (
+    BillError,
+    build_bill,
+    build_total_expense,
+    cut_statement,
+    entries_of,
+)
 from app.services.ledger import balances, create_entry, update_entry
 
 SEP = dt.date(2026, 9, 10)
@@ -531,3 +537,36 @@ def test_unrelated_transfers_do_not_settle_a_bill(session: Session, members) -> 
     create_entry(session, actor_id=a.id, kind=EntryKind.settlement, on=OCT,
                  amount=999_999, payer_id=t["from_id"], to_member_id=other)
     assert build_bill(session, s1)["settled"] is False
+
+
+def test_the_list_endpoint_agrees_with_the_per_bill_one(session: Session, members) -> None:
+    """列表页那两个数是批量算的，必须和逐张算出来的**一模一样**。
+
+    批量是为了性能（逐张调 60 张就是 120 次查询，而这个接口每次打开账单页都调，
+    实测 5 年规模要 51ms）—— 但快不能换来对不上。
+    """
+    from app.services.bill import list_settled, list_totals, settlement_progress
+
+    a, b, _ = members
+    cat = Category(name="日用品", monthly=False)
+    session.add(cat)
+    session.commit()
+    session.refresh(cat)
+
+    sts = []
+    for i, day in enumerate((SEP, OCT)):
+        create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=day,
+                     amount=30_000 + i, payer_id=a.id, category_id=cat.id)
+        sts.append(cut_statement(session, actor_id=a.id))
+    # 把第一张的方案转掉一部分，让两张的结清状态不一样
+    plan = (sts[0].snapshot_json or {})["transfers"]
+    create_entry(session, actor_id=a.id, kind=EntryKind.settlement, on=OCT,
+                 amount=plan[0]["amount"], payer_id=plan[0]["from_id"], to_member_id=plan[0]["to_id"])
+
+    totals = list_totals(session)
+    settled = list_settled(session, sts)
+    for st in sts:
+        assert totals.get(st.id, 0) == build_total_expense(session, st), st.id
+        assert settled[st.id] == settlement_progress(session, st)["settled"], st.id
+    # 至少有一张没结清，否则这条用例等于什么都没验
+    assert not all(settled.values())

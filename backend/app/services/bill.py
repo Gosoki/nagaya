@@ -347,6 +347,61 @@ def _edited_after_cut(
     }
 
 
+def list_totals(session: Session) -> dict[int, int]:
+    """每张账单的支出合计，一次查完。
+
+    列表页每一行都要这个数。原来是逐张调 build_total_expense，60 张就是 60 次
+    全表扫 —— 实测 5 年规模下 /api/statements 要 51ms，而它是**每次打开账单页
+    都调**的那个接口。
+    """
+    rows = session.exec(
+        select(Entry.statement_id, func.sum(Entry.amount_jpy))
+        .where(
+            Entry.deleted_at.is_(None),
+            Entry.statement_id.is_not(None),
+            Entry.kind == EntryKind.expense,
+        )
+        .group_by(Entry.statement_id)
+    )
+    return {sid: int(total or 0) for sid, total in rows}
+
+
+def list_settled(session: Session, statements: list[Statement]) -> dict[int, bool]:
+    """每张账单结清了没有，一次查完。
+
+    判据和 settlement_progress 一模一样（按这张的方案，该给的钱后来给够了没有），
+    只是把「每张各查一次转账」换成「转账只查一次，在内存里按张分」——
+    转账本来就没几笔，而账单会一直变多。
+    """
+    if not statements:
+        return {}
+    rows = list(
+        session.exec(
+            select(Entry).where(
+                Entry.kind == EntryKind.settlement,
+                Entry.deleted_at.is_(None),
+                Entry.to_member_id.is_not(None),
+            )
+        )
+    )
+    out: dict[int, bool] = {}
+    for st in statements:
+        plan = (st.snapshot_json or {}).get("transfers") or []
+        if not plan:
+            out[st.id] = True
+            continue
+        pairs = {(t["from_id"], t["to_id"]) for t in plan}
+        paid: dict[tuple[int, int], int] = {}
+        for e in rows:
+            if e.created_at <= st.cut_at:
+                continue
+            key = (e.payer_id, e.to_member_id)
+            if key in pairs:
+                paid[key] = paid.get(key, 0) + e.amount_jpy
+        out[st.id] = all(paid.get((t["from_id"], t["to_id"]), 0) >= t["amount"] for t in plan)
+    return out
+
+
 def build_total_expense(session: Session, statement: Statement) -> int:
     return sum(
         e.amount_jpy for e in entries_of(session, statement.id) if e.kind == EntryKind.expense

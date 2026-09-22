@@ -64,11 +64,15 @@ def carry_monthly(
 def list_statements(session: Session = Depends(get_session), _: Member = Depends(current_member)):
     """出过的账单，新的在前。带上金额和结清状态 —— 列表页每行都要显示。"""
     rows = list(session.exec(select(Statement).order_by(Statement.cut_at.desc())))
+    # 批量拿金额和结清状态。逐张调的话 60 张就是 120 次查询，
+    # 而这个接口每次打开账单页都要调
+    totals = bill_svc.list_totals(session)
+    settled = bill_svc.list_settled(session, rows)
     return [
         StatementOut(
             **st.model_dump(),
-            total_expense=bill_svc.build_total_expense(session, st),
-            settled=bool(bill_svc.settlement_progress(session, st)["settled"]),
+            total_expense=totals.get(st.id, 0),
+            settled=settled.get(st.id, False),
         )
         for st in rows
     ]
