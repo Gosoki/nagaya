@@ -218,6 +218,12 @@ if DIST.is_dir():
             # 这两处 404 是 HTTP 管道，不是给人看的话，所以不配错误码
             raise HTTPException(status.HTTP_404_NOT_FOUND, "no such API")
 
+        # 打包时那份静态清单也让动态的来答：手机上还留着旧 HTML 的时候，
+        # 它指的就是这个地址 —— 那份文件里名字写死成「長屋 nagaya」
+        if full_path in ("manifest.webmanifest", "/manifest.webmanifest"):
+            with Session(engine) as session:
+                return appearance.manifest(session)
+
         # index.html 不许走「原样吐文件」那一支：service worker 预缓存的就是它，
         # 吐原件等于把写死的「長屋」和静态清单缓存进手机，之后怎么改都刷不出来
         if full_path in ("index.html", "/index.html"):
