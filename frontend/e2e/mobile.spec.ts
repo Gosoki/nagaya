@@ -142,7 +142,7 @@ test('记一笔：默认页就是它，且主操作在拇指区', async ({ page 
   // 已经挪到账单页顺手填，不在这里占按钮。
   // 不写死个数（加个「外食」就得改测试没意义），钉的是真正的规矩：
   // 固定费一个都不许出现，而且总数一行放得下 —— 这一屏的价值就在于按钮少。
-  await expect(page.getByRole('button', { name: '日用品' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '日用' })).toBeVisible()
   // 钉的是**分类网格里**没有固定费。整页搜名字会误伤 —— 网格底下那句
   // 「房租 / 水电煤网在「账单」那页填」正是要把人指过去的，它当然会提到这些词
   for (const monthly of ['房租', '电费', '燃气', '水费', '网费']) {
@@ -163,7 +163,7 @@ test('记一笔：默认页就是它，且主操作在拇指区', async ({ page 
 test('金额 → 分类 → 保存，三步录完一笔', async ({ page }) => {
   await login(page)
   await page.locator('input.amount').fill('1980')
-  await page.getByRole('button', { name: '日用品' }).click()
+  await page.getByRole('button', { name: '日用' }).click()
   await page.screenshot({ path: 'e2e/shots/03-add-filled.png', fullPage: true })
 
   await page.getByRole('button', { name: '记入账' }).click()
@@ -206,7 +206,7 @@ test('权重全填 0：把缺口报出来，而且存不了', async ({ page }) =
   await login(page)
   await page.locator('input.amount').fill('12000')
   // 分类是必选的：不选的话后端拿不到分类默认规则，会悄悄掉回全员均分
-  await page.getByRole('button', { name: '日用品' }).click()
+  await page.getByRole('button', { name: '日用' }).click()
 
   // 比例模式几乎永远自动配平 —— 调整额再怎么填都会从基数里扣回来。
   // 唯一的例外就是所有人权重都 0：这笔钱没人担，整笔悬空，必须当场说清缺多少
@@ -228,7 +228,7 @@ test('权重全填 0：把缺口报出来，而且存不了', async ({ page }) =
 test('改日期不会把调好的分摊打回默认', async ({ page }) => {
   await login(page)
   await page.locator('input.amount').fill('9000')
-  await page.getByRole('button', { name: '日用品' }).click()
+  await page.getByRole('button', { name: '日用' }).click()
   await setWeight(page, 2, 0)                     // 第三个人这次不参与
   const before = await page.locator('.share-col').allTextContents()
 
@@ -352,7 +352,7 @@ test('离线草稿：断网能填完，回来点一下补交', async ({ page }) 
     route.request().method() === 'POST' ? route.abort() : route.continue(),
   )
   await page.locator('input.amount').fill('777')
-  await page.getByRole('button', { name: '日用品' }).click()
+  await page.getByRole('button', { name: '日用' }).click()
   await page.getByRole('button', { name: '记入账' }).click()
 
   await expect(page.locator('.q-notification')).toContainText('先存在本地')
@@ -384,7 +384,7 @@ test('服务器明确拒绝的不该存成草稿', async ({ page }) => {
       : route.continue(),
   )
   await page.locator('input.amount').fill('555')
-  await page.getByRole('button', { name: '日用品' }).click()
+  await page.getByRole('button', { name: '日用' }).click()
   await page.getByRole('button', { name: '记入账' }).click()
 
   await expect(page.locator('.q-notification')).toContainText('金额方向不对')
@@ -530,7 +530,7 @@ test('账单页在固定费下面也列出本期其他开销', async ({ page }) 
   // **自己准备前提**：前面的「出账单」用例会把种子数据全出账，草稿就空了。
   // 靠种子数据活着的断言，红的时候看起来跟这一屏毫无关系
   const cats = await (await page.request.get('/api/categories', { headers })).json()
-  const daily = cats.find((c: { name: string; monthly: boolean }) => c.name === '日用品')
+  const daily = cats.find((c: { name: string; monthly: boolean }) => c.name === '日用')
   const fixed = cats.find((c: { name: string }) => c.name === '房租')
   for (const [cat, title, amount] of [[daily, 'E2E日用品', 1_980], [fixed, '', 120_000]] as const) {
     await page.request.post('/api/entries', {
@@ -666,7 +666,7 @@ test('点一条账目进去改：金额改得动，自定义分摊不会被打�
 
   // 自备前提：记一笔带「调整」的账（3000，有人少担 600）
   await page.locator('input.amount').fill('3000')
-  await page.getByRole('button', { name: '日用品' }).click()
+  await page.getByRole('button', { name: '日用' }).click()
   await page.getByPlaceholder('备注（选填）').fill('E2E改这笔')
   await page.locator('.adj-col .num-input').first().fill('-600')
   await page.getByRole('button', { name: '记入账' }).click()
@@ -721,7 +721,7 @@ test('账目里点固定费去固定费那一屏，点日常开销才进单笔�
 test('调整额输得进负数，比例点一下就能选', async ({ page }) => {
   await login(page)
   await page.locator('input.amount').fill('9000')
-  await page.getByRole('button', { name: '日用品' }).click()
+  await page.getByRole('button', { name: '日用' }).click()
 
   // **符号在旁边那个开关上，框里只放数值** —— iOS 的数字键盘没有减号
   // （numeric / decimal / type=number 弹出来都是纯 0-9），所以不能指望人在框里打。
@@ -1456,7 +1456,7 @@ test('账目筛选：按分类/付款人筛，并给出筛选后的合计', asyn
 test('点头像把人排除出这笔，再点恢复（原来是几就还回几）', async ({ page }) => {
   await login(page)
   await page.locator('input.amount').fill('9000')
-  await page.getByRole('button', { name: '日用品' }).click()
+  await page.getByRole('button', { name: '日用' }).click()
 
   // 轮子上十个数字都在 DOM 里，读 textContent 没意义 —— 读它报出来的当前值
   const weights = () =>

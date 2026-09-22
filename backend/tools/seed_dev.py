@@ -119,7 +119,7 @@ def main() -> None:
         # ---------------------------------------------------------------- 5 月
         fixed(5, denki=7_800, gasu=4_600)
         add(EntryKind.expense, d(5, 3), 7_200, "伙食", "迎新烤肉", go.id)
-        add(EntryKind.expense, d(5, 12), 2_480, "日用品", "洗衣液和卫生纸", zen.id)
+        add(EntryKind.expense, d(5, 12), 2_480, "日用", "洗衣液和卫生纸", zen.id)
         add(EntryKind.expense, d(5, 24), 3_900, "伙食", "披萨", kan.id)
         may = finish_cut(s, go.id, "5/30 出账", utc(5, 30))
         settle_plan(s, may, on=d(6, 2), at=utc(6, 2), how_many=None)
@@ -127,7 +127,7 @@ def main() -> None:
         # ---------------------------------------------------------------- 6 月
         fixed(6, denki=8_900, gasu=3_900)
         add(EntryKind.expense, d(6, 25), 11_800, "水费", "", zen.id)
-        add(EntryKind.expense, d(6, 8), 1_780, "日用品", "垃圾袋和保鲜膜", kan.id)
+        add(EntryKind.expense, d(6, 8), 1_780, "日用", "垃圾袋和保鲜膜", kan.id)
         add(EntryKind.expense, d(6, 15), 6_400, "伙食", "烧烤", go.id, rule=zen_less)
         add(EntryKind.income, d(6, 21), -4_500, None, "电费返现", go.id)
         # 这一张拖到 7 月初才出 —— 覆盖期于是是 5/30〜7/2，跨了个月
@@ -136,7 +136,7 @@ def main() -> None:
 
         # ---------------------------------------------------------------- 7 月
         fixed(7, denki=9_200, gasu=3_800)
-        add(EntryKind.expense, d(7, 6), 1_380, "日用品", "卫生纸", zen.id)
+        add(EntryKind.expense, d(7, 6), 1_380, "日用", "卫生纸", zen.id)
         add(EntryKind.expense, d(7, 18), 6_400, "伙食", "烤肉", kan.id)
         add(EntryKind.expense, d(7, 25), 4_200, "伙食", "夏日凉面", go.id)
         july = finish_cut(s, go.id, "7/28 出账", utc(7, 28))
@@ -146,7 +146,7 @@ def main() -> None:
         fixed(8, denki=10_400, gasu=3_200)
         add(EntryKind.expense, d(8, 25), 12_600, "水费", "", zen.id)
         add(EntryKind.expense, d(8, 12), 8_900, "伙食", "中元假期烤肉", go.id, rule=zen_less)
-        add(EntryKind.expense, d(8, 20), 3_240, "日用品", "洗手液等", zen.id)
+        add(EntryKind.expense, d(8, 20), 3_240, "日用", "洗手液等", zen.id)
         add(EntryKind.income, d(8, 25), -3_000, None, "电费返现", go.id)
         august = finish_cut(s, go.id, "8/30 出账", utc(8, 30))
         # 只转了一笔 → 未结清，转账卡片上一个勾一个空
@@ -159,7 +159,7 @@ def main() -> None:
         # 燃气 和 水费 故意不填：面板要显示成灰色参考值，不是预填的真值
         add(EntryKind.expense, d(9, 3), 4_600, "伙食", "披萨（Zen 出差）", kan.id,
             rule=without_zen)
-        add(EntryKind.expense, d(9, 10), 1_980, "日用品", "卫生纸", kan.id)
+        add(EntryKind.expense, d(9, 10), 1_980, "日用", "卫生纸", kan.id)
         add(EntryKind.expense, d(9, 14), 5_200, "伙食", "火锅食材", go.id)
         add(EntryKind.income, d(9, 20), -2_400, None, "乐天积分返现", kan.id)
 

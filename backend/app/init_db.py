@@ -23,7 +23,7 @@ DEFAULT_CATEGORIES = [
     ("燃气", "local_fire_department", CATEGORY_COLORS[3], True),     # 红
     ("水费", "water_drop", CATEGORY_COLORS[5], True),                # 天蓝
     ("网费", "wifi", CATEGORY_COLORS[1], True),                      # 青
-    ("日用品", "shopping_basket", CATEGORY_COLORS[8], False),        # 棕
+    ("日用", "shopping_basket", CATEGORY_COLORS[8], False),          # 棕
     ("伙食", "restaurant", CATEGORY_COLORS[6], False),               # 绿
     # 不用 more_horiz（•••）：那个符号在一排分类里读作「还有更多分类」，
     # 而点下去只是选中了一个叫「其他」的分类 —— 实测有人照着它把电费记成了「其他」
