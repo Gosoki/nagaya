@@ -11,16 +11,19 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
+from html import escape
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from sqlmodel import Session
 
 from app.db import engine
 from app.services import backup as backup_svc
+from app.services import settings as settings_svc
 
 from app.core.rules import RuleError
 from app.errors import AppError, not_found
@@ -147,8 +150,30 @@ REVALIDATE = "no-cache"
 
 if DIST.is_dir():
 
+    def _index() -> Response:
+        """index.html —— 把这屋自己的 App 名字**写进 HTML 再吐出去**。
+
+        **iOS 加到主屏时叫什么，只看 `apple-mobile-web-app-title`。**
+        打包产物里那行是写死的「長屋」，设置里改完名字，主屏上那个图标底下
+        照样写着長屋。前端在运行时改过这个标签，但那是 JS 跑起来之后的事 ——
+        而「添加到主屏幕」有可能在更早的时刻就把名字读走了。写死在 HTML 里最稳。
+
+        <title> 一并换掉：页签、历史记录、分享出去的链接标题都用它。
+        """
+        html = (DIST / "index.html").read_text(encoding="utf-8")
+        with Session(engine) as session:
+            name = (settings_svc.get(session, "app_name") or "").strip()
+        if name:
+            safe = escape(name)
+            html = html.replace(
+                '<meta name="apple-mobile-web-app-title" content="長屋" />',
+                f'<meta name="apple-mobile-web-app-title" content="{safe}" />',
+            )
+            html = re.sub(r"<title>.*?</title>", f"<title>{safe}</title>", html, count=1)
+        return Response(html, media_type="text/html", headers={"Cache-Control": REVALIDATE})
+
     @app.api_route("/{full_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
-    def spa(full_path: str) -> FileResponse:
+    def spa(full_path: str) -> Response:
         """SPA 回退 + 缓存头。
 
         三件事，每一件都对应一个真实故障：
@@ -183,4 +208,4 @@ if DIST.is_dir():
         if "." in full_path.rsplit("/", 1)[-1]:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "no such file")
 
-        return FileResponse(DIST / "index.html", headers={"Cache-Control": REVALIDATE})
+        return _index()
