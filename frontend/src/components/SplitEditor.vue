@@ -30,24 +30,27 @@
       class="member-row"
       :class="{ out: weightOf(m.id) === 0 }"
     >
-      <!-- 点头像/名字＝这个人这笔不参与（比例设 0），再点一下恢复。
-           「谁没在」是改分摊时最常做的事，不该还要先点开比例再选一次 -->
-      <button
-        class="name-col row items-center no-wrap"
-        type="button"
-        :aria-pressed="weightOf(m.id) === 0"
-        :title="t('split.excludeHint')"
-        @click="toggleOut(m.id)"
-      >
-        <MemberAvatar :member-id="m.id" class="q-mr-sm" />
+      <!-- 点**头像**＝这个人这笔不参与（比例设 0），再点一下恢复。
+           「谁没在」是改分摊时最常做的事，不该还要先点开比例再选一次。
+
+           **名字不接这一下**：名字那块又宽又靠着屏幕左边，是拇指扶着手机时
+           最容易蹭到的地方，而蹭一下改的是钱怎么分。头像是个有边界的圆，
+           要点它得瞄一下 —— 这一点「要瞄一下」正是我们想要的 -->
+      <div class="name-col row items-center no-wrap">
+        <button
+          class="avatar-btn"
+          type="button"
+          :aria-pressed="weightOf(m.id) === 0"
+          :aria-label="`${m.display_name}：${t('split.excludeHint')}`"
+          :title="t('split.excludeHint')"
+          @click="toggleOut(m.id)"
+        >
+          <MemberAvatar :member-id="m.id" />
+        </button>
         <div class="col column items-start" style="min-width: 0">
           <div class="name ellipsis">{{ m.display_name }}</div>
-          <!-- **状态得可见，手势才敢留。** 「点头像＝这笔他不参与」是这一屏
-               最常用的动作，可它原来除了整行变灰之外没有任何说明 ——
-               变灰在别的地方也表示「禁用」，看不出是自己点出来的 -->
-          <div v-if="weightOf(m.id) === 0" class="excluded">{{ t('split.excluded') }}</div>
         </div>
-      </button>
+      </div>
 
       <!--
         比例就在**原地左右拨**，不弹层。
@@ -124,14 +127,19 @@
           />
         </div>
 
-      <!-- 还没填金额时给一条短横，不是一排 ¥0。
-           ¥0 是个**看起来算过了**的数字，而这时候根本没得算 —— 固定费那一屏
-           一排全是 ¥0，看着就像坏了 -->
+      <!-- 这一格问的是「他该出多少」，所以三种答案各说各的话：
+             不参与  比例 0 —— 答案不是 ¥0（那是个**看起来算过了**的数字），
+                     是「这笔没他的份」。小字原来挂在名字底下，那一列窄，会折行
+             —       还没填金额，根本没得算。固定费那一屏一排 ¥0 看着就像坏了
+             ¥n      正常 -->
       <div
         class="share-col"
-        :class="{ 'text-grey-5': !amount || (preview?.[String(m.id)] ?? 0) === 0 }"
+        :class="{
+          'text-grey-5': !amount || (preview?.[String(m.id)] ?? 0) === 0,
+          excluded: weightOf(m.id) === 0,
+        }"
       >
-        {{ amount ? formatYen(preview?.[String(m.id)] ?? 0) : '—' }}
+        {{ weightOf(m.id) === 0 ? t('split.excluded') : amount ? formatYen(preview?.[String(m.id)] ?? 0) : '—' }}
       </div>
     </div>
 
@@ -591,11 +599,23 @@ defineExpose({
 }
 .name-col {
   min-width: 0;
-  border: none;
-  background: transparent;
-  padding: 0;
   text-align: left;
   color: inherit;
+}
+/* 只有头像这一圈接「不参与」那一下。做成圆形、和头像同宽 ——
+   点击区就是你看见的那个圆，边界在哪一眼就知道；
+   拿名字当按钮的话，可点区会一路延到屏幕左边，扶手机就会蹭到 */
+.avatar-btn {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 44px;               /* 竖向撑到拇指的底线；横向一寸不进名字那块 */
+  margin-right: 8px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  display: grid;
+  place-items: center;
   cursor: pointer;
 }
 /* 比例和调整之间留一道明显的空 —— 它们是两种不同的输入，不该挨在一起 */
@@ -650,9 +670,9 @@ defineExpose({
 .member-row.out .name { text-decoration: line-through; }
 .member-row.out .q-avatar { opacity: 0.4; }
 .name { font-size: var(--nagaya-fs-body); }
+/* 「不参与」占的是应担那一格：比数字小一号，一眼看得出它不是钱 */
 .excluded {
-  font-size: 11px;
-  line-height: 1.1;
+  font-size: 12px;
   color: var(--nagaya-ink-3);
 }
 /* 数字框本身要够高：44px 说的是**可点区域**，输入框太矮拇指点不准 */

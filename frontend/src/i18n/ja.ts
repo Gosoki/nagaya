@@ -31,7 +31,7 @@ export default {
   split: {
     negative: 'マイナス（この行は差し引き）',
     excluded: '対象外',
-    excludeHint: 'タップでこの記録から除外',
+    excludeHint: 'アイコンをタップで除外',
     weight: '比率', adjustment: '調整', share: '負担額',
     total: '合計', diff: '差額',
     notBalanced: '{n} 合いません。合わないと保存できません',

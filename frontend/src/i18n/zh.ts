@@ -31,7 +31,7 @@ export default {
   split: {
     negative: '减号（这一格算减的）',
     excluded: '不参与',
-    excludeHint: '点一下＝这笔他不参与',
+    excludeHint: '点头像＝这笔他不参与',
     weight: '比例', adjustment: '调整', share: '应担',
     total: '合计', diff: '差额',
     notBalanced: '还差 {n}，不平不能存',

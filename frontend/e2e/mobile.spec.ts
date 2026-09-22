@@ -1463,24 +1463,26 @@ test('点头像把人排除出这笔，再点恢复（原来是几就还回几�
     page.locator('.wheel').evaluateAll((els) =>
       els.map((e) => e.getAttribute('aria-valuenow')).join('/'),
     )
+  // 不参与那一行的应担写的是「不参与」而不是 ¥0 —— 那一格答的是「该出多少」，
+  // 而答案是「这笔没他的份」，不是一个看起来算过了的零
   const shares = () =>
     page.locator('.member-row .share-col').allTextContents()
-      .then((t) => t.map((x) => Number(x.replace(/[^\d]/g, ''))))
+      .then((t) => t.map((x) => (x.includes('不参与') ? 0 : Number(x.replace(/[^\d]/g, '')))))
 
   expect(await weights()).toBe('1/1/1')
-  await page.locator('.name-col').nth(2).click()
+  await page.locator('.avatar-btn').nth(2).click()
   expect(await weights(), '点一下头像＝这个人不参与').toBe('1/1/0')
   expect((await shares()).sort((a, b) => a - b)).toEqual([0, 4500, 4500])
 
-  await page.locator('.name-col').nth(2).click()
+  await page.locator('.avatar-btn').nth(2).click()
   expect(await weights(), '再点一下恢复').toBe('1/1/1')
 
   // 原来不是 1 的人，恢复时要还回原来那个数，不能一律变成 1
   await setWeight(page, 0, 2)
   expect(await weights()).toBe('2/1/1')
-  await page.locator('.name-col').first().click()
+  await page.locator('.avatar-btn').first().click()
   expect(await weights()).toBe('0/1/1')
-  await page.locator('.name-col').first().click()
+  await page.locator('.avatar-btn').first().click()
   expect(await weights(), '恢复该还回 2，不是 1').toBe('2/1/1')
 })
 
