@@ -117,6 +117,7 @@
           </button>
           <input
             class="num-input"
+            :class="{ neg: adjNeg(m.id) }"
             type="text"
             inputmode="numeric"
             placeholder="0"
@@ -728,6 +729,12 @@ defineExpose({
   color: inherit;
 }
 .num-input::placeholder { color: var(--nagaya-ink-4); }
+/* 开关亮着时数字跟着变红 —— 红药丸加一个黑数字，是两个半句话；
+   一整格都红了，「这一格是减的」才是一眼的事，不用回头去看那颗按钮 */
+.num-input.neg {
+  color: var(--nagaya-neg);
+  border-bottom-color: var(--nagaya-neg);
+}
 
 .total-bar { font-size: 15px; }
 </style>
