@@ -32,7 +32,7 @@ export default {
     rotateHint: '除不尽的 1 円按「逐笔轮转」归谁，存下去才定得下来',
   },
   monthly: {
-    carryFailed: '这几项按上期记不进来，去设置里看看它们的分摊规则：{list}',
+    carryFailed: '这几项这次没替你记，去固定费设置里看看垫付人和分摊规则还对不对：{list}',
     icon: '图标', color: '颜色',
     settingsTitle: '固定费项目',
     carried: '按上期金额记上了：{list}',

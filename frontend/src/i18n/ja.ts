@@ -32,7 +32,7 @@ export default {
     rotateHint: '割り切れない 1 円の負担者は「持ち回り」のため、保存後に確定します',
   },
   monthly: {
-    carryFailed: '次の項目は前期どおりに記帳できませんでした。分担ルールを確認してください：{list}',
+    carryFailed: '次の項目は今回自動記帳を見送りました。立替者と分担ルールを確認してください：{list}',
     icon: 'アイコン', color: '色',
     settingsTitle: '固定費の項目',
     carried: '前期の金額で記帳しました：{list}',

@@ -73,6 +73,12 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m tools.seed_dev   # 建库 + 三个示例账号（密码 dev12345，用之前删掉）
 ./run.sh                             # 监听 0.0.0.0:8000
 
+# 真用起来的那次：别跑 seed_dev（它建的是三个假室友、还顺手关掉了自动备份），
+# 一个人一行，自己敲密码 —— 建成员的接口要求先登录，而全新库里一个人都没有，
+# 这行命令就是那扇门的钥匙
+.venv/bin/python -m tools.add_member go Go
+.venv/bin/python -m tools.add_member --reset go   # 忘了密码也是这儿重置
+
 # 同一个 WiFi 下手机直接开：
 #   ipconfig getifaddr en0  →  http://<那个 IP>:8000
 # 用 Safari 打开后「添加到主屏幕」，就是一个全屏 App（PWA）
@@ -171,7 +177,7 @@ Alembic），而 `create_all` 对已存在的表**只加表不加列**。恢复�
 能用了，日常记账 / 出账 / 结算这条主线是通的。**还缺的：**
 
 - **成员管理界面**。加人减人后端支持（成员带「入住日 / 搬出日」，分摊按那笔账当天
-  在籍的人算），同样只差一屏。
+  在籍的人算），同样只差一屏。眼下加人 / 重置密码走 `tools.add_member`。
 - **数据库迁移**。Alembic 配好了但没启用 —— 设计阶段表结构还在改，用 `create_all`；
   录真实账目之前切过去（见 `backend/alembic/versions/README.md`）。
 

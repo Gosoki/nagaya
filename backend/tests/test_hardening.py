@@ -459,3 +459,53 @@ def test_fixing_an_old_bill_does_not_switch_this_months_carry_off(session: Sessi
 
     out = bill.carry_same_as_last(session, actor_id=a.id)
     assert [c["name"] for c in out["created"]] == ["房租"], out
+
+
+def test_carry_refuses_to_pay_rent_with_a_roommate_who_moved_out(session: Session, members) -> None:
+    """垫付人搬走了就别再替他垫 —— 账单会反过来叫留下的人给他转账。"""
+    a, b, c_ = members
+    cat = Category(name="房租", monthly=True, same_as_last=True, default_payer_id=c_.id)
+    session.add(cat)
+    session.commit()
+    session.refresh(cat)
+    ledger.create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=TODAY,
+                        amount=120_000, payer_id=c_.id, category_id=cat.id)
+    cut_statement(session, actor_id=a.id, label="上一期", on=TODAY)
+
+    c_.left_on = TODAY - dt.timedelta(days=1)
+    session.add(c_)
+    session.commit()
+
+    out = bill.carry_same_as_last(session, actor_id=a.id)
+    assert out["created"] == [], "搬走的人不该又垫了一次房租"
+    assert [f["reason"] for f in out["failed"]] == ["payer_left"], out
+
+
+def test_carry_refuses_a_rule_that_never_heard_of_the_new_roommate(
+    session: Session, members
+) -> None:
+    """规则点名写了谁分多少，而新搬来的人不在名单里 —— 他会被分到 ¥0。
+
+    expand 的口径是「规则里没提到的人按 0 补齐」，所以这种情况不报错、
+    黑字入账。自动记的钱必须看得见，这一条也包括「这次没敢替你记」。
+    """
+    a, b, c_ = members
+    cat = Category(
+        name="房租", monthly=True, same_as_last=True, default_payer_id=a.id,
+        default_rule_json={"mode": "ratio",
+                           "weights": {str(a.id): 1, str(b.id): 1, str(c_.id): 1}},
+    )
+    session.add(cat)
+    session.commit()
+    session.refresh(cat)
+    ledger.create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=TODAY,
+                        amount=120_000, payer_id=a.id, category_id=cat.id)
+    cut_statement(session, actor_id=a.id, label="上一期", on=TODAY)
+
+    session.add(Member(name="d", display_name="D", display_order=3,
+                       joined_on=TODAY - dt.timedelta(days=1)))
+    session.commit()
+
+    out = bill.carry_same_as_last(session, actor_id=a.id)
+    assert out["created"] == [], "新室友会被这条旧规则分到 ¥0"
+    assert [f["reason"] for f in out["failed"]] == ["rule_stale"], out

@@ -672,6 +672,12 @@ def _carry(session: Session, *, actor_id: int | None) -> dict[str, Any]:
         amount = last.get(c.id)
         if c.id in handled or not amount:
             continue
+        payer = c.default_payer_id or fallback_payer
+        stale = _stale_for_today(c, payer, active)
+        if stale is not None:
+            # 自动记的钱必须看得见 —— 这一条也包括「这次没敢替你记」
+            failed.append({"category_id": c.id, "name": c.name, "reason": stale})
+            continue
         try:
             entry = ledger.create_entry(
                 session,
@@ -679,7 +685,7 @@ def _carry(session: Session, *, actor_id: int | None) -> dict[str, Any]:
                 kind=EntryKind.expense,
                 on=today_jst(),
                 amount=amount,
-                payer_id=c.default_payer_id or fallback_payer,
+                payer_id=payer,
                 category_id=c.id,
                 category_rule=_prune_rule(c.default_rule_json, active),
             )
@@ -689,6 +695,38 @@ def _carry(session: Session, *, actor_id: int | None) -> dict[str, Any]:
             continue
         made.append({"category_id": c.id, "name": c.name, "amount": entry.amount_jpy})
     return {"created": made, "failed": failed}
+
+
+def _stale_for_today(category: Category, payer: int | None, active: set[int]) -> str | None:
+    """这一项还能不能照上期自动记？返回拦下来的原因，None ＝ 可以记。
+
+    「和上期一样」抄的是**上一期**的安排，而人是会搬走搬进来的。两件事一旦发生，
+    照抄就从「省事」变成「静悄悄记错钱」：
+
+      * **垫付人搬走了** —— 记出来是「已经不住这儿的人又垫了一次房租」，
+        账单反过来叫留下的两个人给他转账；
+      * **有人新搬进来、而这条规则点名写了谁分多少** —— expand 的口径是
+        「规则里没提到的人按 0 补齐」（rules.py），新室友于是白住一个月，
+        黑字入账、一句提示都没有。而 _prune_rule 恰好把本来会抛出来的
+        unknown_member 消掉了，所以连报错都不会有。
+
+    两种都该**响一声**让人自己重新定，而不是替他记一笔错的 ——
+    这跟这个函数「搬不过来的也要说出来」的既有约定是同一条。
+    """
+    if payer is not None and payer not in active:
+        return "payer_left"
+    rule = category.default_rule_json or {}
+    named = rule.get("exact") if rule.get("mode", "ratio") == "exact" else rule.get("weights")
+    if isinstance(named, dict) and named:
+        listed: set[int] = set()
+        for key in named:
+            try:
+                listed.add(int(key))
+            except (TypeError, ValueError):
+                continue
+        if active - listed:
+            return "rule_stale"
+    return None
 
 
 def _prune_rule(rule: dict[str, Any] | None, active: set[int]) -> dict[str, Any] | None:
@@ -702,6 +740,9 @@ def _prune_rule(rule: dict[str, Any] | None, active: set[int]) -> dict[str, Any]
     剔掉而不是报错：这是一条**为上一期写的**规则，拿它硬套今天的人本来就不对。
     注意剩下的人分摊会变（adjustments 是「先抠掉再按比例分」），所以调整额一并去掉
     的那份钱会回到大家头上 —— 这是唯一说得通的默认，规则本身该由用户重新定。
+
+    **它只管「人少了」。**「人多了」是另一回事，在 _stale_for_today 那儿拦下来 ——
+    往这条规则里补一个新人，补多少只有住的人知道。
     """
     if not rule:
         return rule
