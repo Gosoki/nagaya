@@ -205,6 +205,31 @@ function measureHeader() {
  * iOS 的键盘动画会分帧抛 resize，按钮一格格挪，卡得难看；transform 走合成器，
  * 不触发重排。rAF 合并一下，一帧最多写一次。
  */
+/**
+ * **手指一滑就收键盘。**
+ *
+ * iOS 上键盘开着时，滑动手势进行中 fixed 元素是冻住的 —— 顶栏跟一段就卡住，
+ * 松手才跳回来，而 offsetTop 还有个上限（＝键盘高度），到顶之后更跟不动。
+ * 这是 WebKit 的行为，JS 赢不了。
+ *
+ * 那就绕开：要滑动，就说明这一刻他在看下面的东西，不在打字 —— 收掉键盘，
+ * 顶栏、按钮条、底下那片空白当场全部回位。很多 iOS app 就是这么做的。
+ *
+ * 只认**真手势**，而且要划过 8px 才算：点按钮时手指难免蹭一两像素，
+ * 那种不能算成「他要滚了」。在输入框自己身上划（选字）也不算。
+ */
+let touchY = 0
+function onTouchStart(e: TouchEvent) {
+  touchY = e.touches[0]?.clientY ?? 0
+}
+function onTouchMove(e: TouchEvent) {
+  const el = document.activeElement as HTMLElement | null
+  if (!el || (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA')) return
+  if (e.target === el) return
+  if (Math.abs((e.touches[0]?.clientY ?? 0) - touchY) < 8) return
+  el.blur()
+}
+
 let vvRaf = 0
 function trackHeader() {
   const vv = window.visualViewport
@@ -228,6 +253,8 @@ onMounted(() => {
   measureHeader()
   window.visualViewport?.addEventListener('scroll', onViewport)
   window.visualViewport?.addEventListener('resize', onViewport)
+  document.addEventListener('touchstart', onTouchStart, { passive: true })
+  document.addEventListener('touchmove', onTouchMove, { passive: true })
   if (typeof ResizeObserver === 'undefined') return
   if (footEl.value?.$el) {
     footWatch = new ResizeObserver(measureFooter)
@@ -243,6 +270,8 @@ onBeforeUnmount(() => {
   headWatch?.disconnect()
   window.visualViewport?.removeEventListener('scroll', onViewport)
   window.visualViewport?.removeEventListener('resize', onViewport)
+  document.removeEventListener('touchstart', onTouchStart)
+  document.removeEventListener('touchmove', onTouchMove)
   if (vvRaf) cancelAnimationFrame(vvRaf)
 })
 
