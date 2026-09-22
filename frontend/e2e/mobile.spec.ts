@@ -716,22 +716,32 @@ test('调整额输得进负数，比例点一下就能选', async ({ page }) => 
   await page.locator('input.amount').fill('9000')
   await page.getByRole('button', { name: '日用品' }).click()
 
-  // **一个键一个键地敲**：光打一个减号时数值还是 0，原来输入框会被重绘成空，
-  // 负号当场消失，于是「a 少担 1000」根本输不进去 —— 而它正是这个字段的用途。
-  // 注意不能用 fill()：那是整串一次性塞进去，绕过了出问题的那条路。
+  // **符号在旁边那个开关上，框里只放数值** —— iOS 的数字键盘没有减号
+  // （numeric / decimal / type=number 弹出来都是纯 0-9），所以不能指望人在框里打。
+  // 但硬件键盘打得出减号的（桌面、外接键盘）那条路也得通：打进来的减号
+  // 不进框，而是把开关点亮。
+  // **一个键一个键地敲**，不能用 fill()：那是整串一次性塞进去，绕过了这条路。
   const adj = page.locator('.adj-col .num-input').first()
+  const sign = page.locator('.adj-col .sign').first()
   await adj.click()
   await page.keyboard.type('-')
-  await expect(adj, '减号被吃掉了').toHaveValue('-')
+  await expect(adj, '符号不该进框').toHaveValue('')
+  await expect(sign, '减号被吃掉了 —— 开关没亮').toHaveClass(/on/)
   await page.keyboard.type('1500')
-  await expect(adj).toHaveValue('-1,500')
+  await expect(adj, '框里只有数值').toHaveValue('1,500')
 
   const shares = () =>
     page.locator('.member-row .share-col').allTextContents()
       .then((ts) => ts.map((t) => Number(t.replace(/[^\d-]/g, ''))))
   expect((await shares()).sort((a, b) => a - b)).toEqual([2000, 3500, 3500])
 
-  // 比例点一下弹出 0/1/2/3
+  // 减号再按一下就回到正的
+  await sign.click()
+  await expect(sign).not.toHaveClass(/on/)
+  expect((await shares()).sort((a, b) => a - b)).toEqual([2500, 2500, 4000])
+  await sign.click()
+
+  // 比例原地左右拨
   await setWeight(page, 2, 0)
   expect((await shares()).sort((a, b) => a - b)).toEqual([0, 3750, 5250])
 })

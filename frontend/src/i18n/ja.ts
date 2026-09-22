@@ -29,7 +29,7 @@ export default {
     deleted: '削除しました', restored: '削除を取り消しました',
   },
   split: {
-    flipSign: 'プラス / マイナス',
+    negative: 'マイナス（この行は差し引き）',
     excluded: '対象外',
     excludeHint: 'タップでこの記録から除外',
     weight: '比率', adjustment: '調整', share: '負担額',

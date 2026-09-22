@@ -97,18 +97,23 @@
           弹出来的都是纯 0-9；tel 那个有 + 没有 −。减号只在全键盘的「123」那一层。
 
           原来的办法是干脆用全键盘（inputmode="text"），代价是为了填一个数字
-          要面对一整个字母键盘。现在改成：数字键盘 + 一个正负号按钮。
+          要面对一整个字母键盘。现在改成：数字键盘 + 一个减号开关。
+
+          **符号只由按钮表示，框里只放数值。** 两边都带符号的话屏幕上会出现
+          「− -12,000」，一个减号说两遍；而按钮上印「±」等于什么都没说 ——
+          它不告诉你现在是正是负。亮着的减号才说得出「这一格是减的」。
           键盘上打得出减号的（外接键盘、安卓）照样打，两条路都通。
         -->
         <div class="adj-col">
           <button
             class="sign"
             type="button"
-            :class="{ on: adjDisplay(m.id).startsWith('-') }"
-            :aria-label="t('split.flipSign')"
+            :class="{ on: adjNeg(m.id) }"
+            :aria-pressed="adjNeg(m.id)"
+            :aria-label="t('split.negative')"
             @click="flipAdj(m.id)"
           >
-            ±
+            −
           </button>
           <input
             class="num-input"
@@ -501,8 +506,16 @@ function normalize(raw: string): { text: string; value: number } {
 }
 
 function onAdjInput(id: number, e: Event) {
+  // 框里打进来的没有符号（符号在旁边那个按钮上），所以要把当前的符号接回去。
+  // 硬件键盘直接打了减号的也算 —— 那条路上的人不会去点按钮
+  const raw = (e.target as HTMLInputElement).value
+  write(id, (adjNeg(id) || raw.includes('-') ? '-' : '') + raw)
+}
+
+/** 把一串原文（可能带前导减号）落进 typing 和 adjustments */
+function write(id: number, raw: string) {
   touched.value = true
-  const { text, value } = normalize((e.target as HTMLInputElement).value)
+  const { text, value } = normalize(raw)
   typing.value = { ...typing.value, [`a${id}`]: text }
   const next = { ...adjustments.value }
   if (value === 0) delete next[String(id)]
@@ -511,26 +524,27 @@ function onAdjInput(id: number, e: Event) {
 }
 
 /**
- * 正负号。空着的时候按一下，框里留一个「-」—— 下一个数字就是负的，
- * 和在全键盘上先打减号完全一样（typing 里本来就允许一个光秃秃的减号活着）。
+ * 减号开关。**空着的时候也按得动** —— 按完框里仍然是空的（占位符 0 照旧），
+ * 只有按钮亮着，接着打数字就是负的。这和在全键盘上先打一个减号是同一件事，
+ * 只是那个减号现在存在按钮上，不占输入框的位置。
  */
 function flipAdj(id: number) {
-  touched.value = true
-  const shown = adjDisplay(id)
-  const { text, value } = normalize(shown.startsWith('-') ? shown.slice(1) : `-${shown}`)
-  typing.value = { ...typing.value, [`a${id}`]: text }
-  const next = { ...adjustments.value }
-  if (value === 0) delete next[String(id)]
-  else next[String(id)] = value
-  adjustments.value = next
+  const t = adjText(id)
+  write(id, t.startsWith('-') ? t.slice(1) : `-${t}`)
 }
 
-const adjDisplay = (id: number) => {
+/** 这一格的内部原文，可能带前导减号 */
+function adjText(id: number): string {
   const held = typing.value[`a${id}`]
   if (held !== undefined) return held
   const v = adjustments.value[String(id)]
   return v ? v.toLocaleString('en-US') : ''
 }
+
+/** 框里显示的：**只有数值，没有符号** */
+const adjDisplay = (id: number) => adjText(id).replace('-', '')
+/** 这一格是不是负的。空着但按过减号的也算 —— 按钮得亮着，否则人不知道自己按过 */
+const adjNeg = (id: number) => adjText(id).startsWith('-')
 
 /** 父组件切完分类想恢复默认时调它 */
 defineExpose({
@@ -583,20 +597,26 @@ defineExpose({
   align-items: center;
   padding-left: 4px;
 }
+/* 减号开关。灭着是一小横灰线（「这儿可以变负」），亮着是一颗红药丸 ——
+   那一小横太容易漏看，而「这一格是减的」是这一行里最要紧的一件事 */
 .sign {
   flex: 0 0 auto;
   width: 22px;
-  height: 40px;
+  height: 26px;
   border: none;
+  border-radius: 13px;
   background: transparent;
   color: var(--nagaya-ink-4);
-  font-size: 16px;
+  font-size: 17px;
   line-height: 1;
   cursor: pointer;
+  transition: background 0.12s, color 0.12s;
 }
-/* 已经是负数了就把号点亮 —— 「这一格是减的」得看得出来，
-   而那个减号本身只有一小横，扫一眼容易漏 */
-.sign.on { color: var(--nagaya-neg); font-weight: 600; }
+.sign.on {
+  background: var(--nagaya-neg);
+  color: #fff;
+  font-weight: 700;
+}
 .share-col { text-align: right; font-variant-numeric: tabular-nums; font-size: 15px; }
 
 .member-row { min-height: 52px; }

@@ -29,7 +29,7 @@ export default {
     deleted: '已删掉', restored: '已撤销删除',
   },
   split: {
-    flipSign: '正负号',
+    negative: '减号（这一格算减的）',
     excluded: '不参与',
     excludeHint: '点一下＝这笔他不参与',
     weight: '比例', adjustment: '调整', share: '应担',
