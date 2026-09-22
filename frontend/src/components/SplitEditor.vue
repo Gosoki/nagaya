@@ -91,11 +91,29 @@
           </button>
         </div>
       </div>
+        <!--
+          调整额要能填负数（「Zen 这顿少担 1,000」），而 **iOS 的数字键盘上
+          没有减号** —— inputmode 的 numeric / decimal、以及 type=number，
+          弹出来的都是纯 0-9；tel 那个有 + 没有 −。减号只在全键盘的「123」那一层。
+
+          原来的办法是干脆用全键盘（inputmode="text"），代价是为了填一个数字
+          要面对一整个字母键盘。现在改成：数字键盘 + 一个正负号按钮。
+          键盘上打得出减号的（外接键盘、安卓）照样打，两条路都通。
+        -->
         <div class="adj-col">
+          <button
+            class="sign"
+            type="button"
+            :class="{ on: adjDisplay(m.id).startsWith('-') }"
+            :aria-label="t('split.flipSign')"
+            @click="flipAdj(m.id)"
+          >
+            ±
+          </button>
           <input
             class="num-input"
             type="text"
-            inputmode="text"
+            inputmode="numeric"
             placeholder="0"
             :value="adjDisplay(m.id)"
             @input="onAdjInput(m.id, $event)"
@@ -470,7 +488,12 @@ function toggleOut(id: number) {
 }
 
 function normalize(raw: string): { text: string; value: number } {
-  const neg = raw.trim().startsWith('-')
+  // 减号**出现在哪儿都算负的**，不只是开头。
+  // 按完「±」框里是个光秃秃的「-」，这时候点一下输入框，光标很可能落在它左边
+  // （数字是右对齐的，点中间就等于点到了减号前面），接着打出来的是「1500-」——
+  // 只认开头的话这一笔就成了正数，而屏幕上那个减号还在，看着像是生效了。
+  // 减号会出现在这个框里只有一个原因：人想要负数。
+  const neg = raw.includes('-')
   const d = raw.replace(/\D/g, '')
   const n = d ? Number(d) : 0
   const sign = neg ? '-' : ''
@@ -480,6 +503,21 @@ function normalize(raw: string): { text: string; value: number } {
 function onAdjInput(id: number, e: Event) {
   touched.value = true
   const { text, value } = normalize((e.target as HTMLInputElement).value)
+  typing.value = { ...typing.value, [`a${id}`]: text }
+  const next = { ...adjustments.value }
+  if (value === 0) delete next[String(id)]
+  else next[String(id)] = value
+  adjustments.value = next
+}
+
+/**
+ * 正负号。空着的时候按一下，框里留一个「-」—— 下一个数字就是负的，
+ * 和在全键盘上先打减号完全一样（typing 里本来就允许一个光秃秃的减号活着）。
+ */
+function flipAdj(id: number) {
+  touched.value = true
+  const shown = adjDisplay(id)
+  const { text, value } = normalize(shown.startsWith('-') ? shown.slice(1) : `-${shown}`)
   typing.value = { ...typing.value, [`a${id}`]: text }
   const next = { ...adjustments.value }
   if (value === 0) delete next[String(id)]
@@ -513,7 +551,11 @@ defineExpose({
 .head-row,
 .member-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 108px minmax(0, 0.9fr) minmax(0, 1fr);
+  /* 四列在 375 上是挤的，每一列都按它真正要装的东西给：
+       · 比例 84 ＝ 中间那格 36 ＋ 两边各露 24（轮子）
+       · 调整要装得下「-12,000」外加一个正负号按钮，所以比应担还宽一点
+       · 名字那列只剩头像 + 两三个字，超了省略号 */
+  grid-template-columns: minmax(0, 0.95fr) 84px minmax(0, 1.2fr) minmax(0, 1fr);
   align-items: center;
   column-gap: 6px;
 }
@@ -534,7 +576,27 @@ defineExpose({
   cursor: pointer;
 }
 /* 比例和调整之间留一道明显的空 —— 它们是两种不同的输入，不该挨在一起 */
-.adj-col { padding-left: 14px; }
+/* 正负号按钮在左、数字靠右。比例和调整之间那道空留着 ——
+   它们是两种不同的输入，挨在一起看着就乱 */
+.adj-col {
+  display: flex;
+  align-items: center;
+  padding-left: 4px;
+}
+.sign {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 40px;
+  border: none;
+  background: transparent;
+  color: var(--nagaya-ink-4);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+/* 已经是负数了就把号点亮 —— 「这一格是减的」得看得出来，
+   而那个减号本身只有一小横，扫一眼容易漏 */
+.sign.on { color: var(--nagaya-neg); font-weight: 600; }
 .share-col { text-align: right; font-variant-numeric: tabular-nums; font-size: 15px; }
 
 .member-row { min-height: 52px; }
@@ -558,7 +620,7 @@ defineExpose({
      给了反而会越过固定操作条画到「记入账」按钮上面去 */
   position: relative;
   display: flex;
-  width: 108px;
+  width: 84px;
   height: 44px;                 /* 拇指的底线 */
   /* **没激活就滚不动**：默认只是个显示当前值的格子，两边的数被遮住，
      手势也不接。点一下（.live）才露出来、才开始拨 */
@@ -566,8 +628,8 @@ defineExpose({
   outline: none;
   /* 一格一停。没有 snap 它会停在两格之间，「到底算几」就说不清了 */
   scroll-snap-type: x mandatory;
-  /* 首尾两格也要停得到中间：(108 − 36) / 2 */
-  padding: 0 36px;
+  /* 首尾两格也要停得到中间：(84 − 36) / 2 */
+  padding: 0 24px;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
   /* **只接管横向手势**。不写的话手指在这一格上竖着划，页面不动，
