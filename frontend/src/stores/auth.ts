@@ -5,7 +5,7 @@ import { ApiError, api, setToken } from 'src/api/client'
 import type { Member } from 'src/api/types'
 import { setLang } from 'src/i18n'
 
-//: 自己是谁，也在本地留一份 —— 和 meta 那份缓存同一个道理。
+// 自己是谁，也在本地留一份 —— 和 meta 那份缓存同一个道理。
 //  它只用来做**界面门卫**（谁能点「确认已完成」、显不显示个人设置、默认付款人），
 //  真正的权限判定在后端拿 token 说话，所以用一份本地缓存的身份不放大任何权限。
 const ME_KEY = 'nagaya.me'

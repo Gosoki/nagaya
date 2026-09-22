@@ -210,10 +210,13 @@ export const useBills = defineStore('bills', () => {
 
   /** 固定费面板。ck 是缓存 key（'draft' 或 'st:4'），面板自己算得出来 */
   async function loadMonthly(ck: string): Promise<MonthlyData> {
+    const gen = generation
     const d = await api.get<MonthlyData>(
       ck === 'draft' ? '/api/monthly' : `/api/monthly?statement_id=${ck.slice(3)}`,
     )
-    monthly.value = { ...monthly.value, [ck]: d }
+    // 和账单那边同一条规矩：出账之前发出去的这一发，回来的是已经归进新单子的
+    // 那批固定费。写进去的话，「未出账」那页会把它们当本期草稿画出来，还可点可改
+    if (gen === generation) monthly.value = { ...monthly.value, [ck]: d }
     return d
   }
 
