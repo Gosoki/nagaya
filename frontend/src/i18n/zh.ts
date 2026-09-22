@@ -179,7 +179,7 @@ export default {
     backup_disk_full: '盘不够了，备份没做',
     backup_corrupt: '刚导出来的备份没通过检查，已经删掉了',
     backup_empty_source: '账本是空的，没有备份，旧的也一份没动',
-    backup_failed: '备份没做成：{message}',
+    backup_failed: '备份没做成：{why}',
     not_found: '找不到了，刷新一下再试',
     name_required: '名字不能为空',
     name_taken: '「{name}」已经有了',

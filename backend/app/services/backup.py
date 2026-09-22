@@ -303,7 +303,9 @@ def run(session: Session) -> dict[str, Any]:
         raise
     except Exception as e:                # sqlite3.OperationalError: disk I/O error 等
         part.unlink(missing_ok=True)
-        raise BackupError("backup_failed", f"备份没做成：{e}", path=str(part)) from e
+        # why 带上原始原因（磁盘 I/O 错、盘满…）。它是**诊断数据不是界面文案** ——
+        # 备份失败这一条如果不说原因，用户在面板上只看得到「没做成」，无从下手
+        raise BackupError("backup_failed", f"backup failed: {e}", path=str(part), why=str(e)) from e
 
     keep = int(settings_svc.get(session, "backup_keep") or 0)
     pruned = _prune(directory, keep, protect=final)

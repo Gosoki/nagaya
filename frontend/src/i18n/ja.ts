@@ -179,7 +179,7 @@ export default {
     backup_disk_full: '空き容量が足りず、バックアップを取れませんでした',
     backup_corrupt: '作成したバックアップが検査に通らなかったため削除しました',
     backup_empty_source: '台帳が空です。バックアップは取らず、既存の世代もそのままです',
-    backup_failed: 'バックアップを作成できませんでした：{message}',
+    backup_failed: 'バックアップを作成できませんでした：{why}',
     not_found: '見つかりません。画面を更新してください',
     name_required: '名前を入力してください',
     name_taken: '「{name}」はすでにあります',
