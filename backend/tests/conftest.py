@@ -15,11 +15,12 @@ from app.auth import hash_password
 from app.db import get_session
 from app.main import app as fastapi_app
 from app.models import Member
+from app.services import settings as settings_svc
 from app.services.settings import seed_settings
 
 
 @pytest.fixture
-def session():
+def session(tmp_path):
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -28,6 +29,11 @@ def session():
     SQLModel.metadata.create_all(engine)
     with Session(engine) as s:
         seed_settings(s)
+        # **备份目录一律指到 tmp。** 不指的话默认是 backend/backups/ ——
+        # 用户真备份放在那儿，而任何一条忘了设 backup_path 的用例都会往里写，
+        # 假备份和真备份同名同形混在一起，「恢复最新那份」就会盖错东西。
+        # 这不是假想：审计的 agent 跑探测时就往里塞了 13 份 5MB 的垃圾
+        settings_svc.set_(s, "backup_path", str(tmp_path / "backups"))
         yield s
 
 

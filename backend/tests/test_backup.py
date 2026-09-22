@@ -289,3 +289,20 @@ def test_status_actually_opens_the_newest_one(session: Session, bk: Path) -> Non
     st = backup_svc.status(session)
     assert st["last_ok"] is False, "打不开的那份不许显示成正常"
     assert st["error"] == "backup_corrupt"
+
+
+def test_tests_never_write_into_the_real_backup_folder(session: Session, members) -> None:
+    """跑测试不许碰 backend/backups/ —— 那是用户真备份待的地方。
+
+    conftest 把 backup_path 指到 tmp 了。这条用例盯着那一行别被人删掉：
+    忘了设的话假备份会和真备份同名同形混在一个目录里，
+    而「恢复最新那份」就会盖错东西。审计的 agent 真往里塞过 13 份。
+    """
+    from app.services import backup as bk
+
+    real = Path(__file__).resolve().parents[1] / "backups"
+    before = {p.name for p in real.iterdir()} if real.is_dir() else set()
+    bk.run(session)                      # 故意不设 backup_path，用 conftest 给的
+    after = {p.name for p in real.iterdir()} if real.is_dir() else set()
+    assert after == before, f"往真实备份目录里写了：{after - before}"
+    assert str(bk.backup_dir(session)).startswith("/"), "该指到 tmp 而不是仓库里"
