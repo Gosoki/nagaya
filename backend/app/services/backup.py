@@ -109,8 +109,9 @@ def _prepare_dir(session: Session) -> Path:
         ) from e
 
     # 「目录建得出来」不等于「文件写得进去」：只读挂载、别人的目录、满盘 ——
-    # 都得真写一次才知道。带 pid 是为了两个进程同时探时不互相删对方的探针
-    probe = directory / f".nagaya-write-test-{os.getpid()}"
+    # 都得真写一次才知道。名字带 pid **和线程号**：自动备份跑在后台线程、
+    # 点「立即备份」走请求线程，只带 pid 的话同一进程里那两条就用同一个探针名
+    probe = directory / f".nagaya-write-test-{os.getpid()}-{threading.get_ident()}"
     try:
         probe.write_bytes(b"ok")
     except OSError as e:
