@@ -112,9 +112,7 @@
             :aria-pressed="adjNeg(m.id)"
             :aria-label="t('split.negative')"
             @click="flipAdj(m.id)"
-          >
-            {{ adjNeg(m.id) ? '−' : '+' }}
-          </button>
+          />
           <input
             class="num-input"
             :class="{ neg: adjNeg(m.id) }"
@@ -602,23 +600,37 @@ defineExpose({
    点一下翻成一颗红圆点「−」，那一格是减的。
    两个状态各自印着**当前**是什么，不是印着「点我会变成什么」 */
 .sign {
+  position: relative;
   flex: 0 0 26px;            /* 不让 flex 把它抻成椭圆 */
   width: 26px;
   height: 26px;
+  padding: 0;
   border: none;
   border-radius: 50%;
   background: transparent;
   color: var(--nagaya-ink-4);
-  font-size: 17px;
-  line-height: 1;
   cursor: pointer;
   transition: background 0.12s, color 0.12s;
 }
+/* ＋ 和 − 是两道 CSS 画的杠，不是字 ——
+   字体里的「−」挂在数学轴上，比圆心高一点点，套进圆里就是歪的；
+   两道杠用 inset:0 + margin:auto 居中，是几何正中，换字体也不会跑 */
+.sign::before,
+.sign::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  border-radius: 1px;
+  background: currentColor;
+}
+.sign::before { width: 11px; height: 2px; }   /* 横杠：两个状态都在 */
+.sign::after { width: 2px; height: 11px; }    /* 竖杠：只有「＋」有 */
 .sign.on {
   background: var(--nagaya-neg);
   color: #fff;
-  font-weight: 700;
 }
+.sign.on::after { display: none; }
 .share-col { text-align: right; font-variant-numeric: tabular-nums; font-size: 15px; }
 
 .member-row { min-height: 52px; }
