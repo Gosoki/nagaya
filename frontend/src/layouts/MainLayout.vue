@@ -154,7 +154,10 @@ let footWatch: ResizeObserver | null = null
 function measureFooter() {
   const el = footEl.value?.$el
   if (!el) return
-  const h = Math.round(el.getBoundingClientRect().height)
+  // **向下取整**。真实高度常常带小数（安全区一掺进来就有），四舍五入可能比真值
+  // 大半像素 —— 固定操作条就被顶高那么一点，和底栏之间露出一条发丝缝，
+  // 而缝里是正在滚的内容。宁可小一点：小了是压在底栏底下（它 z-index 2000，盖得住）
+  const h = Math.floor(el.getBoundingClientRect().height)
   if (h > 0) document.documentElement.style.setProperty('--nagaya-footer-h', `${h}px`)
 }
 

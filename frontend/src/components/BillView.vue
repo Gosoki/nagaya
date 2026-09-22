@@ -966,7 +966,10 @@ function doCut() {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: var(--nagaya-footer-h);
+  /* 再往下压 1px，**故意和底栏叠一条**：两条各自取整之后中间可能差出半像素，
+     在 3x 屏上就是一条看得见的发丝缝，而缝里是正在滚的内容。
+     叠着没有代价 —— 底栏 z-index 2000，盖在上面 */
+  bottom: calc(var(--nagaya-footer-h) - 1px);
   z-index: 10;
   display: grid;
   grid-template-columns: 1fr 1fr;
