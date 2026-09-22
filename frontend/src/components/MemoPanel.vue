@@ -227,7 +227,7 @@ function removeMemo(m: Memo) {
   line-height: 1.5;
   color: rgba(0, 0, 0, 0.6);
 }
-.note::placeholder { color: #c8c8c8; }
+.note::placeholder { color: var(--nagaya-ink-4); }
 .memo-title {
   border: none;
   outline: none;
@@ -237,7 +237,7 @@ function removeMemo(m: Memo) {
   padding: 0;
   color: inherit;
 }
-.memo-title::placeholder { color: #bbb; }
+.memo-title::placeholder { color: var(--nagaya-ink-4); }
 .add-row { border-top: 1px solid rgba(0, 0, 0, 0.06); min-height: var(--nagaya-add-row-h); }
 .new-name {
   border: none;
@@ -247,5 +247,5 @@ function removeMemo(m: Memo) {
   padding: 6px 0;
   color: inherit;
 }
-.new-name::placeholder { color: #bbb; }
+.new-name::placeholder { color: var(--nagaya-ink-4); }
 </style>

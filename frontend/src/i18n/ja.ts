@@ -29,6 +29,8 @@ export default {
     deleted: '削除しました', restored: '削除を取り消しました',
   },
   split: {
+    excluded: '対象外',
+    excludeHint: 'タップでこの記録から除外',
     dragHint: '境界をドラッグして配分を調整',
     equalize: '均等に戻す',
     weight: '比率', adjustment: '調整', share: '負担額',

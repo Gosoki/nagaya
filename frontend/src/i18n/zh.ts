@@ -29,6 +29,8 @@ export default {
     deleted: '已删掉', restored: '已撤销删除',
   },
   split: {
+    excluded: '不参与',
+    excludeHint: '点一下＝这笔他不参与',
     dragHint: '拖动分界线调整谁多谁少',
     equalize: '恢复等分',
     weight: '比例', adjustment: '调整', share: '应担',

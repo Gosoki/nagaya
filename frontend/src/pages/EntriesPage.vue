@@ -311,7 +311,7 @@ async function onRefresh(done: () => void) {
      实测要往回滚三千多像素才找得回来 */
   top: var(--nagaya-tabs-h);
   z-index: 2;
-  background: #fff;
+  background: var(--nagaya-bg);
   border-bottom: 1px solid rgba(0, 0, 0, 0.06);
 }
 .chip {
@@ -323,20 +323,20 @@ async function onRefresh(done: () => void) {
   padding: 0 8px 0 14px;
   border: none;
   border-radius: 16px;
-  background: #f2f2f5;
-  color: #555;
+  background: var(--nagaya-fill);
+  color: var(--nagaya-ink-2);
   font-size: 13px;
   white-space: nowrap;
   cursor: pointer;
 }
-.chip.on { background: var(--q-primary); color: #fff; }
+.chip.on { background: var(--nagaya-accent); color: #fff; }
 
-.statement-row { background: #f5f7ff; }
+.statement-row { background: var(--nagaya-accent-bg); }
 .date-head {
   padding: 10px 16px 4px;
   font-size: 12px;
-  color: #888;
-  background: #fafafa;
+  color: var(--nagaya-ink-3);
+  background: var(--nagaya-bg-sunken);
   position: sticky;
   top: 0;
   z-index: 1;

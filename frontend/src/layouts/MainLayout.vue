@@ -170,20 +170,20 @@ onMounted(boot)
 /* 账单上的一「块」：固定费、本期其他、每人、转账方案各算一块。
    块与块之间用 8px 的灰带断开 —— 1px 细线在手机上分不出「同一块里的两行」
    和「两块之间」，整页会糊成一长条 */
-.bill-section { border-bottom: 8px solid #f2f2f2; }
+.bill-section { border-bottom: 8px solid var(--nagaya-bg-sunken); }
 /* 离线细带。颜色用 warning 一路：这不是错误，是「你看到的可能不是最新的」 */
 .stale-bar {
   min-height: 32px;
   padding: 4px 12px;
   background: #fff4e0;
-  color: #8a5a00;
+  color: var(--nagaya-warn);
   font-size: 12px;
 }
 .stale-retry {
   border: none;
   background: transparent;
-  color: #8a5a00;
-  font-size: 12px;
+  color: var(--nagaya-warn);
+  font-size: var(--nagaya-fs-meta);
   font-weight: 600;
   text-decoration: underline;
   padding: 6px 4px;

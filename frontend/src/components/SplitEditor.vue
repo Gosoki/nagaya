@@ -83,15 +83,30 @@
     >
       <!-- 点头像/名字＝这个人这笔不参与（比例设 0），再点一下恢复。
            「谁没在」是改分摊时最常做的事，不该还要先点开比例再选一次 -->
-      <button class="name-col row items-center no-wrap" @click="toggleOut(m.id)">
+      <button
+        class="name-col row items-center no-wrap"
+        type="button"
+        :aria-pressed="weightOf(m.id) === 0"
+        :title="t('split.excludeHint')"
+        @click="toggleOut(m.id)"
+      >
         <MemberAvatar :member-id="m.id" class="q-mr-sm" />
-        <div class="name ellipsis">{{ m.display_name }}</div>
+        <div class="col column items-start" style="min-width: 0">
+          <div class="name ellipsis">{{ m.display_name }}</div>
+          <!-- **状态得可见，手势才敢留。** 「点头像＝这笔他不参与」是这一屏
+               最常用的动作，可它原来除了整行变灰之外没有任何说明 ——
+               变灰在别的地方也表示「禁用」，看不出是自己点出来的 -->
+          <div v-if="weightOf(m.id) === 0" class="excluded">{{ t('split.excluded') }}</div>
+        </div>
       </button>
 
       <!-- 比例不用输入框：真机 iOS 上 type=number 没有上下箭头，
            改个 0/1 得弹出数字键盘挡半屏。点一下直接选，全程不碰键盘 -->
       <div class="weight-col">
-        <button class="weight-pill" :class="{ off: weightOf(m.id) === 0 }">
+        <button class="weight-pill" type="button" :class="{ off: weightOf(m.id) === 0 }">
+          <!-- 那个小三角用 CSS 画（见 .weight-pill::after），不用 q-icon：
+               material-icons 是**连字字体**，图标名会实打实留在 textContent 里 ——
+               药丸的文字就成了「1arrow_drop_down」，读屏会照着念出来 -->
           {{ weightOf(m.id) }}
           <q-popup-proxy cover transition-show="jump-down">
             <div class="weight-pick row no-wrap">
@@ -593,31 +608,50 @@ defineExpose({
 .adj-col { padding-left: 14px; }
 .share-col { text-align: right; font-variant-numeric: tabular-nums; font-size: 15px; }
 
-.member-row { min-height: 48px; }
+.member-row { min-height: 52px; }
 /* 权重 0 ＝ 这个人这笔不参与。整行压灰，1:1:0 一眼就认得出来 */
 .member-row.out .name,
-.member-row.out .share-col { color: #bdbdbd; }
-.member-row.out .q-avatar { opacity: 0.45; }
-.name { font-size: 15px; }
+.member-row.out .share-col { color: var(--nagaya-ink-4); }
+.member-row.out .name { text-decoration: line-through; }
+.member-row.out .q-avatar { opacity: 0.4; }
+.name { font-size: var(--nagaya-fs-body); }
+.excluded {
+  font-size: 11px;
+  line-height: 1.1;
+  color: var(--nagaya-ink-3);
+}
 /* 数字框本身要够高：44px 说的是**可点区域**，输入框太矮拇指点不准 */
 /* 比例那颗药丸：44px 是可点区域的底线，拇指点得准 */
 .weight-col { display: flex; justify-content: center; }
 /* 药丸只占 48px 宽（44 高仍然够拇指点）。撑满整列的话是个大盒子，
    右边又紧贴着调整的下划线，两种输入样式挤在一起看着就乱 */
 .weight-pill {
-  width: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 54px;
   min-height: 44px;                    /* 拇指的底线 */
   border: none;
-  border-radius: 8px;
-  background: #f2f2f5;
-  color: #222;
+  border-radius: var(--nagaya-r-sm);
+  background: var(--nagaya-fill);
+  color: var(--nagaya-ink);
   font-size: 16px;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
+/* 小三角。没有它，这颗灰底药丸和旁边「调整」那个输入框长得太像，
+   看上去像个填不进去的框，而它其实点一下就弹出 0/1/2/3 */
+.weight-pill::after {
+  content: '';
+  margin-left: 5px;
+  border: 4px solid transparent;
+  border-top-color: var(--nagaya-ink-3);
+  transform: translateY(2px);
+}
 .weight-pill.off {
-  background: #fafafa;
-  color: #bdbdbd;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--nagaya-line);
+  color: var(--nagaya-ink-4);
 }
 .weight-pick {
   padding: 4px;
@@ -633,7 +667,7 @@ defineExpose({
   cursor: pointer;
 }
 .weight-pick .pick.on {
-  background: #3d4785;
+  background: var(--nagaya-accent);
   color: #fff;
   font-weight: 600;
 }
@@ -654,7 +688,7 @@ defineExpose({
   font-variant-numeric: tabular-nums;
   color: inherit;
 }
-.num-input::placeholder { color: #ccc; }
+.num-input::placeholder { color: var(--nagaya-ink-4); }
 
 /* ---------------------------------------------------------- 分配条 */
 .alloc-wrap { margin: 2px 0 14px; }
@@ -664,7 +698,7 @@ defineExpose({
   height: 44px;                 /* 够粗才拖得住，也才看得出比例 */
   border-radius: 12px;
   overflow: hidden;
-  background: #f2f2f5;
+  background: var(--nagaya-fill);
   touch-action: none;           /* 不然手指一动就变成页面滚动 */
   user-select: none;
 }
@@ -719,8 +753,8 @@ defineExpose({
 .link {
   border: none;
   background: transparent;
-  color: #3d4785;
-  font-size: 12px;
+  color: var(--nagaya-accent);
+  font-size: var(--nagaya-fs-meta);
   padding: 4px 2px;
   cursor: pointer;
 }

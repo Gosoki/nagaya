@@ -37,8 +37,8 @@ const short = (name: string) => (name.length <= 4 ? name : name.slice(0, 3))
   padding: 0 14px;
   border-radius: 21px;
   border: none;
-  background: #f2f2f5;
-  color: #555;
+  background: var(--nagaya-fill);
+  color: var(--nagaya-ink-2);
   font-size: 15px;
   cursor: pointer;
 }
