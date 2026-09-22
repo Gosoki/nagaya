@@ -124,10 +124,7 @@ def create_entry(
             old = session.get(Entry, seen.entry_id)
             if old is not None:
                 return to_entry_out(session, old)
-        entry = _create(session, body, member)
-        session.add(RequestKey(key=body.client_key, entry_id=entry.id))
-        session.commit()
-        return to_entry_out(session, entry)
+        return to_entry_out(session, _create(session, body, member))
 
 
 def _create(session: Session, body: EntryIn, member: Member) -> Entry:
@@ -146,6 +143,7 @@ def _create(session: Session, body: EntryIn, member: Member) -> Entry:
         title=body.title,
         note=body.note,
         bundle_id=body.bundle_id,
+        client_key=body.client_key,
     )
 
 

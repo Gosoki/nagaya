@@ -24,6 +24,7 @@ from app.models import (
     EntryKind,
     EntryShare,
     Member,
+    RequestKey,
     now_utc,
     today_jst,
 )
@@ -150,6 +151,7 @@ def create_entry(
     title: str = "",
     note: str = "",
     bundle_id: int | None = None,
+    client_key: str | None = None,
 ) -> Entry:
     """记一笔，并把分摊结果**固化**成 entry_share。
 
@@ -198,6 +200,10 @@ def create_entry(
 
     _write_shares(session, entry, expanded, payer_id)
     _audit(session, actor_id, "create", "entry", entry.id, None, _snapshot(session, entry))
+    if client_key is not None:
+        # 幂等键和这笔账**同一个事务**落库：分两次 commit 的话，第二次撞上锁超时或者
+        # 进程重启，账记上了键却没存下，补交时照样再记一遍
+        session.add(RequestKey(key=client_key, entry_id=entry.id))
     session.commit()
     session.refresh(entry)
     return entry
@@ -486,16 +492,27 @@ def delete_entry(
     """
     if entry.deleted_at is not None:
         return
-    if version is not None and version != entry.version:
+    before = _snapshot(session, entry)
+    # **认领和删除是一条 UPDATE**（和 update_entry 同一个写法）：先读 version 再写的话，
+    # 中间正好有人出账或者改了这笔，核过的 version 就不作数了 —— 刚发出去的账单
+    # 上的一笔被删掉，也没有 409
+    cond = [Entry.id == entry.id, Entry.deleted_at.is_(None)]
+    if version is not None:
+        cond.append(Entry.version == version)
+    claimed = session.execute(
+        sa_update(Entry).where(*cond).values(deleted_at=now_utc(), version=Entry.version + 1)
+    )
+    if claimed.rowcount == 0:
+        session.rollback()
+        session.refresh(entry)
+        if entry.deleted_at is not None:
+            return                                   # 别人刚删过：重复删什么都不做
         raise LedgerError(
             "version_conflict", "这笔账刚被人改过，请刷新后重试", expected=entry.version, got=version
         )
-    before = _snapshot(session, entry)
-    entry.deleted_at = now_utc()
-    # version 也要推进：别人手里那份就此过期。不推的话，另一台手机拿着删除前的
+    # version 也推进了：别人手里那份就此过期。不推的话，另一台手机拿着删除前的
     # version 去改，乐观锁还以为没人动过
-    entry.version += 1
-    session.add(entry)
+    session.refresh(entry)
     _audit(session, actor_id, "delete", "entry", entry.id, before, None)
     session.commit()
 

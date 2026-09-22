@@ -215,6 +215,9 @@ class ConfirmIn(SQLModel):
     expect_left: int
     date: Optional[dt.date] = None
 
+    # true 会被当成 1：「确认已完成」就记成一笔 ¥1 的转账
+    _amount_not_bool = field_validator("amount", "expect_left", mode="before")(_no_bool_amount)
+
 
 class SettingIn(SQLModel):
     value: Any

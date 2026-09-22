@@ -176,6 +176,7 @@ import { useI18n } from 'vue-i18n'
 import type { Member } from 'src/api/types'
 import MemberAvatar from 'src/components/MemberAvatar.vue'
 import { SplitError, split } from 'src/core/split'
+import { seedToRatio } from 'src/core/seed'
 import { digitsOf, toHalfWidth } from 'src/digits'
 import { formatYen } from 'src/i18n'
 import { useMeta } from 'src/stores/meta'
@@ -226,36 +227,20 @@ const touched = ref(false)
  */
 const typing = ref<Record<string, string>>({})
 
+/** 设成 0 之前那个人是几，恢复时原样还回去（不是一律变回 1） */
+const lastNonZero = ref<Record<string, number>>({})
+/** 同上，调整额。「不参与」时收起来，恢复时还回去 */
+const lastAdj = ref<Record<string, number>>({})
+
 function resetWeights() {
-  const seed = props.seedRule ?? null
-  const seedMode = (seed?.mode as string) ?? 'ratio'
-  const keys = props.members.map((m) => String(m.id))
-
-  // 老数据里还有 mode:'exact' 的规则（界面上已经没有这个模式了）。
-  // 原样换算成「权重全 1 + 调整额」：基数取 floor(总额/人数)，调整额就是
-  // 各人金额减掉基数 —— 加回去一分不差。总额取规则自己的和，不依赖当前金额。
-  if (seed && seedMode === 'exact') {
-    const seeded = (seed.exact ?? {}) as Record<string, number>
-    const total = keys.reduce((sum, k) => sum + Number(seeded[k] ?? 0), 0)
-    const base = Math.floor(total / (keys.length || 1))
-    weights.value = Object.fromEntries(keys.map((k) => [k, 1]))
-    adjustments.value = Object.fromEntries(
-      keys.map((k) => [k, Number(seeded[k] ?? 0) - base]).filter(([, v]) => v !== 0),
-    )
-    typing.value = {}
-    return
-  }
-
-  const seededW = (seed?.weights ?? null) as Record<string, number> | null
-  const equal = Number(seed?.equal_weight ?? 1)
-  weights.value = Object.fromEntries(
-    keys.map((k) => [k, seededW ? Number(seededW[k] ?? 0) : equal]),
-  )
-  const seededAdj = (seed?.adjustments ?? {}) as Record<string, number>
-  adjustments.value = Object.fromEntries(
-    Object.entries(seededAdj).filter(([k, v]) => keys.includes(k) && Number(v) !== 0),
-  )
+  // 起步规则 → 比例 + 调整额。和「没碰过就存」用的是同一个函数（src/core/seed.ts）
+  const seeded = seedToRatio(props.seedRule ?? null, props.members.map((m) => String(m.id)))
+  weights.value = seeded.weights
+  adjustments.value = seeded.adjustments
   typing.value = {}
+  // 「不参与」时收起来的那些是**上一笔**的，换了规则就不该再还回去
+  lastNonZero.value = {}
+  lastAdj.value = {}
 }
 resetWeights()
 /**
@@ -496,10 +481,6 @@ function setWeight(id: number, n: number) {
   weights.value = { ...weights.value, [String(id)]: n }
 }
 
-/** 设成 0 之前那个人是几，恢复时原样还回去（不是一律变回 1） */
-const lastNonZero = ref<Record<string, number>>({})
-/** 同上，调整额。「不参与」时收起来，恢复时还回去 */
-const lastAdj = ref<Record<string, number>>({})
 
 /**
  * 点头像：这个人这笔不参与 / 恢复。

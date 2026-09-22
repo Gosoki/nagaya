@@ -116,3 +116,42 @@ def test_config_changes_are_audited(client: TestClient, auth, members, session) 
     for x in logs:
         blob = str(x.before_json) + str(x.after_json)
         assert "password_hash" not in blob and "avatar'" not in blob
+
+
+def test_chunked_oversized_body_is_413_too(client: TestClient) -> None:
+    """没有 Content-Length 的分块上传，超限时原来回的是 400「解析请求体出错」。"""
+
+    def chunks():
+        for _ in range(3):
+            yield b"x" * (512 * 1024)
+
+    r = client.post("/api/entries", content=chunks(), headers={"content-type": "application/json"})
+    assert r.status_code == 413
+    assert r.json()["code"] == "payload_too_large"
+
+
+def test_login_throttle_holds_under_concurrency(client: TestClient, auth) -> None:
+    """并发发一批错密码，原来先查后记，一批全部真的去验了密码。"""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def attempt(_):
+        return client.post("/api/auth/login", json={"name": "a", "password": "wrong"}).status_code
+
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        codes = list(pool.map(attempt, range(24)))
+    assert codes.count(401) <= 5
+    assert codes.count(429) >= 19
+
+
+def test_confirm_amount_rejects_bool(client: TestClient, auth, members) -> None:
+    r = client.post(
+        "/api/bill/confirm",
+        json={"from_id": members[1].id, "to_id": members[0].id, "amount": True, "expect_left": 0},
+        headers=auth,
+    )
+    assert r.status_code == 422
+
+
+def test_tilde_user_backup_path_is_400_not_500(client: TestClient, auth) -> None:
+    r = client.put("/api/settings/backup_path", json={"value": "~nosuchuser_zz/backups"}, headers=auth)
+    assert r.status_code == 400

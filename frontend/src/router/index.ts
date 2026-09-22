@@ -61,12 +61,12 @@ router.onError((err) => {
   }
   location.reload()
 })
-router.afterEach(() => {
+router.afterEach((to) => {
   try {
     sessionStorage.removeItem(RELOADED)             // 成功导航过就把标记清掉
   } catch {
     /* ignore */
   }
   // 有新版等着就趁这次切页换上（切页本来就丢当前页的状态，不额外丢东西）
-  applyUpdateIfReady()
+  applyUpdateIfReady(to.fullPath)
 })

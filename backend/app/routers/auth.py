@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import threading
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -26,6 +27,9 @@ FREE_TRIES = 5
 BASE_WAIT = 30
 MAX_WAIT = 15 * 60
 _fails: dict[tuple[str, str], tuple[int, float]] = {}
+#: 「查还能不能试 → 记一次失败」必须是一步：并发发 30 个错密码的话，
+#: 先查后记的写法 30 个都查到「还没到 5 次」，全部真的验了密码
+_lock = threading.Lock()
 
 
 def _wait_left(key: tuple[str, str], now: float) -> int:
@@ -59,17 +63,20 @@ def to_member_out(m: Member) -> MemberOut:
 def login(body: LoginIn, request: Request, session: Session = Depends(get_session)) -> LoginOut:
     key = (request.client.host if request.client else "?", body.name.strip().lower())
     now = time.monotonic()
-    wait = _wait_left(key, now)
-    if wait:
-        # 在验密码**之前**就挡：挡在之后的话，攻击者照样拿到了「这次对不对」
-        raise AppError("too_many_logins", f"retry in {wait}s", status=429, seconds=wait)
+    with _lock:
+        wait = _wait_left(key, now)
+        if wait:
+            # 在验密码**之前**就挡：挡在之后的话，攻击者照样拿到了「这次对不对」
+            raise AppError("too_many_logins", f"retry in {wait}s", status=429, seconds=wait)
+        # **先记成失败再去验**：验对了再撤掉。这样同一时刻最多放 FREE_TRIES 个进去
+        _note_fail(key, now)
     member = authenticate(session, body.name, body.password)
     if member is None:
-        _note_fail(key, now)
         # 同样不配码：登录页是按 e.status === 401 显示「用户名或密码不对」的
         # （别的状态码要原样说出来 —— 断网时说成密码错会让人一遍遍改密码）
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "用户名或密码不对")
-    _fails.pop(key, None)
+    with _lock:
+        _fails.pop(key, None)
     return LoginOut(token=make_token(member), member=to_member_out(member))
 
 

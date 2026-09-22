@@ -120,25 +120,35 @@ class BodyLimit:
 
         seen = 0
         started = False
+        exceeded = False
+        replaced = False
 
         async def counted():  # noqa: ANN202
-            nonlocal seen
+            nonlocal seen, exceeded
             msg = await receive()
             if msg["type"] == "http.request":
                 seen += len(msg.get("body", b""))
                 if seen > limit:
+                    exceeded = True
                     raise _TooLarge
             return msg
 
         async def watched(msg) -> None:  # noqa: ANN001
-            nonlocal started
+            nonlocal started, replaced
+            # 超限之后应用自己回的那句（FastAPI 把读体时的异常翻成 400
+            # 「There was an error parsing the body」）不许发出去，换成 413
+            if exceeded:
+                if not replaced and msg["type"] == "http.response.start":
+                    replaced = True
+                    await self._reject(scope, send)
+                return
             started = started or msg["type"] == "http.response.start"
             await send(msg)
 
         try:
             await self.inner(scope, counted, watched)
         except _TooLarge:
-            if not started:
+            if not started and not replaced:
                 await self._reject(scope, send)
 
     @staticmethod

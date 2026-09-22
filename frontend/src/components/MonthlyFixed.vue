@@ -139,7 +139,7 @@
 
 <script setup lang="ts">
 import { useQuasar } from 'quasar'
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 
@@ -147,6 +147,7 @@ import { ApiError, api } from 'src/api/client'
 import type { Category, Member, MonthlyData, MonthlyRow } from 'src/api/types'
 import MemberPicker from 'src/components/MemberPicker.vue'
 import SplitEditor from 'src/components/SplitEditor.vue'
+import { seedToRatio } from 'src/core/seed'
 import { todayJst } from 'src/date'
 import { digitsOf } from 'src/digits'
 import { formatYen } from 'src/i18n'
@@ -191,6 +192,20 @@ const data = ref<MonthlyData | null>(null)
 const rows = ref<Row[]>([])
 
 /**
+ * 没碰过分摊时存哪条规则 —— 和 SplitEditor 预览的是同一份（src/core/seed.ts）。
+ * 新记的这一笔参与人是今天在籍的人，和预览、和 POST 带的 member_ids 一致。
+ * 没有起步规则才发 null：后端用全局默认，和预览的「全员同权」是一回事
+ */
+function untouchedRule(seed: Record<string, unknown> | null): Record<string, unknown> | null {
+  if (!seed) return null
+  return {
+    mode: 'ratio',
+    ...seedToRatio(seed, meta.activeMembers.map((m) => String(m.id))),
+    remainder_to: (seed.remainder_to as string | undefined) || meta.setting<string>('remainder_to', 'payer'),
+  }
+}
+
+/**
  * 每一行分摊给谁。**已录的那一笔按它自己的参与人**（规则里点了名的那几个人），
  * 没录的按今天在籍的人 —— 和记一笔那屏改旧账时同一个写法（AddEntryPage.splitMembers）。
  * 原来一律用今天在籍的人：有人月中搬走之后回来改一下这期的电费，
@@ -231,7 +246,11 @@ function payerOf(row: Row): number | null {
   // 后面两级回退给的是「今天的默认垫付人」，跟当初谁真掏的钱没关系 ——
   // 而这一屏正是靠这个名字告诉人「这笔房租是谁垫的」
   if (historic.value && row.entry_id !== null) return null
-  return row.default_payer_id ?? row.last_payer_id ?? fallbackPayerId.value
+  // 分类上定的默认垫付人已经搬走了：跳过他往下退（和记一笔那边同一个口径）。
+  // 照用的话，手填的房租就记成了已经不住这儿的人垫的。设置里他会标红
+  const living = (id: number | null | undefined) =>
+    id != null && meta.activeMembers.some((m) => m.id === id) ? id : null
+  return living(row.default_payer_id) ?? row.last_payer_id ?? fallbackPayerId.value
 }
 
 const payerName = (row: Row) => {
@@ -314,6 +333,20 @@ async function hydratePayers() {
     if (r.entry_id !== null) r.payer_id = byId.get(r.entry_id) ?? null
   }
 }
+
+/**
+ * 缓存那份被别处刷新了（切回前台、别的页记了账、室友出了账）：照着重建。
+ * 原来这个面板只在挂载时取一次 —— 室友出账之后切回来，上面的合计已经清零，
+ * 这一块还挂着上一期的房租，人以为这期录过了就不填。build 会留住没存的输入
+ */
+watch(
+  () => bills.monthly[cacheKey.value],
+  (d) => {
+    if (!d || d === data.value) return
+    build(d)
+    void hydratePayers()
+  },
+)
 
 onMounted(() => {
   // 缓存先上屏，再后台校正。load() 本身会保留还没保存的输入，所以校正不会抹掉手输的值
@@ -502,7 +535,10 @@ async function saveRow(row: Row) {
   busy.value = true
   try {
     if (willDelete(row)) {
-      await api.del(`/api/entries/${row.entry_id}`)
+      // 带上 version：这一笔要是刚被出账带走了（或者被人改过），不能把刚发进群里的
+      // 那张单子上的账删掉 —— 409 之后走下面 version_conflict 那条路重载，
+      // build() 会把被带走的那一行认出来、提示一句
+      await api.del(`/api/entries/${row.entry_id}?version=${row.version}`)
       // 留着这笔的分摊和日期：清空再重打是「改个金额」，不该顺手把分摊换掉
       row.deleted_rule = row.rule
       row.deleted_date = row.date
@@ -537,7 +573,10 @@ async function saveRow(row: Row) {
           payer_id: payerOf(row),
           category_id: row.category_id,
           title: row.name,
-          rule: row.rule_override ?? row.deleted_rule ?? null,
+          // **没动过分摊也要把预览那条发上去**：没录的行是从上期那一笔（或者刚删掉的
+          // 那一笔）的分摊起步的，发 null 的话后端落成分类默认 —— 屏幕上是
+          // 45,000/40,000/35,000，库里是均分
+          rule: row.rule_override ?? untouchedRule(row.deleted_rule ?? row.rule),
           // 和分摊预览用的是同一批人，避免预览与落库分摊到不同的人头上
           member_ids: meta.activeMembers.map((m) => m.id),
         },

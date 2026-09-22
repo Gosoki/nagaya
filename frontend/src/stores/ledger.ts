@@ -46,7 +46,11 @@ export const useLedger = defineStore('ledger', () => {
         api.get<Entry[]>(`/api/entries?limit=${LIMIT}`),
         api.get<{ prev_cut_at: string | null; prev_label: string | null }>('/api/bill'),
       ])
-      if (my !== seq || w !== writes) return
+      if (my !== seq) return                       // 后面还有更新的一发，交给它
+      // 我出发之后本地写过（记了一笔、删了一笔）：这份列表里没有它。
+      // **别整份丢掉就算了** —— 冷启动慢网时刚记的那一笔会成了流水里唯一的一笔，
+      // 日期锁也跟着失效。再取一次，那一笔已经落库，新的列表里就有它
+      if (w !== writes) return refresh()
       entries.value = e
       truncated.value = e.length >= LIMIT
       prevCutAt.value = bill.prev_cut_at
@@ -60,7 +64,8 @@ export const useLedger = defineStore('ledger', () => {
   async function create(payload: EntryPayload): Promise<Entry> {
     const saved = await api.post<Entry>('/api/entries', payload)
     writes += 1
-    entries.value = [saved, ...entries.value]
+    // 按 id 去重：补交离线草稿时，后端认出幂等键会把**已经在列表里的那一笔**还回来
+    entries.value = [saved, ...entries.value.filter((e) => e.id !== saved.id)]
     // 账单那几页缓存着，记完这笔它们就旧了。后台刷，不清空 ——
     // 清空的话下次点过去又要白屏等一遍。**失败也不冒泡**：这笔已经记上了
     useBills().refreshCached(saved)
@@ -98,7 +103,7 @@ export const useLedger = defineStore('ledger', () => {
   }): Promise<Entry> {
     const saved = await api.post<Entry>('/api/bill/confirm', body)
     writes += 1
-    entries.value = [saved, ...entries.value]
+    entries.value = [saved, ...entries.value.filter((e) => e.id !== saved.id)]
     useBills().refreshCached(saved)
     return saved
   }

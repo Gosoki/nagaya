@@ -63,9 +63,16 @@ STALE_PART_SECONDS = 6 * 3600
 # ---------------------------------------------------------------- 位置
 
 def resolve_backup_path(raw: str) -> Path:
-    """设置里填的那串路径最后落在哪。相对路径相对 backend/"""
-    path = Path(raw.strip() or "./backups").expanduser()
-    return (path if path.is_absolute() else BASE_DIR / path).resolve()
+    """设置里填的那串路径最后落在哪。相对路径相对 backend/
+
+    解析不了的一律 ValueError：`~不存在的用户/…` 在 expanduser 里抛的是 RuntimeError，
+    NUL 抛 ValueError —— 统一成一种，调用方好接
+    """
+    try:
+        path = Path(raw.strip() or "./backups").expanduser()
+        return (path if path.is_absolute() else BASE_DIR / path).resolve()
+    except (RuntimeError, OSError) as e:
+        raise ValueError(str(e)) from e
 
 
 def backup_dir(session: Session) -> Path:
@@ -429,6 +436,8 @@ def run_if_due(session: Session) -> dict[str, Any] | None:
     # 取了安全的那一头，照它判到没到期就行。原来当成出错，每小时备一份，
     # 30 份保留只盖得住 30 个小时
     healthy = st["error"] in (None, "backup_clock_skew")
-    if healthy and st["age_hours"] is not None and st["age_hours"] < every:
+    # age 是负的（最新那份的名字和 mtime 都在未来）也算到期：否则自动备份一直停着，
+    # 要等真实时间追上那个未来时刻。补做一份之后新文件的时间是对的，节奏自己恢复
+    if healthy and st["age_hours"] is not None and 0 <= st["age_hours"] < every:
         return None
     return run(session)

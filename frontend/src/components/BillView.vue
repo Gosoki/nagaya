@@ -862,7 +862,12 @@ function confirmReceived(tr: BillTransfer, index: number) {
     if (fired) return
     fired = true
     // 先把逗号和空格擦掉：整屏的金额都写成 ¥10,000，照着屏幕打回去是最自然的动作
-    const amount = Math.floor(Number(toHalfWidth(String(value)).replace(/[,，.．\s]/g, '')))
+    // 千分位的逗号（和点）擦掉；**别的小数点不当千分位** —— 日元没有小数，
+    // 「5000.00」原来会被擦成 500,000。整串是「1,234,567 / 1.234.567」这种分组才擦点
+    const raw = toHalfWidth(String(value)).replace(/[\s．]/g, (c) => (c === '．' ? '.' : ''))
+    const grouped = /^\d{1,3}([.,]\d{3})+$/.test(raw)
+    const plain = /^\d+$/.test(raw.replace(/,/g, ''))
+    const amount = grouped || plain ? Number(raw.replace(/[.,]/g, '')) : NaN
     if (!Number.isFinite(amount) || amount <= 0) {
       // **不许静默 return。** 对话框已经关了、页面一个字不变，和「刚才没点上」
       // 长得一模一样 —— 而这个函数上面那段注释说的正是那个状态会让人再按一次、

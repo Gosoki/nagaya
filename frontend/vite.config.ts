@@ -55,14 +55,22 @@ export default defineConfig({
         runtimeCaching: [
           {
             urlPattern: ({ request }) => request.mode === 'navigate',
+            // **只走网络，不按 URL 另存一份壳。** 原来是 NetworkFirst + 'nagaya-shell'：
+            // 每个地址各存一份，发版之后 '/' 那份可能还是上一版 —— 断网冷启动拿到它，
+            // 入口脚本早就不在新的预缓存里，白屏，离线草稿也记不了。
+            // SPA 所有路由都是同一份 index.html，预缓存里本来就有一份和资源同版的。
+            //
+            // 写成 NetworkFirst 是因为 workbox 只许它带超时（NetworkOnly 不收
+            // networkTimeoutSeconds），而超时是在外面用流量、够不着家里局域网时
+            // 不干等一分钟的关键。缓存换了个新名字、并且**一份都不让存**
+            // （cacheableResponse 的状态码永远对不上）—— 旧的 nagaya-shell 不再被读
             handler: 'NetworkFirst',
             options: {
-              cacheName: 'nagaya-shell',
+              cacheName: 'nagaya-nav',
+              cacheableResponse: { statuses: [-1] },
               networkTimeoutSeconds: 3,      // 服务器不在就别干等
-              expiration: { maxEntries: 16 },
-              // 网络不通、这个地址也没在 nagaya-shell 里缓存过（刚装到主屏后的
-              // 第一次离线启动、或者头一回离线点进某个深链）：退回预缓存里
-              // **同一版**的壳，而不是一张浏览器的断网页。离线草稿那条路靠的就是能打开
+              // 网络不通或超时：退回预缓存里**同一版**的壳，而不是一张浏览器的断网页。
+              // 离线草稿那条路靠的就是能打开
               precacheFallback: { fallbackURL: 'index.html' },
             },
           },

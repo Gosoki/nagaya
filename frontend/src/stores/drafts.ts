@@ -50,8 +50,10 @@ export const useDrafts = defineStore('drafts', () => {
   const auth = useAuth()
   const items = ref<Draft[]>(read())
   /** 当前登录的这个人的草稿（加上没记名的老草稿） */
+  // 没记名的（老版本存的、或者存的那一刻还没认出自己是谁 —— 离线冷启动）谁都给看：
+  // 按「记名为 null」过滤的话，身份一认出来，这笔钱就既看不见、也交不了、也丢不掉
   const mine = computed(() =>
-    items.value.filter((d) => d.memberId === undefined || d.memberId === (auth.me?.id ?? null)),
+    items.value.filter((d) => d.memberId == null || d.memberId === auth.me?.id),
   )
   const count = computed(() => mine.value.length)
 

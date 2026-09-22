@@ -82,7 +82,10 @@ def update_setting(
         # 那个目录整个对外发，未登录就能下载。NUL 字符会让后面建目录时直接 500
         if "\x00" in value:
             raise _bad(key, "path")
-        target = backup_dir_for(value)
+        try:
+            target = backup_dir_for(value)
+        except ValueError:
+            raise _bad(key, "path") from None
         if target == WEB_ROOT or target.is_relative_to(WEB_ROOT):
             raise _bad(key, "outside web root")
     elif spec["type"] in {"int", "int_or_null"}:

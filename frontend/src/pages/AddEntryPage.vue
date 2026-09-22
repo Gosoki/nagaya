@@ -221,13 +221,18 @@
 </template>
 
 <script lang="ts">
-/** 这次页面加载以来，记一笔是不是还没挂载过（＝冷启动落在这一屏） */
+/** 这次页面加载以来，记一笔是不是还没挂载过 */
 let firstMount = true
-/** 触屏设备、而且是冷启动那一下。每次挂载问一次：问过就不再是冷启动了 */
+/**
+ * 触屏设备、而且是**冷启动就落在这一屏**。每次挂载问一次，问过就不再是了。
+ * 「第一次挂载」还不够：从账单页冷启动、看完再点进记一笔，也是第一次挂载，
+ * 那时视口早就稳了，该聚焦照样聚焦。vue-router 在历史记录里给第一条记的 back 是 null
+ */
 function coldTouchLaunch(): boolean {
-  const cold = firstMount
+  const first = firstMount
   firstMount = false
-  return cold && window.matchMedia('(pointer: coarse)').matches
+  const landed = (window.history.state as { back?: unknown } | null)?.back == null
+  return first && landed && window.matchMedia('(pointer: coarse)').matches
 }
 </script>
 
@@ -382,7 +387,10 @@ const gridCategories = computed(() => {
  * 后端本来就防着这件事（update_entry 里 `inheritable = prev_kind != settlement`），
  * 是前端把这道防线绕开的，这里把同一条规矩镜像一遍。
  */
+/** loadForEdit 正在把一笔账灌进表单：这期间 kind 的变化不是人切的，别清规则 */
+let hydrating = false
 watch(kind, (now, before) => {
+  if (hydrating) return
   if (before === 'settlement' && now !== 'settlement') {
     ownRule.value = null
     loadedRule.value = null
@@ -540,6 +548,7 @@ const loaded = ref<Entry | null>(null)
 async function loadForEdit(id: number) {
   try {
     const e = await api.get<Entry>(`/api/entries/${id}`)
+    hydrating = true
     loaded.value = e
     editKind.value = e.kind
     amount.value = Math.abs(e.amount_jpy)
@@ -555,7 +564,11 @@ async function loadForEdit(id: number) {
     // label 是空的是常态（名字由出账日渲染）—— 原来直接拿 label，于是这条提示从来不出现
     billedLabel.value =
       e.statement_id !== null ? statementLabel({ label: e.statement_label, cut_at: e.statement_cut_at }) || null : null
+    // watch(kind) 是在下一拍才跑的：等它跑完再放开
+    await nextTick()
+    hydrating = false
   } catch (err) {
+    hydrating = false
     $q.notify({ type: 'negative', message: err instanceof ApiError ? err.text : String(err) })
     goBack()
   }
@@ -624,6 +637,25 @@ async function resolveConflict() {
     return
   }
   const before = loaded.value
+  // **这笔刚被出账带走了**（没人改过它）：得照实说。用「别人改了分摊或备注」兜底的话，
+  // 人点了覆盖，改的就是一张刚发进群里的账单，而他全程不知道
+  if (before && before.statement_id === null && latest.statement_id !== null) {
+    const label = statementLabel({ label: latest.statement_label, cut_at: latest.statement_cut_at })
+    billedLabel.value = label || null
+    $q.dialog({
+      title: t('entry.conflictTitle'),
+      message: t('entry.conflictCut', { label }),
+      cancel: true,
+      persistent: true,
+    })
+      .onOk(() => {
+        version.value = latest.version
+        loaded.value = latest
+        void saveEdit()
+      })
+      .onCancel(() => void reloadFresh(id))
+    return
+  }
   const changes: string[] = []
   if (before) {
     if (before.amount_jpy !== latest.amount_jpy) {
@@ -634,6 +666,12 @@ async function resolveConflict() {
       changes.push(`${t('entry.payer')} ${name(before.payer_id)} → ${name(latest.payer_id)}`)
     }
     if (before.date !== latest.date) changes.push(`${t('entry.conflictDate')} ${before.date} → ${latest.date}`)
+    if (before.kind !== latest.kind) changes.push(`${t(`kind.${before.kind}`)} → ${t(`kind.${latest.kind}`)}`)
+    if (before.category_id !== latest.category_id) {
+      const cat = (cid: number | null) => (cid === null ? '—' : (meta.categoryById[cid]?.name ?? String(cid)))
+      changes.push(`${cat(before.category_id)} → ${cat(latest.category_id)}`)
+    }
+    if (before.title !== latest.title) changes.push(`「${before.title}」→「${latest.title}」`)
   }
   $q.dialog({
     title: t('entry.conflictTitle'),
@@ -647,7 +685,18 @@ async function resolveConflict() {
       loaded.value = latest
       void saveEdit()
     })
-    .onCancel(() => void loadForEdit(id))
+    .onCancel(() => void reloadFresh(id))
+}
+
+/**
+ * 放弃我的修改、换成服务器上的最新版。**表单里动过的分摊也一并清掉** —— 只重灌字段的话，
+ * 金额换成了别人的、分摊却还是我刚才调的，随手再存一次就把以为已经放弃的分摊存了进去
+ */
+async function reloadFresh(id: number) {
+  rule.value = null
+  await loadForEdit(id)
+  await nextTick()
+  splitEl.value?.reset()
 }
 
 /**
@@ -673,6 +722,13 @@ function removeEntry() {
         if (entry) await ledger.remove(entry)
         else await api.del(`/api/entries/${id}`)
       } catch (e) {
+        // 删的时候带着 version：打开这一页之后这笔被人改过、或者被出账带走了。
+        // 换成最新的摆出来让人再看一眼 —— 不换的话再点多少次都是同一个 409
+        if (e instanceof ApiError && e.code === 'version_conflict') {
+          await reloadFresh(id)
+          $q.notify({ type: 'warning', message: t('entry.deleteConflict'), timeout: 5000 })
+          return
+        }
         $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e) })
         return
       }

@@ -271,14 +271,16 @@ export const useBills = defineStore('bills', () => {
 
   /**
    * 从后台切回来：挂着的这段时间室友可能记了账、甚至出了一张新的。
-   * 缓存过的几张都后台校正一遍（不清空，屏幕不白）。'current' 顺带重取单子列表。
-   * 固定费面板那份不在这儿刷：人可能正停在某一格上改金额，别把它冲掉
+   * 缓存过的几张都后台校正一遍（不清空，屏幕不白）。'current' 顺带重取单子列表
    */
   function refreshViews(): void {
     const cks = Object.keys(views.value)
     if (!cks.length) return
     run('current', true).catch(() => {})
     for (const ck of cks) run(ck as BillKey, true).catch(() => {})
+    // 草稿的固定费面板也重取：面板盯着这份缓存重建，而重建会留住还没存的输入 ——
+    // 不刷的话，室友出完账这一块还挂着上一期的房租
+    if (monthly.value.draft) loadMonthly('draft').catch(() => {})
   }
 
   /** 预热另外两页 + 固定费面板，第一次切过去就不用等 */
