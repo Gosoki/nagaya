@@ -22,6 +22,8 @@ export default {
     dateLocked: '{date} より前は請求済みのため選べません。追記は備考へ',
     editTitle: 'この明細を修正',
     needLabel: '何の支出ですか？',
+    needAmount: '金額は？',
+    amountLabel: '金額',
     needLabelHint: '備考を書けば「その他」として記帳します。カテゴリを選びたい場合はキャンセルしてください。',
     editBilled: 'この明細は「{label}」に含まれています。修正した差額は次回請求の「前期繰越」に入ります',
     deleteConfirm: 'この明細を削除しますか？差額は次回請求に反映されます。',

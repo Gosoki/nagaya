@@ -736,6 +736,31 @@ test('调整额输得进负数，比例点一下就能选', async ({ page }) => 
   expect((await shares()).sort((a, b) => a - b)).toEqual([0, 3750, 5250])
 })
 
+test('金额没填也点得动「记入账」：当场补金额和备注', async ({ page }) => {
+  await login(page)
+  const btn = page.getByRole('button', { name: '记入账' })
+  // 灰的（该填的还没填，这个信号要留着），但**点得动** ——
+  // 原来是真禁用，按下去一点反应都没有，而拇指正好在屏幕底下，
+  // 要补金额得先滚回屏幕上半部那个大数字框
+  await expect(btn).toBeEnabled()
+  expect(await btn.evaluate((e) => getComputedStyle(e).opacity)).toBe('0.6')
+
+  await btn.click()
+  const dialog = page.locator('.q-dialog')
+  await expect(dialog).toBeVisible()
+  await dialog.locator('input').first().fill('3200')
+  await expect(dialog.locator('input').first(), '边打边加千分位').toHaveValue('3,200')
+  await dialog.locator('input').nth(1).fill('火锅')
+  await dialog.getByRole('button', { name: '记入账' }).click()
+  await expect(page.locator('.q-dialog')).toHaveCount(0)
+
+  const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
+  const [latest] = await (await page.request.get('/api/entries?limit=1', { headers })).json()
+  expect(latest.amount_jpy).toBe(3200)
+  expect(latest.title).toBe('火锅')
+  await page.request.delete(`/api/entries/${latest.id}`, { headers })
+})
+
 test('支出 / 收入 / 转账 三等分，选中的是实心色块且三种颜色各不相同', async ({ page }) => {
   await login(page)
   const segs = page.locator('.kind-toggle .q-btn')

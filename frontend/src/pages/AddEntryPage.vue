@@ -119,6 +119,50 @@
       </div>
     </div>
 
+    <!--
+      金额没填就按了「记入账」—— 别让它变成一次没反应的点击。
+
+      按钮仍然是灰的（该填的还没填，这个信号得留着），但**点得动**：
+      点了就在这儿补金额和备注，填完直接记账。不然人得先滚回屏幕上半部
+      那个大数字框，而拇指正好在屏幕底下。
+    -->
+    <q-dialog v-model="asking" @hide="onAskHide">
+      <q-card style="width: 92vw; max-width: 360px">
+        <q-card-section class="text-subtitle1">{{ t('entry.needAmount') }}</q-card-section>
+        <q-card-section class="q-pt-none">
+          <q-input
+            ref="askAmountEl"
+            v-model="askAmount"
+            type="text"
+            inputmode="numeric"
+            autofocus
+            :prefix="t('common.currency')"
+            :label="t('entry.amountLabel')"
+            @keyup.enter="confirmAsk"
+          />
+          <q-input
+            v-model="askNote"
+            class="q-mt-sm"
+            type="text"
+            maxlength="40"
+            :label="t('entry.title')"
+            @keyup.enter="confirmAsk"
+          />
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn v-close-popup flat no-caps color="grey-7" :label="t('common.cancel')" />
+          <q-btn
+            unelevated
+            no-caps
+            :color="kindPalette"
+            :disable="askValue <= 0"
+            :label="t('entry.record')"
+            @click="confirmAsk"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
     <!-- 主操作在拇指区；合计对不上时差额就摆在按钮正上方，不用滚回去找 -->
     <div class="actions">
       <div v-if="splitDiff !== 0 && amount > 0" class="diff-line text-negative">
@@ -131,10 +175,11 @@
         size="lg"
         no-caps
         unelevated
-        :disable="!canSave"
+        :class="{ 'looks-off': !canSave }"
+        :disable="!readyExceptAmount"
         :loading="busy"
         :label="editingId === null ? t('entry.record') : t('entry.save')"
-        @click="editingId === null ? save() : saveEdit()"
+        @click="onPrimary"
       />
       <q-btn
         v-if="editingId !== null"
@@ -154,7 +199,7 @@
 
 <script setup lang="ts">
 import { useQuasar } from 'quasar'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -303,15 +348,65 @@ const dateLabel = computed(() => {
   return date.value === today ? t('common.today') : date.value.slice(5)
 })
 
-const canSave = computed(
+/**
+ * 除了金额，别的都齐了没有。
+ *
+ * 和 canSave 分开，是因为「金额没填」和别的没填**不该是同一种拦法**：
+ * 别的没填（分摊不平、转账没选转给谁）是真的走不下去，按钮就该点不动；
+ * 而金额没填只是少一个数 —— 按钮保持灰色提醒你，但点得动，点了当场补。
+ */
+const readyExceptAmount = computed(
   () =>
-    amount.value > 0 &&
     payerId.value !== null &&
     splitValid.value &&
     // 分类不再是硬门槛：没选但写了备注就记「其他」，两个都没有时按保存会弹框问。
     // 收入本来就没有分类（返现、給付金套不上「日用品/伙食」，写备注更清楚）。
     (kind.value !== 'settlement' || (toMemberId.value !== null && toMemberId.value !== payerId.value)),
 )
+const canSave = computed(() => amount.value > 0 && readyExceptAmount.value)
+
+// ---------------------------------------------- 金额没填时那个补填框
+
+const asking = ref(false)
+const askAmount = ref('')
+const askNote = ref('')
+/** 框里打的那串数字。只认数字，和大金额框一个规矩 */
+const askValue = computed(() => Number(askAmount.value.replace(/\D/g, '')) || 0)
+// 边打边加千分位，和上面那个大金额框一样 —— 三千二和三万二在没有逗号时很容易看错
+watch(askAmount, (v) => {
+  const digits = v.replace(/\D/g, '')
+  const shown = digits ? Number(digits).toLocaleString('en-US') : ''
+  if (shown !== v) askAmount.value = shown
+})
+
+function onPrimary() {
+  if (editingId.value !== null) {
+    void saveEdit()
+    return
+  }
+  if (amount.value > 0) {
+    void save()
+    return
+  }
+  // 只差金额：当场补
+  askAmount.value = ''
+  askNote.value = title.value
+  asking.value = true
+}
+
+function confirmAsk() {
+  if (askValue.value <= 0) return
+  amount.value = askValue.value
+  title.value = askNote.value.trim()
+  asking.value = false
+  // 等框收起来再存：save() 里可能还要再弹一个「这笔是什么」，
+  // 两个框叠在一起时后面那个的遮罩会吃掉点击
+  void nextTick(() => save())
+}
+
+function onAskHide() {
+  askAmount.value = ''
+}
 
 /** 选中分类的默认分摊规则，交给编辑器当初始值 —— 否则预览和实际存下去的不是一回事 */
 const selectedCategoryRule = computed(
@@ -608,6 +703,9 @@ function reset() {
 
 
 .actions :deep(.q-btn) { min-height: 44px; }
+/* 「该填的还没填」这个信号要留着，所以长得和禁用一模一样（Quasar 的禁用态
+   就是 0.6 透明度）—— 但它点得动，点了当场补金额 */
+.actions :deep(.q-btn.looks-off) { opacity: 0.6; }
 .date-hint { max-width: 290px; border-top: 1px solid rgba(0, 0, 0, 0.08); }
 .actions {
   position: fixed;
