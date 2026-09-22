@@ -135,6 +135,7 @@ async function after() {
   position: relative;
   width: 48px;
   height: 48px;
+  padding: 0;                 /* <button> 自带 2px 6px 3px：不清掉，48px 的图会被挤出内容盒，整块偏右下 */
   border: none;
   border-radius: var(--nagaya-r-md);
   background: var(--nagaya-fill);
