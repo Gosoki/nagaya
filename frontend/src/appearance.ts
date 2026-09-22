@@ -23,6 +23,26 @@ function meta(name: string): HTMLMetaElement | null {
   return document.querySelector<HTMLMetaElement>(`meta[name="${name}"]`)
 }
 
+/**
+ * 让浏览器**重新去读**清单。
+ *
+ * 清单是页面加载时读一次的东西。改完名字只把 href 设成同一个地址，浏览器
+ * 认为什么都没变，不会去重拉 —— 于是「改完得刷新一次才生效」。
+ * 把整个 link 元素换掉、地址再带上版本号，才算一次新的声明。
+ *
+ * 只在真的变了才换：meta 每次刷新都会走到这儿，每次都换等于每次都多拉一趟。
+ */
+let manifestToken = ''
+function applyManifest(token: string): void {
+  if (token === manifestToken) return
+  manifestToken = token
+  link('manifest')?.remove()
+  const el = document.createElement('link')
+  el.rel = 'manifest'
+  el.href = `/api/appearance/manifest.webmanifest?v=${encodeURIComponent(token)}`
+  document.head.appendChild(el)
+}
+
 export function applyAppearance(name: string, iconVersion: number): void {
   const title = name.trim()
   if (title) document.title = title
@@ -34,8 +54,7 @@ export function applyAppearance(name: string, iconVersion: number): void {
   const appleTitle = meta('apple-mobile-web-app-title')
   if (appleTitle && title) appleTitle.content = title
 
-  const manifest = link('manifest')
-  if (manifest) manifest.href = '/api/appearance/manifest.webmanifest'
+  applyManifest(`${iconVersion}-${title}`)
 
   if (!iconVersion) return          // 没设过就用打包时那套，别动
   const favicon = link('icon')

@@ -2,9 +2,16 @@
   <!-- 用普通容器而不是 q-page：登录页没有 QLayout 包着，
        QPage 必须是 QLayout 的后代，否则 Quasar 直接拒绝渲染（整页空白）。 -->
   <div class="login-page column flex-center bg-primary text-white q-pa-md">
+    <!-- 这屋自己的名字和图标也要出现在门口：设置里改完，登录页还挂着
+         别人家的「長」字，第一眼就不像自己家的东西。
+         名字和图标从**清单**里拿 —— 那个地址不要登录（本来就是给浏览器读的），
+         而设置接口要，这儿还没人登录 -->
     <div class="column items-center q-mb-xl">
-      <div class="logo">長</div>
-      <div class="text-h5 q-mt-md">{{ t('app.name') }}</div>
+      <div class="logo">
+        <img v-if="logo" :src="logo" class="logo-img" alt="" />
+        <template v-else>長</template>
+      </div>
+      <div class="text-h5 q-mt-md">{{ appName || t('app.name') }}</div>
       <div class="text-caption text-white-7">{{ t('app.tagline') }}</div>
     </div>
 
@@ -46,7 +53,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 
@@ -57,6 +64,28 @@ import { useAuth } from 'src/stores/auth'
 const { t, locale } = useI18n()
 const router = useRouter()
 const auth = useAuth()
+
+/**
+ * 门口这块招牌。取自公开的清单（`/api/appearance/manifest.webmanifest`）——
+ * 那是给浏览器读的地址，本来就不要登录；而 /api/settings 要，这儿还没人登录。
+ * 拉不到就用打包时那套（断网、后端还没起来），门照样要能进。
+ */
+const appName = ref('')
+const logo = ref('')
+
+onMounted(async () => {
+  try {
+    const res = await fetch('/api/appearance/manifest.webmanifest')
+    if (!res.ok) return
+    const mf = (await res.json()) as { name?: string; icons?: { src: string }[] }
+    appName.value = mf.name ?? ''
+    // 自定义图标才换那个「長」字；没设过的话 icons 指的是打包时那几张
+    const src = mf.icons?.[0]?.src ?? ''
+    if (src.startsWith('/api/appearance/icon/')) logo.value = src.replace('/192.png', '/180.png')
+  } catch {
+    /* 断网/后端没起来：用打包时那套 */
+  }
+})
 
 const name = ref('')
 const password = ref('')
@@ -99,6 +128,7 @@ function toggleLang() {
   width: 88px;
   height: 88px;
   border-radius: 22px;
+  overflow: hidden;
   background: rgba(255, 255, 255, 0.15);
   display: flex;
   align-items: center;
@@ -106,5 +136,6 @@ function toggleLang() {
   font-size: 54px;
   line-height: 1;
 }
+.logo-img { width: 88px; height: 88px; object-fit: cover; }
 .text-white-7 { opacity: 0.7; }
 </style>
