@@ -118,6 +118,14 @@ def expand(rule: Mapping[str, Any], member_ids: Sequence[int]) -> dict[str, Any]
     if adjustments:
         out["adjustments"] = adjustments
     if rule.get("remainder_to"):
+        # 当场认一下：只在「真有除不尽的 1 円」时才会走到 split 里的那道检查，
+        # 存规则时拿 1000 円试算一次往往整除，坏值就这么混进库，等哪天记一笔
+        # 除不尽的账才报错 —— 那时人正在记账，看不出是规则的事
+        if rule["remainder_to"] not in ("payer", "order", "rotate"):
+            raise RuleError(
+                "unknown_remainder_to", f"未知的余数规则：{rule['remainder_to']}",
+                remainder_to=rule["remainder_to"],
+            )
         out["remainder_to"] = rule["remainder_to"]
     return out
 

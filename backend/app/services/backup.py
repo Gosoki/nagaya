@@ -62,10 +62,14 @@ STALE_PART_SECONDS = 6 * 3600
 
 # ---------------------------------------------------------------- 位置
 
-def backup_dir(session: Session) -> Path:
-    raw = str(settings_svc.get(session, "backup_path") or "").strip() or "./backups"
-    path = Path(raw).expanduser()
+def resolve_backup_path(raw: str) -> Path:
+    """设置里填的那串路径最后落在哪。相对路径相对 backend/"""
+    path = Path(raw.strip() or "./backups").expanduser()
     return (path if path.is_absolute() else BASE_DIR / path).resolve()
+
+
+def backup_dir(session: Session) -> Path:
+    return resolve_backup_path(str(settings_svc.get(session, "backup_path") or ""))
 
 def source_path(session: Session) -> Path | None:
     """源库在哪 —— 问连接自己，不读模块级的 DB_PATH。

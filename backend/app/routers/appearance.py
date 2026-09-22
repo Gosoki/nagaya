@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 
 from fastapi import APIRouter, Depends, File, Response, UploadFile
@@ -30,6 +31,11 @@ MASTER = 512
 #: 允许取的尺寸。不开放任意值 —— 免得有人拿 /icon/99999.png 让服务器去画一张大图
 SIZES = {32, 180, 192, 512}
 MAX_ICON_BYTES = 5 * 1024 * 1024
+#: 只认这几种格式。Pillow 默认什么都敢开，EPS 这类还会转手交给 Ghostscript
+IMAGE_FORMATS = ["JPEG", "PNG", "WEBP", "GIF"]
+#: 解码前先看像素数。Pillow 自己的炸弹闸在 1.79 亿像素，而 1 亿像素的小 PNG
+#: 文件才几百 KB、解开要 1GB 多内存 —— 手机照片也就一两千万像素，4000 万足够宽
+MAX_PIXELS = 40_000_000
 
 
 def _to_master(raw: bytes) -> bytes:
@@ -42,7 +48,9 @@ def _to_master(raw: bytes) -> bytes:
       * 保留透明通道 —— 圆角/异形图标在深色主屏上不该多一个白方块。
     """
     try:
-        img = Image.open(io.BytesIO(raw))
+        img = Image.open(io.BytesIO(raw), formats=IMAGE_FORMATS)
+        if img.width * img.height > MAX_PIXELS:
+            raise ValueError("too many pixels")
         img = ImageOps.exif_transpose(img) or img
         img = img.convert("RGBA")
         img = ImageOps.fit(img, (MASTER, MASTER), method=Image.Resampling.LANCZOS)
@@ -70,7 +78,8 @@ async def upload_icon(
         raise AppError("icon_empty", "no file received")
 
     row = session.get(AppIcon, 1) or AppIcon(id=1)
-    row.png = _to_master(raw)
+    # 解码/缩放是几百毫秒的 CPU 活：放线程里跑，别卡住整个事件循环（别人的请求）
+    row.png = await asyncio.to_thread(_to_master, raw)
     row.updated_at = now_utc()
     session.add(row)
     session.commit()

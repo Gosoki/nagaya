@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 
@@ -11,9 +13,13 @@ from app.errors import AppError, not_found
 from app.models import Category, Member
 from app.schemas import SettingIn, SettingOut
 from app.services import settings as settings_svc
+from app.services.backup import resolve_backup_path as backup_dir_for
 from app.settings_spec import SETTINGS_SPEC
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
+
+#: 前端产物所在的整个前端目录（main.py 里 DIST 的上两级）。备份不许落在这下面
+WEB_ROOT = (Path(__file__).resolve().parents[3] / "frontend").resolve()
 
 
 def _bad(key: str, want: str) -> AppError:
@@ -70,6 +76,14 @@ def update_setting(
                 raise AppError("not_found", f"{key} points nowhere", what="setting_ref", key=key)
     elif spec["type"] == "str" and not isinstance(value, str):
         raise _bad(key, "str")
+    elif key == "backup_path":
+        # 备份是整本账的明文（含密码哈希）。**不许指进前端产物目录** ——
+        # 那个目录整个对外发，未登录就能下载。NUL 字符会让后面建目录时直接 500
+        if "\x00" in value:
+            raise _bad(key, "path")
+        target = backup_dir_for(value)
+        if target == WEB_ROOT or target.is_relative_to(WEB_ROOT):
+            raise _bad(key, "outside web root")
     elif spec["type"] in {"int", "int_or_null"}:
         if value is not None:
             if not isinstance(value, int) or isinstance(value, bool):

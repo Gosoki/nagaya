@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from sqlmodel import SQLModel
 
 from app.models import EntryKind, Lang
+
+#: 排序号的范围。不设的话一条 display_order=2^63-1 的备忘会让之后
+#: 「新建」算下一个序号时溢出 SQLite 的整数 —— 翻成一个误导人的 404
+OrderNo = Annotated[int, Field(ge=-1_000_000, le=1_000_000)]
 
 
 def _no_bool_amount(v: Any) -> Any:
@@ -53,7 +57,7 @@ class MemberIn(SQLModel):
     name: Optional[str] = None
     display_name: Optional[str] = None
     color: Optional[str] = None
-    display_order: Optional[int] = None
+    display_order: Optional[OrderNo] = None
     joined_on: Optional[dt.date] = None
     left_on: Optional[dt.date] = None
     lang: Optional[Lang] = None
@@ -68,7 +72,7 @@ class CategoryIn(SQLModel):
     color: Optional[str] = None
     default_rule_json: Optional[dict[str, Any]] = None
     monthly: Optional[bool] = None
-    display_order: Optional[int] = None
+    display_order: Optional[OrderNo] = None
     archived: Optional[bool] = None
     note: Optional[str] = None
     default_payer_id: Optional[int] = None
@@ -92,7 +96,7 @@ class CategoryOut(SQLModel):
 class MemoIn(SQLModel):
     title: Optional[str] = None
     body: Optional[str] = None
-    display_order: Optional[int] = None
+    display_order: Optional[OrderNo] = None
 
 
 class MemoOut(SQLModel):

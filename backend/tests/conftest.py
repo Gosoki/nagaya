@@ -19,6 +19,16 @@ from app.services import settings as settings_svc
 from app.services.settings import seed_settings
 
 
+@pytest.fixture(autouse=True)
+def _fresh_login_throttle():
+    """登录节流记在进程内存里 —— 每条用例从零开始，别让上一条的失败次数漏过来。"""
+    from app.routers import auth as auth_router
+
+    auth_router._fails.clear()
+    yield
+    auth_router._fails.clear()
+
+
 @pytest.fixture
 def session(tmp_path):
     engine = create_engine(

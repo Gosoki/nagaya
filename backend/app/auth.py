@@ -126,8 +126,20 @@ def current_member(
     return member
 
 
+#: 查无此人时也照样跑一次 bcrypt。不跑的话「用户名不存在」几毫秒就回，
+#: 「密码不对」要两三百毫秒 —— 按响应时间就能把三个人的登录名挨个试出来
+_DUMMY_HASH = bcrypt.hashpw(b"nagaya-dummy", bcrypt.gensalt()).decode()
+
+#: 密码最短多少位。前端改密码那一格早就要求 6 位，后端得是同一条线，
+#: 否则绕过界面直接打接口就能设成一位数
+MIN_PASSWORD_LEN = 6
+
+
 def authenticate(session: Session, name: str, password: str) -> Member | None:
     member = session.exec(select(Member).where(Member.name == name)).first()
-    if member is None or not verify_password(password, member.password_hash):
+    if member is None:
+        verify_password(password, _DUMMY_HASH)
+        return None
+    if not verify_password(password, member.password_hash):
         return None
     return member

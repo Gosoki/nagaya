@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import io
 
 from fastapi import APIRouter, Depends, File, UploadFile, status
 from PIL import Image, ImageOps
 from sqlmodel import Session, select
 
-from app.auth import current_member, hash_password, verify_password
+from app.auth import MIN_PASSWORD_LEN, current_member, hash_password, verify_password
 from app.db import get_session
 from app.errors import AppError, not_found, reject_nulls
 from app.models import Member, free_color
 from app.routers.auth import to_member_out
+from app.routers.appearance import IMAGE_FORMATS, MAX_PIXELS
 from app.schemas import MemberIn, MemberOut
 
 router = APIRouter(prefix="/api/members", tags=["members"])
@@ -37,6 +39,8 @@ def create_member(
     # 别人替他改会被上面那条挡下 —— 谁也解不开。建的时候就要有
     if not body.password:
         raise AppError("member_needs_password", "a new member needs an initial password")
+    if len(body.password) < MIN_PASSWORD_LEN:
+        raise AppError("password_too_short", "password too short", min=MIN_PASSWORD_LEN)
     data = body.model_dump(exclude_none=True, exclude={"password"})
     data.setdefault("display_name", body.name)
     # 没挑颜色就发一个**还没人用的**。按人数取模的老做法会撞：
@@ -78,6 +82,8 @@ def update_member(
         raise AppError(
             "forbidden_self_only", f"self only: {private}", status=403, fields=", ".join(private)
         )
+    if body.password is not None and len(body.password) < MIN_PASSWORD_LEN:
+        raise AppError("password_too_short", "password too short", min=MIN_PASSWORD_LEN)
     if body.password is not None:
         # 已经设过密码的，得先报出旧的。手机搁桌上没锁屏，别人顺手就能改掉
         if member.password_hash and not verify_password(body.old_password or "", member.password_hash):
@@ -123,7 +129,9 @@ def _compress_avatar(raw: bytes) -> bytes:
       * 丢掉所有元数据 —— EXIF 里有拍摄地点的 GPS
     """
     try:
-        img = Image.open(io.BytesIO(raw))
+        img = Image.open(io.BytesIO(raw), formats=IMAGE_FORMATS)
+        if img.width * img.height > MAX_PIXELS:
+            raise ValueError("too many pixels")
         img = ImageOps.exif_transpose(img) or img
         img = ImageOps.fit(img, (AVATAR_SIZE, AVATAR_SIZE), method=Image.Resampling.LANCZOS)
         img = img.convert("RGB")
@@ -158,7 +166,7 @@ async def upload_avatar(
     if not raw:
         raise AppError("avatar_empty", "no file received")
 
-    member.avatar = _compress_avatar(raw)
+    member.avatar = await asyncio.to_thread(_compress_avatar, raw)
     member.avatar_version += 1
     session.add(member)
     session.commit()

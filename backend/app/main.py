@@ -88,6 +88,68 @@ def _backup_once() -> dict | None:
 
 app = FastAPI(title="nagaya 長屋", description="合租记账", version="0.1.0", lifespan=lifespan)
 
+#: 请求体上限。原来没有：未登录的请求就能 POST 一个几个 G 的体，
+#: 在鉴权之前就被整个读进内存/临时文件，把进程或磁盘撑满。
+#: 头像和 App 图标自己有 5MB 的闸（带文案），这里给它们留到 16MB，
+#: 让 5〜16MB 的照片还能走到那道闸、拿到「图片不能超过 5MB」那句话
+MAX_BODY = 1024 * 1024
+MAX_UPLOAD_BODY = 16 * 1024 * 1024
+
+
+class _TooLarge(Exception):
+    pass
+
+
+class BodyLimit:
+    """按路径卡请求体大小。纯 ASGI：Content-Length 先看一眼，
+    没有长度头（分块上传）的就边收边数，超了当场停。"""
+
+    def __init__(self, inner) -> None:  # noqa: ANN001
+        self.inner = inner
+
+    async def __call__(self, scope, receive, send) -> None:  # noqa: ANN001
+        if scope["type"] != "http":
+            await self.inner(scope, receive, send)
+            return
+        path = scope.get("path", "")
+        limit = MAX_UPLOAD_BODY if path.startswith("/api/appearance/icon") or path.endswith("/avatar") else MAX_BODY
+        for k, v in scope.get("headers", []):
+            if k == b"content-length" and v.isdigit() and int(v) > limit:
+                await self._reject(scope, send)
+                return
+
+        seen = 0
+        started = False
+
+        async def counted():  # noqa: ANN202
+            nonlocal seen
+            msg = await receive()
+            if msg["type"] == "http.request":
+                seen += len(msg.get("body", b""))
+                if seen > limit:
+                    raise _TooLarge
+            return msg
+
+        async def watched(msg) -> None:  # noqa: ANN001
+            nonlocal started
+            started = started or msg["type"] == "http.response.start"
+            await send(msg)
+
+        try:
+            await self.inner(scope, counted, watched)
+        except _TooLarge:
+            if not started:
+                await self._reject(scope, send)
+
+    @staticmethod
+    async def _reject(scope, send) -> None:  # noqa: ANN001
+        async def nothing():  # noqa: ANN202
+            return {"type": "http.disconnect"}
+
+        response = _error_response(AppError("payload_too_large", "request body too large", status=413))
+        await response(scope, nothing, send)
+
+
 # 开发期前端跑在 vite dev server 上，走代理；这里放开以防直连调试
 app.add_middleware(
     CORSMiddleware,
@@ -132,6 +194,9 @@ def _id_too_big(request, exc):  # noqa: ANN001, ARG001
 
 for module in (auth, members, categories, entries, ledger, memos, settings, backup, appearance):
     app.include_router(module.router)
+
+# 最后挂 ＝ 最外层：CORS 和路由都还没碰到请求体之前就先卡住
+app.add_middleware(BodyLimit)
 
 
 @app.api_route("/api/health", methods=["GET", "HEAD"])
@@ -233,6 +298,11 @@ if DIST.is_dir():
             return _index()
 
         candidate = (DIST / full_path).resolve()
+        # 库文件、备份半成品、WAL **永远不从这儿发出去**。前端产物里本来没有这些，
+        # 有就只可能是备份目录被指进了前端目录 —— 那样整本账（含密码哈希）
+        # 未登录就能下载。设置那边也拦了，这里是第二道
+        if candidate.name.endswith((".db", ".part", ".sqlite", "-wal", "-shm", "-journal")):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "no such file")
         # resolve 之后再比对根目录，挡住 ../ 穿越
         if full_path and candidate.is_file() and candidate.is_relative_to(DIST.resolve()):
             cache = IMMUTABLE if full_path.startswith("assets/") else REVALIDATE
