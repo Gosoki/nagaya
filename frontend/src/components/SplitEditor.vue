@@ -14,6 +14,53 @@
 -->
 <template>
   <div>
+    <!--
+      分配条 —— 按住两段之间那道杠推，钱就在相邻两个人之间流动。
+
+      「谁多谁少」本来就是个连续量，摆成一列数字要人心算；一条按人上色的条子
+      手指一推，两个数字当场对着变，是这一屏唯一不需要先弄懂「权重」这个词
+      就能用的控件。
+
+      **它写的是「调整额」，不动「份数」**：份数（1:1:2）和调整额是这套分摊的
+      两个概念，拖动只是给后者一个直接操作的入口 —— 于是份数那一列一个字不变，
+      拖出来的差额明明白白落在「调整」那一格里，能看见、能再手改、也能清零。
+    -->
+    <div v-if="barOk" class="alloc-wrap">
+      <div ref="barEl" class="alloc">
+        <div
+          v-for="(p, k) in parts"
+          :key="p.id"
+          class="seg"
+          :class="{ dragging: dragIndex === k || dragIndex === k - 1 }"
+          :style="{ width: pctOf(segs[k] ?? 0), background: colorOf(p.id) }"
+        >
+          <span v-if="pctNum(segs[k] ?? 0) >= 18" class="seg-label">{{ p.display_name }}</span>
+        </div>
+        <!-- 手柄单独一层：段是等宽变化的，手柄要压在分界线上，而且可点区域
+             得比那道 2px 的杠宽得多（44px），否则手机上根本按不住 -->
+        <button
+          v-for="h in handles"
+          :key="h.i"
+          class="handle"
+          :class="{ on: dragIndex === h.i }"
+          :style="{ left: h.left }"
+          type="button"
+          :aria-label="t('split.dragHint')"
+          @pointerdown="grab(h.i, $event)"
+          @pointermove="move"
+          @pointerup="release"
+          @pointercancel="release"
+        />
+      </div>
+      <div class="alloc-foot text-caption">
+        <span class="text-grey-6">{{ t('split.dragHint') }}</span>
+        <q-space />
+        <button v-if="touched" class="link" type="button" @click="equalize">
+          {{ t('split.equalize') }}
+        </button>
+      </div>
+    </div>
+
     <!-- 列头：比例 / 调整 / 应担 三件事摆在一排，一眼看得出它们的关系。
          调整额原来藏在下面一个折叠里，看不见它是加在比例结果之上的 -->
     <div class="head-row text-caption text-grey-6">
@@ -310,6 +357,134 @@ watch(
   { immediate: true, deep: true },
 )
 
+// ------------------------------------------------------------- 分配条
+
+const barEl = ref<HTMLElement | null>(null)
+const dragIndex = ref<number | null>(null)
+
+/** 条子上有哪几段 —— 只有真正参与的人（权重 0 的不占地方，也不该被拖到钱） */
+const parts = computed(() => props.members.filter((m) => weightOf(m.id) > 0))
+/** 每段多少钱。没填金额时退回按份数画，比例照样是对的 */
+const segs = computed<number[]>(() => {
+  const p = preview.value
+  if (props.amount && p) return parts.value.map((m) => p[String(m.id)] ?? 0)
+  return parts.value.map((m) => weightOf(m.id))
+})
+const segTotal = computed(() => segs.value.reduce((a, b) => a + b, 0))
+/**
+ * 什么时候不画这条子：
+ *   * 有人分到负数（调整额压过头）—— 负数段画不出来；
+ *   * 不参与的人却分到了钱（权重 0 但手填了调整额）—— 条子会少算一块，
+ *     加起来对不上总额，那比不画更误导。
+ * 这两种都罕见，退回下面那几行数字就是了。
+ */
+const barOk = computed(() => {
+  if (parts.value.length < 2 || segTotal.value <= 0) return false
+  if (segs.value.some((v) => v < 0)) return false
+  const p = preview.value
+  if (props.amount && p) {
+    return props.members.every((m) => weightOf(m.id) > 0 || (p[String(m.id)] ?? 0) === 0)
+  }
+  return true
+})
+
+const pctNum = (v: number) => (segTotal.value ? (v / segTotal.value) * 100 : 0)
+const pctOf = (v: number) => `${pctNum(v)}%`
+const colorOf = (id: number) => meta.byId[id]?.color ?? '#90a4ae'
+
+const handles = computed(() => {
+  const out: { i: number; left: string }[] = []
+  let acc = 0
+  for (let i = 0; i < segs.value.length - 1; i += 1) {
+    acc += pctNum(segs.value[i] ?? 0)
+    out.push({ i, left: `${acc}%` })
+  }
+  return out
+})
+
+let drag: { i: number; x: number; base: number[]; width: number } | null = null
+
+function grab(i: number, e: PointerEvent) {
+  const el = barEl.value
+  if (!el) return
+  drag = { i, x: e.clientX, base: [...segs.value], width: el.clientWidth }
+  dragIndex.value = i
+  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+  navigator.vibrate?.(5)
+}
+
+function move(e: PointerEvent) {
+  if (!drag) return
+  e.preventDefault()
+  const total = drag.base.reduce((a, b) => a + b, 0)
+  const raw = Math.round(((e.clientX - drag.x) / drag.width) * total)
+  // 只在相邻两段之间挪钱，谁都不许被推成负数
+  const delta = Math.max(-(drag.base[drag.i] ?? 0), Math.min(drag.base[drag.i + 1] ?? 0, raw))
+  const next = [...drag.base]
+  next[drag.i] = (drag.base[drag.i] ?? 0) + delta
+  next[drag.i + 1] = (drag.base[drag.i + 1] ?? 0) - delta
+  applyBar(next)
+}
+
+function release() {
+  drag = null
+  dragIndex.value = null
+}
+
+/**
+ * 把「我要的这几个数」写回规则里。
+ *
+ * 写的是**调整额**，不是份数：
+ *   应担 ＝ 按份数分的那份 ＋ 调整额，
+ * 所以调整额 ＝ 目标 − 按份数分的那份。拖动只在相邻两人之间挪钱，总额不变，
+ * 于是调整额之和恒为 0 —— 基数仍然是整笔金额，算出来的应担**一分不差**就是
+ * 拖出来的那几个数（所见即所存）。
+ *
+ * 「按份数分的那份」用同一个分摊引擎算，不自己除 —— 余数怎么分是引擎的事，
+ * 自己算会和落库差 1 円，而那正是这个组件用共享 fixture 钉死的东西。
+ */
+function applyBar(next: number[]) {
+  if (!props.amount) {
+    // 还没填金额：拖的是纯比例，直接落在份数上（这时也没有「应担」可言）
+    touched.value = true
+    weights.value = {
+      ...weights.value,
+      ...Object.fromEntries(parts.value.map((m, k) => [String(m.id), Math.max(0, next[k] ?? 0)])),
+    }
+    return
+  }
+  let ratioOnly: Record<string, number>
+  try {
+    ratioOnly = split(
+      { ...rule.value, adjustments: {} } as never,
+      props.amount,
+      {
+        order: order.value,
+        payer: props.payerId === null ? null : String(props.payerId),
+        rotateSeed: props.entryId ?? 0,
+      },
+    )
+  } catch {
+    return
+  }
+  touched.value = true
+  const adj: Record<string, number> = {}
+  parts.value.forEach((m, k) => {
+    const d = (next[k] ?? 0) - (ratioOnly[String(m.id)] ?? 0)
+    if (d !== 0) adj[String(m.id)] = d
+  })
+  adjustments.value = adj
+  typing.value = {}
+}
+
+/** 推回等分：份数全 1、调整额清零 */
+function equalize() {
+  touched.value = true
+  weights.value = Object.fromEntries(props.members.map((m) => [String(m.id), 1]))
+  adjustments.value = {}
+  typing.value = {}
+}
+
 /** 三四个室友，权重再高也就是「谁用得多一倍」。给到 3 足够，多了反而挑花眼 */
 const WEIGHT_CHOICES = [0, 1, 2, 3]
 
@@ -464,5 +639,74 @@ defineExpose({
   color: inherit;
 }
 .num-input::placeholder { color: #ccc; }
+
+/* ---------------------------------------------------------- 分配条 */
+.alloc-wrap { margin: 2px 0 14px; }
+.alloc {
+  position: relative;
+  display: flex;
+  height: 44px;                 /* 够粗才拖得住，也才看得出比例 */
+  border-radius: 12px;
+  overflow: hidden;
+  background: #f2f2f5;
+  touch-action: none;           /* 不然手指一动就变成页面滚动 */
+  user-select: none;
+}
+.seg {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+.seg.dragging { filter: brightness(1.08); }
+.seg-label {
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+}
+/* 手柄：屏幕上是一道 4px 的白杠，可点区域 44px —— 拇指按得住 */
+.handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 44px;
+  margin-left: -22px;
+  border: none;
+  padding: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+.handle::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 20px;
+  width: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
+  transition: transform 0.12s;
+}
+.handle.on::before { transform: scaleX(1.6); }
+.alloc-foot {
+  display: flex;
+  align-items: center;
+  margin-top: 6px;
+}
+.link {
+  border: none;
+  background: transparent;
+  color: #3d4785;
+  font-size: 12px;
+  padding: 4px 2px;
+  cursor: pointer;
+}
 .total-bar { font-size: 15px; }
 </style>
