@@ -7,21 +7,28 @@
     Σ(每人已垫付) − Σ(每人应担) ≡ 0
     每一笔账的 Σshares ≡ amount
 操作池里放的是真实会发生的事：记账（含自定义权重和调整额）、改金额/日期/分类/付款人、
-删、恢复、出账、转账、成员搬走、成员搬回来。
+删、恢复、出账、转账、成员搬走、成员搬回来、**中途备份**。
 
 跑完再逐张检查每张已出账单和当前草稿的 Σclosing ≡ 0 —— 展示层也不许把钱算丢。
+
+备份那一支单独说一句：**每一份中途产出的备份自己也要满足同样两条**。
+备份是在账本一直被写的过程中取的快照，「取的那一刻恰好是半截状态」这件事
+只有这么撞才撞得出来。
 """
 
 from __future__ import annotations
 
 import datetime as dt
 import random
+import sqlite3
+from pathlib import Path
 
 from sqlmodel import Session, select
 
 from app.core.rules import RuleError
 from app.core.split import SplitError
 from app.models import Category, Entry, EntryKind, EntryShare, Member, Statement
+from app.services import backup as backup_svc
 from app.services import ledger
 from app.services.bill import BillError, build_bill, cut_statement
 
@@ -53,6 +60,39 @@ def _check(session: Session, tag: str) -> None:
         assert got == e.amount_jpy, f"{tag}：账目 {e.id} 的 Σshares {got} ≠ 金额 {e.amount_jpy}"
 
 
+def _check_backup(path: Path, tag: str) -> None:
+    """备份是**在账本一直被写的过程中**取的快照，所以它自己也得满足那两条。"""
+    con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        assert list(con.execute("PRAGMA integrity_check"))[0][0] == "ok", f"{tag}：备份打不开"
+        paid = dict(
+            con.execute(
+                "select payer_id, sum(amount_jpy) from entry where deleted_at is null group by payer_id"
+            )
+        )
+        owed = dict(
+            con.execute(
+                "select s.member_id, sum(s.amount_jpy) from entry_share s "
+                "join entry e on e.id = s.entry_id where e.deleted_at is null group by s.member_id"
+            )
+        )
+        ids = [r[0] for r in con.execute("select id from member")]
+        total = sum(paid.get(i, 0) - owed.get(i, 0) for i in ids)
+        assert total == 0, f"{tag}：备份里的 Σ余额 = {total}"
+        bad = len(
+            list(
+                con.execute(
+                    "select e.id from entry e left join entry_share s on s.entry_id = e.id "
+                    "where e.deleted_at is null group by e.id "
+                    "having coalesce(sum(s.amount_jpy), 0) <> e.amount_jpy"
+                )
+            )
+        )
+        assert bad == 0, f"{tag}：备份里有 {bad} 笔 Σshares ≠ amount"
+    finally:
+        con.close()
+
+
 def _setup(session: Session, members: list[Member]) -> tuple[list[int], list[int]]:
     cats = [Category(name=f"c{i}", monthly=(i == 0), display_order=i) for i in range(3)]
     for c in cats:
@@ -70,8 +110,8 @@ def _one_run(session: Session, members: list[Member], seed: int) -> None:
 
     for step in range(STEPS):
         op = rng.choices(
-            ["create", "update", "delete", "restore", "cut", "settle", "leave", "join"],
-            weights=[34, 22, 10, 6, 8, 14, 3, 3],
+            ["create", "update", "delete", "restore", "cut", "settle", "leave", "join", "backup"],
+            weights=[34, 22, 10, 6, 8, 14, 3, 3, 8],
         )[0]
         try:
             if op == "create":
@@ -134,6 +174,9 @@ def _one_run(session: Session, members: list[Member], seed: int) -> None:
                     m.left_on = dt.date(2026, rng.randint(5, 9), 15)
                     session.add(m)
                     session.commit()
+            elif op == "backup":
+                made = backup_svc.run(session)
+                _check_backup(Path(made["path"]), f"seed={seed} step={step}")
             elif op == "join":
                 m = session.get(Member, rng.choice(mid))
                 if m.left_on is not None:
