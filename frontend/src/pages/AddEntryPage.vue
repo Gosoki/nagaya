@@ -773,8 +773,8 @@ async function save() {
       client_key: newClientKey(),
     }
     try {
-      await ledger.create(payload)
-      $q.notify({ type: 'positive', message: t('entry.saved'), timeout: 1200 })
+      const saved = await ledger.create(payload)
+      notifySaved(saved)
       reset()
     } catch (e) {
       // 只有「连不上服务器」才转存草稿。金额方向错、账期已关这类是**服务器明确拒绝**，
@@ -794,6 +794,37 @@ async function save() {
   } finally {
     busy.value = false
   }
+}
+
+/**
+ * 记下了。**说清记的是哪一笔，并给一次后悔的机会。**
+ *
+ * 原来只有一句「已记下」、1.2 秒就没了：连着录一串小票时，点错分类、多打一个 0，
+ * 要翻去流水里找出来再删。现在提示里写着「日用 ¥1,234」，旁边就是「撤销」——
+ * 撤销走的是软删（和编辑页的删除同一条路），流水和账单缓存一并刷新
+ */
+function notifySaved(saved: Entry) {
+  const cat = saved.category_id === null ? undefined : meta.categoryById[saved.category_id]
+  const what = saved.title || cat?.name || t(`kind.${saved.kind}`)
+  $q.notify({
+    type: 'positive',
+    message: t('entry.savedWhat', { what, amount: formatYen(Math.abs(saved.amount_jpy)) }),
+    timeout: 3500,
+    actions: [
+      {
+        label: t('common.undo'),
+        color: 'white',
+        handler: async () => {
+          try {
+            await ledger.remove(saved)
+            $q.notify({ type: 'info', message: t('entry.undone'), timeout: 1500 })
+          } catch (e) {
+            $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e) })
+          }
+        },
+      },
+    ],
+  })
 }
 
 /**

@@ -17,6 +17,8 @@ export default {
     payer: '谁付的', receiver: '谁收的',
     to: '转给谁', title: '备注（选填）',
     saved: '已记下',
+    savedWhat: '已记下 · {what} {amount}',
+    undone: '撤销了，这笔没记',
     splitEven: '均分', splitEvenAmong: '{names} 均分',
     record: '记入账', save: '保存',
     dateLocked: '{date} 之前已经出过账，选不了。要补记就写在备注里',
