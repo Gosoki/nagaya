@@ -20,9 +20,11 @@
             <q-icon v-if="!uploading" name="photo_camera" size="14px" class="cam" />
             <q-spinner v-else size="14px" class="cam" color="white" />
           </button>
+          <!-- 带个类名：这一页上不止一个文件输入（还有「应用图标」那张卡），
+               靠「第几个」去指必然会在插卡片时错位 -->
           <input
             ref="fileEl"
-            class="hidden"
+            class="hidden avatar-file"
             type="file"
             accept="image/*"
             @change="onFile"

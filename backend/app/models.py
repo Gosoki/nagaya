@@ -189,6 +189,22 @@ class Category(SQLModel, table=True):
     )
 
 
+class AppIcon(SQLModel, table=True):
+    """这屋自己的 App 图标（主屏那个、页签那个小的）。只有一行，id 恒为 1。
+
+    **存在库里而不是磁盘上**：备份走的是 VACUUM INTO，只覆盖数据库 ——
+    图标放磁盘的话，恢复一份备份之后图标还是旧的，而它恰恰是
+    「这是哪个屋的账本」的标志。
+    只存一张 512 的母版，各尺寸取的时候现缩（一年也取不了几次）。
+    """
+
+    __tablename__ = "app_icon"
+
+    id: Optional[int] = Field(default=1, primary_key=True)
+    png: bytes = Field(default=b"", sa_column=Column(LargeBinary))
+    updated_at: dt.datetime = Field(default_factory=now_utc)
+
+
 class Memo(SQLModel, table=True):
     """自己加的备忘条目。
 

@@ -137,6 +137,12 @@ export default {
     logoutHint: '只退这一台，别的设备不受影响',
     logoutConfirm: '退出之后要重新输密码才进得来。',
   },
+  appearance: {
+    title: '应用',
+    name: '名字', namePlaceholder: '長屋 nagaya',
+    icon: '图标', pick: '换个图标', removeIcon: '用回默认',
+    iconHint: '点图标换一张，最大 5MB。加到手机主屏后显示的就是它',
+  },
   settings: {
     system: '系统设置', count: '{n} 项',
     label: {
@@ -220,6 +226,9 @@ export default {
     avatar_empty: '没收到文件',
     avatar_too_big: '图片不能超过 {limit_mb}MB',
     avatar_not_image: '这个文件不是图片',
+    icon_too_big: '图标不能超过 {limit_mb}MB',
+    icon_not_image: '这个文件不是图片',
+    icon_empty: '没收到文件',
     unknown: '出错了：{message}',
   },
 }

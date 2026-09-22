@@ -63,9 +63,10 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import { applyAppearance } from 'src/appearance'
 import { useOnline } from 'src/composables/online'
 import BillTabs from 'src/components/BillTabs.vue'
 import EntriesTabs from 'src/components/EntriesTabs.vue'
@@ -169,6 +170,14 @@ onMounted(() => {
   }
 })
 onBeforeUnmount(() => footWatch?.disconnect())
+
+// 名字和图标是这屋自己设的，而页签标题/小图/主屏清单都不是 Vue 管的 DOM，
+// meta 一到手就手动贴上去（见 src/appearance.ts）
+watch(
+  () => [meta.setting<string>('app_name', ''), meta.setting<number>('app_icon_version', 0)] as const,
+  ([name, version]) => applyAppearance(name, version),
+  { immediate: true },
+)
 
 onMounted(boot)
 </script>

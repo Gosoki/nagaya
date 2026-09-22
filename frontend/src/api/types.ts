@@ -165,6 +165,8 @@ export interface Setting {
   key: string
   value: unknown
   type: string
+  /** 通用面板里不渲染它 —— 有专门的卡片管（App 名字和图标） */
+  hidden?: boolean
   note_zh: string
   note_ja: string
   options: unknown[] | null

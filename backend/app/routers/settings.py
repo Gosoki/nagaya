@@ -33,6 +33,7 @@ def list_settings(session: Session = Depends(get_session), _: Member = Depends(c
                 key=key,
                 value=settings_svc.get(session, key),
                 type=spec["type"],
+                hidden=bool(spec.get("hidden")),
                 note_zh=spec["note_zh"],
                 note_ja=spec["note_ja"],
                 options=spec.get("options"),
@@ -105,7 +106,7 @@ def update_setting(
 
     settings_svc.set_(session, key, value)
     return SettingOut(
-        key=key, value=value, type=spec["type"],
+        key=key, value=value, type=spec["type"], hidden=bool(spec.get("hidden")),
         note_zh=spec["note_zh"], note_ja=spec["note_ja"],
         options=spec.get("options"), min=spec.get("min"), max=spec.get("max"),
     )

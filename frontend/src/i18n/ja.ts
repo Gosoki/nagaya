@@ -137,6 +137,12 @@ export default {
     logoutHint: 'この端末だけ。ほかの端末はそのままです',
     logoutConfirm: 'ログアウトすると、次回はパスワードの入力が必要です。',
   },
+  appearance: {
+    title: 'アプリ',
+    name: '名前', namePlaceholder: '長屋 nagaya',
+    icon: 'アイコン', pick: 'アイコンを変更', removeIcon: '既定に戻す',
+    iconHint: 'タップして変更（最大 5MB）。ホーム画面に追加したときに表示されます',
+  },
   settings: {
     system: 'システム設定', count: '{n} 項目',
     label: {
@@ -220,6 +226,9 @@ export default {
     avatar_empty: 'ファイルを受け取れませんでした',
     avatar_too_big: '画像は {limit_mb}MB までです',
     avatar_not_image: 'この画像は読み込めません',
+    icon_too_big: 'アイコンは {limit_mb}MB までです',
+    icon_not_image: 'この画像は読み込めません',
+    icon_empty: 'ファイルが届いていません',
     unknown: 'エラー：{message}',
   },
 }

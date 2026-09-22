@@ -13,6 +13,24 @@ from __future__ import annotations
 from typing import Any
 
 SETTINGS_SPEC: dict[str, dict[str, Any]] = {
+    # 这两项有自己的卡片（设置页顶上那张「应用」），所以不在通用面板里渲染。
+    # 放进 SETTINGS_SPEC 是为了白拿三样东西：读写接口、类型校验、跟着备份走
+    "app_name": {
+        "type": "str",
+        "default": "",
+        "hidden": True,
+        "note_zh": "这屋的 App 叫什么。加到手机主屏之后显示的就是它；留空用默认名。",
+        "note_ja": "このアプリの名前。ホーム画面に追加したときに表示されます。空なら既定名。",
+    },
+    "app_icon_version": {
+        "type": "int",
+        "default": 0,
+        "min": 0,
+        "hidden": True,
+        "note_zh": "自定义图标的版本号。0 ＝ 没设过，用打包时那个。换一次加一，"
+                   "地址里带着它，好让手机和浏览器把死缓存的旧图标换掉。",
+        "note_ja": "カスタムアイコンのバージョン。0 は既定アイコン。更新のたびに +1。",
+    },
     "default_payer_id": {
         "type": "member_id_or_null",
         "default": None,

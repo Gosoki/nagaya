@@ -968,8 +968,15 @@ test('固定费项目在设置里管：加、删、和上期一样', async ({ pa
   await page.locator('.icon-cell').filter({ has: page.locator('.q-icon') }).nth(8).click()
   await expect.poll(async () => (await catOf('E2E停车位')).icon).toBe('local_parking')
   await parking.locator('.icon-btn').click()
-  await page.locator('.color-cell').nth(3).click()
-  await expect.poll(async () => (await catOf('E2E停车位')).color).toBe('#c62828')
+  // 点第几格就存第几格的颜色。**别写死色值** —— 色板换一组这条就红，
+  // 而它要钉的是「点了真的存下去」，不是「第 4 个格子是红的」
+  const cell = page.locator('.color-cell').nth(3)
+  const picked = await cell.evaluate((el) => {
+    const bg = getComputedStyle(el).backgroundColor.match(/\d+/g) ?? []
+    return '#' + bg.slice(0, 3).map((n) => Number(n).toString(16).padStart(2, '0')).join('')
+  })
+  await cell.click()
+  await expect.poll(async () => (await catOf('E2E停车位')).color).toBe(picked)
 
   // 「和上期一样」默认关着 —— 这是「没开开关就一个数字都不许自动填」那条规矩的底线。
   // 断在**刚加出来的这一项**上，不断在房租：房租是共享状态，别的用例碰过就红在这儿，
@@ -1195,6 +1202,34 @@ test('备忘：固定费那几项常驻，自己也能加；两页共用一个�
   await expect(page).toHaveURL(/\/entries$/)
 })
 
+test('应用名字和图标：改完页签标题和清单当场跟着变', async ({ page }) => {
+  await login(page)
+  const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
+  // 先清干净：这一条会往库里写名字，跑过一轮之后不清的话「改之前」就已经是它了
+  await page.request.put('/api/settings/app_name', { headers, data: { value: '' } })
+
+  await page.goto('/entries')
+  await page.locator('.bill-tabs .q-tab').nth(2).click()
+  const card = page.locator('.bill-section').filter({ hasText: '应用' })
+  await expect(card).toBeVisible()
+  const before = await page.title()
+  expect(before, '没设名字时用打包时那个').toBe('長屋 nagaya')
+
+  const name = card.locator('input[type=text]')
+  await name.fill('三丁目の家計')
+  await name.blur()
+  // 页签标题不是 Vue 管的 DOM，得手动贴上去 —— 这条钉的就是那一下
+  await expect.poll(() => page.title()).toBe('三丁目の家計')
+
+  // 清单是后端按当前设置现拼的；前端把 link 指过去，才不会被 SW 缓存的静态清单挡住
+  await expect(page.locator('link[rel=manifest]'))
+    .toHaveAttribute('href', '/api/appearance/manifest.webmanifest')
+  const m = await (await page.request.get('/api/appearance/manifest.webmanifest')).json()
+  expect(m.name).toBe('三丁目の家計')
+
+  await page.request.put('/api/settings/app_name', { headers, data: { value: '' } })
+})
+
 test('设置面板：照后端的声明渲染，改完当场落库', async ({ page }) => {
   await login(page)
   const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
@@ -1209,7 +1244,12 @@ test('设置面板：照后端的声明渲染，改完当场落库', async ({ pa
   await page.getByText('系统设置').click()
   // 面板不写死项目：后端声明里有几条就渲染几条
   const spec = await (await page.request.get('/api/settings', { headers })).json()
-  await expect(page.locator('.setting-row')).toHaveCount(spec.length)
+  // hidden 的那几项有自己的卡片（App 名字和图标），通用面板里不渲染 ——
+  // 渲染了就等于同一个值有两个入口，改哪个都对不上
+  const shownSpec = spec.filter((x: { hidden?: boolean }) => !x.hidden)
+  expect(shownSpec.length, '总得有几条是要渲染的').toBeGreaterThan(0)
+  expect(spec.length, 'hidden 那两条也得照常返回，卡片要读它们').toBeGreaterThan(shownSpec.length)
+  await expect(page.locator('.setting-row')).toHaveCount(shownSpec.length)
   // 说明是后端给的，里面的 **强调** 不该把星号露在界面上
   const shown = await page.locator('.setting-row').allTextContents()
   expect(shown.some((x) => x.includes('**')), '后端说明里的星号不该露在界面上').toBe(false)
@@ -1316,7 +1356,8 @@ test('换头像：传一张照片，全站跟着换；撤掉就回色圆', async
   await page.getByRole('tab', { name: '设置' }).click()
   await expect(page.locator('.avatar-btn img')).toHaveCount(0)
 
-  await page.locator('input[type="file"]').setInputFiles('e2e/fixtures/avatar.jpg')
+  // 指明是头像那个输入：这一页上还有「应用图标」那张卡，也有一个文件输入
+  await page.locator('input.avatar-file').setInputFiles('e2e/fixtures/avatar.jpg')
   await expect(page.locator('.avatar-btn img')).toHaveCount(1)
   // 颜色那一排不能因为设了照片就消失 —— 它还管着「谁付的」按钮的底色
   await expect(page.locator('.swatch')).not.toHaveCount(0)

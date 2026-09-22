@@ -8,6 +8,7 @@
 <template>
   <div>
     <ProfileCard />
+    <AppearanceCard />
     <FixedCostSettings />
     <BackupCard />
     <!-- 系统设置默认收起来：这些是「定一次就不再动」的规矩，
@@ -164,6 +165,7 @@ import { useI18n } from 'vue-i18n'
 import { ApiError, api } from 'src/api/client'
 import BackupCard from 'src/components/BackupCard.vue'
 import FixedCostSettings from 'src/components/FixedCostSettings.vue'
+import AppearanceCard from 'src/components/AppearanceCard.vue'
 import ProfileCard from 'src/components/ProfileCard.vue'
 import type { Setting } from 'src/api/types'
 import { useMeta } from 'src/stores/meta'
@@ -182,7 +184,9 @@ onMounted(() => {
   void meta.load().catch(() => {})
 })
 
-const rows = computed(() => meta.settings)
+// hidden 的那几项有自己的卡片（App 名字和图标），通用面板里不渲染 ——
+// 渲染了就等于同一个值有两个入口，改哪个都对不上
+const rows = computed(() => meta.settings.filter((s) => !s.hidden))
 
 /** 界面文案走 i18n；认不出的键就把键名本身显出来，总比空白强 */
 function labelOf(key: string): string {

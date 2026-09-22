@@ -28,7 +28,7 @@ from app.services.backup import BackupError
 from app.services.bill import BillError
 from app.core.split import SplitError
 from app.init_db import init_db
-from app.routers import auth, backup, categories, entries, ledger, members, memos, settings
+from app.routers import appearance, auth, backup, categories, entries, ledger, members, memos, settings
 from app.services.ledger import LedgerError
 
 log = logging.getLogger("nagaya")
@@ -127,7 +127,7 @@ def _id_too_big(request, exc):  # noqa: ANN001, ARG001
     """
     return _error_response(not_found("row"))
 
-for module in (auth, members, categories, entries, ledger, memos, settings, backup):
+for module in (auth, members, categories, entries, ledger, memos, settings, backup, appearance):
     app.include_router(module.router)
 
 

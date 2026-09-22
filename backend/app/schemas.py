@@ -186,6 +186,9 @@ class SettingOut(SQLModel):
     key: str
     value: Any
     type: str
+    #: 通用面板里不渲染它 —— 有专门的卡片管（比如 App 名字和图标）。
+    #: 仍然照常返回：那张卡片要读它的值
+    hidden: bool = False
     note_zh: str
     note_ja: str
     options: Optional[list[Any]] = None
