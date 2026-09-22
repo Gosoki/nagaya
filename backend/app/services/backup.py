@@ -366,9 +366,13 @@ def status(session: Session) -> dict[str, Any]:
         try:
             verify_file(newest)
             out["last_ok"] = True
-        except BackupError as e:
+        except BackupError:
             out["last_ok"] = False
-            out["error"] = e.code
+            # **和 run() 那条路不是一回事，别共用一个码。** 这里验的是目录里
+            # 现成的那一份，一个字节都没动过；run() 里验不过的是刚导出来的临时文件，
+            # 那一份当场就删了。共用的话，界面上会对着一份好端端躺在那儿的文件说
+            # 「已经删掉了」—— 而它恰恰是唯一能恢复的那一份
+            out["error"] = "backup_last_corrupt"
         at = dt.datetime.strptime(newest.name, NAME_FMT)
         out["last_at"] = at.isoformat(timespec="seconds")
         out["last_name"] = newest.name

@@ -11,8 +11,16 @@
   <div class="page">
     <!-- 冷启动时别急着喊「这儿是空的」：请求还在飞就先什么都不显示，
          否则每次头一回进来都要先闪一句「本期还没有账目」 -->
-    <div v-if="!bill && !bills.pending" class="text-center text-grey-6 q-mt-xl">
-      {{ isOpenTab ? t('bill.noOpen') : t('bill.noPeriod') }}
+    <div v-if="!bill && !bills.pending" class="text-center q-mt-xl">
+      <!-- **「取不到」和「没有」得分开说。** 断网时原来这儿写的是
+           「这屋里还没出过账」—— 一句假话，而且没有任何重试的出口 -->
+      <template v-if="bills.lastError">
+        <div class="text-negative">{{ bills.lastError }}</div>
+        <q-btn flat dense color="primary" class="q-mt-sm" :label="t('common.retry')" @click="retry" />
+      </template>
+      <div v-else class="text-grey-6">
+        {{ isOpenTab ? t('bill.noOpen') : t('bill.noPeriod') }}
+      </div>
     </div>
 
     <!-- 用 v-if 而不是 v-else：上面那句多了个「还在加载」的条件，
@@ -432,6 +440,8 @@ const mineText = computed(() => {
 
 /** 改完数据强制重取这一张。进页面用的是 ensure（缓存先上屏） */
 const load = () => bills.reload(viewKey.value)
+/** 空态上那个「重试」。失败的话 store 的 lastError 会自己更新，这儿只是别漏接 */
+const retry = () => void load().catch(() => {})
 
 /** 翻到另一张出过的单子。挑中最近那张就存 null，这样以后再出新账它跟着走 */
 function pickStatement(id: number) {
@@ -483,11 +493,12 @@ const iconOfEntry = (e: Entry) =>
 const labelOfEntry = (e: Entry) => e.title || categoryOfEntry(e)?.name || t(`kind.${e.kind}`)
 
 // 有缓存立刻渲染，同时后台校正。换页签时组件不重建、只换 prop，所以盯着 prop
+// 失败在 store 的 lastError 里已经说过了，这儿只是别留一个没人接的 rejection
 onMounted(() => {
-  void bills.ensure(viewKey.value)
+  bills.ensure(viewKey.value).catch(() => {})
   bills.warm()                      // 预热另外两页，第一次切过去不用等
 })
-watch(viewKey, () => void bills.ensure(viewKey.value))
+watch(viewKey, () => bills.ensure(viewKey.value).catch(() => {}))
 
 /** 贴进 LINE 的纯文本。在前端拼，所以自动跟随界面语言（SPEC §7.5）。 */
 const billText = computed(() => {
@@ -564,8 +575,15 @@ function confirmReceived(tr: BillTransfer, index: number) {
     prompt: { model: String(left || tr.amount), type: 'number' },
     cancel: true,
   }).onOk(async (value: string) => {
-    const amount = Math.floor(Number(value))
-    if (!amount || amount <= 0) return
+    // 先把逗号和空格擦掉：整屏的金额都写成 ¥10,000，照着屏幕打回去是最自然的动作
+    const amount = Math.floor(Number(String(value).replace(/[,，\s]/g, '')))
+    if (!Number.isFinite(amount) || amount <= 0) {
+      // **不许静默 return。** 对话框已经关了、页面一个字不变，和「刚才没点上」
+      // 长得一模一样 —— 而这个函数上面那段注释说的正是那个状态会让人再按一次、
+      // 重复记一整笔
+      $q.notify({ type: 'warning', message: t('bill.doneNeedAmount'), timeout: 4000 })
+      return
+    }
     busy.value = index
     try {
       // 转账发生在出账之后，所以它进的是**下一张**草稿 —— 这是对的：

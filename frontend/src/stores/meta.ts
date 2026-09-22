@@ -70,6 +70,18 @@ export const useMeta = defineStore('meta', () => {
    */
   const CACHE_KEY = 'nagaya.meta'
 
+  /** 换人用之前把本地这份忘掉 —— 上一位的成员/分类/设置不该留给下一位 */
+  function forget(): void {
+    members.value = []
+    categories.value = []
+    settings.value = []
+    try {
+      localStorage.removeItem(CACHE_KEY)
+    } catch {
+      /* 隐私模式下删不了就算了 */
+    }
+  }
+
   function useCached(): boolean {
     try {
       const raw = localStorage.getItem(CACHE_KEY)
@@ -112,6 +124,6 @@ export const useMeta = defineStore('meta', () => {
     members, categories, settings,
     activeMembers, activeMembersSelfFirst, membersOn, byId,
     dailyCategories, monthlyCategories, categoryById,
-    setting, load,
+    setting, load, forget,
   }
 })

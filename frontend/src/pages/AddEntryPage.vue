@@ -310,9 +310,13 @@ onMounted(async () => {
   payerId.value = meta.setting<number | null>('default_payer_id', null) ?? auth.me?.id ?? null
 })
 
+/** 正在编辑的那一笔的原样。删除要用它 —— ledger.remove 靠它决定刷哪几份缓存 */
+const loaded = ref<Entry | null>(null)
+
 async function loadForEdit(id: number) {
   try {
     const e = await api.get<Entry>(`/api/entries/${id}`)
+    loaded.value = e
     kind.value = e.kind
     amount.value = Math.abs(e.amount_jpy)
     categoryId.value = e.category_id
@@ -378,10 +382,15 @@ async function saveEdit() {
 function removeEntry() {
   if (editingId.value === null) return
   const id = editingId.value
+  const entry = loaded.value
   $q.dialog({ title: t('common.delete'), message: t('entry.deleteConfirm'), cancel: true }).onOk(
     async () => {
       try {
-        await api.del(`/api/entries/${id}`)
+        // 走 store 而不是直接 DELETE：**「写完要刷哪几份缓存」只该有一处定义**。
+        // 自己打接口的话账单缓存一份都不刷 —— 账目页少了一笔，账单页还挂着它，
+        // 连复制进 LINE 的那段文字都带着。撤销那一支走的一直是 store，一正一反
+        if (entry) await ledger.remove(entry)
+        else await api.del(`/api/entries/${id}`)
       } catch (e) {
         $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e) })
         return

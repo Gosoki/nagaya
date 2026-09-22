@@ -18,7 +18,7 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 
-import { api } from 'src/api/client'
+import { ApiError, api } from 'src/api/client'
 import type { Bill, Entry, MonthlyData, Statement } from 'src/api/types'
 
 export interface BillView {
@@ -72,6 +72,11 @@ export const useBills = defineStore('bills', () => {
   const monthly = ref<Record<string, MonthlyData>>({})
   /** 在飞的请求数。为 0 且没数据，才敢说「这儿是空的」 */
   const pending = ref(0)
+  /**
+   * 上一次取数失败的原因。**「取不到」和「没有」是两件事** ——
+   * 少了它，断网时账单页会说「这屋里还没出过账」，那是句假话。
+   */
+  const lastError = ref<string | null>(null)
   const inflight = new Map<string, Promise<void>>()
   /**
    * 每个槽位发出去的第几发。用来认「我是不是已经过时了」——
@@ -174,10 +179,18 @@ export const useBills = defineStore('bills', () => {
     const my = (ticket += 1)
     seq.set(slot, my)
     pending.value += 1
-    const task = fetchView(key, slot, my, generation).finally(() => {
-      if (inflight.get(slot) === task) inflight.delete(slot)
-      pending.value -= 1
-    })
+    const task = fetchView(key, slot, my, generation)
+      .then(() => {
+        lastError.value = null
+      })
+      .catch((e: unknown) => {
+        lastError.value = e instanceof ApiError ? e.text : String(e)
+        throw e
+      })
+      .finally(() => {
+        if (inflight.get(slot) === task) inflight.delete(slot)
+        pending.value -= 1
+      })
     inflight.set(slot, task)
     return task
   }
@@ -220,6 +233,12 @@ export const useBills = defineStore('bills', () => {
       if (!all && ck !== 'draft') continue
       run(ck as BillKey, true).catch(() => {})
     }
+    // 固定费面板那份缓存有同一个洞：在账目页把一笔房租删了，
+    // 回到账单页那一行还挂着金额、还能点进去改一笔已经不在了的账
+    for (const ck of Object.keys(monthly.value)) {
+      if (!all && ck !== 'draft') continue
+      loadMonthly(ck).catch(() => {})
+    }
   }
 
   /**
@@ -246,7 +265,7 @@ export const useBills = defineStore('bills', () => {
   }
 
   return {
-    tab, detail, statements, views, monthly, pending,
+    tab, detail, statements, views, monthly, pending, lastError,
     cacheKey, loadStatements, loadMonthly, ensure, reload, refreshCached, invalidate, warm,
   }
 })

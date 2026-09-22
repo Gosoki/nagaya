@@ -26,6 +26,13 @@ const drafts = useDrafts()
 const ledger = useLedger()
 const busy = ref(false)
 
+/** html: true 的那条通知里塞的是后端的话，先转义 —— 别让一句错误提示变成注入点 */
+function escapeHtml(text: string): string {
+  return text.replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c,
+  )
+}
+
 async function submit() {
   busy.value = true
   try {
@@ -34,7 +41,20 @@ async function submit() {
     // 被后端明确拒绝的，把它那句话原样说出来 —— 那条草稿会一直卡在这儿，
     // 而「连不上服务器」既是错的，也不告诉人该去改哪儿
     if (rejected.length) {
-      $q.notify({ type: 'negative', timeout: 8000, message: rejected.join('\n') })
+      // 一行一条，还要说清是几条。Quasar 的 message 是纯文本节点，`\n` 在 HTML 里
+      // 折叠成一个空格 —— 几句原因于是挤成一长串，看不出是几笔、哪笔。
+      // 同一个原因的多条草稿也别重复说，数出来更清楚
+      const times = new Map<string, number>()
+      for (const text of rejected) times.set(text, (times.get(text) ?? 0) + 1)
+      $q.notify({
+        type: 'negative',
+        timeout: 8000,
+        multiLine: true,
+        html: true,
+        message: [...times]
+          .map(([text, n]) => escapeHtml(n > 1 ? t('draft.rejectedTimes', { text, n }) : text))
+          .join('<br>'),
+      })
     } else if (offline) {
       $q.notify({ type: 'negative', message: t('errors.network') })
     } else if (ok) {

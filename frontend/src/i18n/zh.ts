@@ -63,6 +63,7 @@ export default {
     planSuperseded: '这张的方案已经被后来的账单接手了 —— 要结账去「未出账」那页',
     done: '确认已完成', doneHint: '记一笔 {from} → {to} 的转账',
     doneRecorded: '已记一笔 {from} → {to} {amount}',
+    doneNeedAmount: '填一个大于 0 的金额',
     copy: '复制账单', copied: '已复制，去 LINE 粘贴就行',
     copyFallback: '长按选中下面的文字复制',
     entryCount: '{n} 笔',
@@ -117,6 +118,9 @@ export default {
     oldPassword: '当前密码', newPassword: '新密码（至少 6 位）',
     passwordChanged: '密码改好了',
     passwordChangedRelogin: '密码已经改好了，但没能自动重新登录 —— 请用**新密码**登录（旧的已经不作数了）',
+    logout: '退出登录',
+    logoutHint: '只退这一台，别的设备不受影响',
+    logoutConfirm: '退出之后要重新输密码才进得来。',
   },
   settings: {
     system: '系统设置', count: '{n} 项',
@@ -143,6 +147,7 @@ export default {
     all: '不限', sum: '合计', empty: '没有符合的账目',
   },
   draft: {
+    rejectedTimes: '{text}（{n} 笔）',
     pending: '有 {n} 笔没提交', submit: '补交', discard: '丢弃',
     savedOffline: '没网，先存在本地了',
   },
@@ -183,6 +188,7 @@ export default {
     backup_not_writable: '备份目录写不进去',
     backup_disk_full: '盘不够了，备份没做',
     backup_corrupt: '刚导出来的备份没通过检查，已经删掉了',
+    backup_last_corrupt: '最新那份备份打不开了（旧的还在）—— 点「立即备份」再放一份',
     backup_empty_source: '账本是空的，没有备份，旧的也一份没动',
     backup_failed: '备份没做成：{why}',
     not_found: '找不到了，刷新一下再试',

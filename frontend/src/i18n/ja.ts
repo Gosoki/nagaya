@@ -63,6 +63,7 @@ export default {
     planSuperseded: 'この送金プランは以降の請求書に引き継がれています —— 精算は「未請求」から',
     done: '送金済みにする', doneHint: '{from} → {to} の送金を記帳します',
     doneRecorded: '{from} → {to} {amount} を記帳しました',
+    doneNeedAmount: '0 より大きい金額を入力してください',
     copy: '請求書をコピー', copied: 'コピーしました。LINE に貼り付けてください',
     copyFallback: '下のテキストを長押しして選択・コピーしてください',
     entryCount: '{n} 件',
@@ -117,6 +118,9 @@ export default {
     oldPassword: '現在のパスワード', newPassword: '新しいパスワード（6 文字以上）',
     passwordChanged: 'パスワードを変更しました',
     passwordChangedRelogin: 'パスワードは変更できましたが、自動ログインに失敗しました —— **新しいパスワード**でログインしてください（古いものは無効です）',
+    logout: 'ログアウト',
+    logoutHint: 'この端末だけ。ほかの端末はそのままです',
+    logoutConfirm: 'ログアウトすると、次回はパスワードの入力が必要です。',
   },
   settings: {
     system: 'システム設定', count: '{n} 項目',
@@ -143,6 +147,7 @@ export default {
     all: 'すべて', sum: '合計', empty: '該当する明細がありません',
   },
   draft: {
+    rejectedTimes: '{text}（{n} 件）',
     pending: '未送信が {n} 件', submit: '送信', discard: '破棄',
     savedOffline: 'オフラインのため端末に保存しました',
   },
@@ -183,6 +188,7 @@ export default {
     backup_not_writable: 'バックアップ先に書き込めません',
     backup_disk_full: '空き容量が足りず、バックアップを取れませんでした',
     backup_corrupt: '作成したバックアップが検査に通らなかったため削除しました',
+    backup_last_corrupt: '最新のバックアップが開けません（古い分は残っています）——「今すぐバックアップ」で取り直してください',
     backup_empty_source: '台帳が空です。バックアップは取らず、既存の世代もそのままです',
     backup_failed: 'バックアップを作成できませんでした：{why}',
     not_found: '見つかりません。画面を更新してください',

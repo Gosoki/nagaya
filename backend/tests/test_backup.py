@@ -289,7 +289,11 @@ def test_status_actually_opens_the_newest_one(session: Session, bk: Path) -> Non
     (bk / name).write_bytes(b"truncated by the sync client")
     st = backup_svc.status(session)
     assert st["last_ok"] is False, "打不开的那份不许显示成正常"
-    assert st["error"] == "backup_corrupt"
+    # 和「刚导出来的那份验不过、已经删掉了」不是一回事：这一份还好端端躺在那儿，
+    # 界面上不能对着它说「已经删掉了」
+    assert st["error"] == "backup_last_corrupt"
+    # 状态里那几条正确信息照样要给：出错的时候人更需要知道「上次是什么时候、共几份」
+    assert st["count"] >= 1 and st["last_at"] and st["last_name"]
 
 
 def test_tests_never_write_into_the_real_backup_folder(session: Session, members) -> None:

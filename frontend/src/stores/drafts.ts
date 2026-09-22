@@ -10,8 +10,9 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
-import { ApiError, api } from 'src/api/client'
-import type { Entry, EntryPayload } from 'src/api/types'
+import { ApiError } from 'src/api/client'
+import type { EntryPayload } from 'src/api/types'
+import { useLedger } from 'src/stores/ledger'
 
 const KEY = 'nagaya.drafts'
 
@@ -72,12 +73,16 @@ export const useDrafts = defineStore('drafts', () => {
    * 带回去说清楚，让人知道该去改哪儿。
    */
   async function submitAll(): Promise<{ ok: number; offline: number; rejected: string[] }> {
+    const ledger = useLedger()
     let ok = 0
     let offline = 0
     const rejected: string[] = []
     for (const draft of [...items.value]) {
       try {
-        await api.post<Entry>('/api/entries', draft.payload)
+        // 走 ledger.create 而不是自己打接口：**「写完要刷哪几份缓存」只该有一处定义**。
+        // 自己打的话账单缓存一份都不刷，而这个横幅在 /bill 上也挂着 ——
+        // 补交完成，账单页原地停在旧数字，一键复制就把错的合计发进群了
+        await ledger.create(draft.payload)
         remove(draft.id)
         ok += 1
       } catch (e) {

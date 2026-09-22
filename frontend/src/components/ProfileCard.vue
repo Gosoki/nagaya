@@ -63,7 +63,7 @@
               type="text"
               maxlength="20"
               :value="auth.me.display_name"
-              @blur="saveText('display_name', ($event.target as HTMLInputElement).value)"
+              @blur="saveText('display_name', $event.target as HTMLInputElement)"
             />
           </q-item-label>
           <q-item-label caption>{{ t('profile.displayNameHint') }}</q-item-label>
@@ -80,7 +80,7 @@
               maxlength="20"
               autocapitalize="off"
               :value="auth.me.name"
-              @blur="saveText('name', ($event.target as HTMLInputElement).value)"
+              @blur="saveText('name', $event.target as HTMLInputElement)"
             />
           </q-item-label>
           <q-item-label caption>{{ t('profile.loginNameHint') }}</q-item-label>
@@ -136,6 +136,18 @@
               @click="savePassword"
             />
           </div>
+        </q-item-section>
+      </q-item>
+
+      <!-- 只退这一台。token 管 90 天，界面上原来没有任何下车的地方 ——
+           借别人手机看过一次账，那台手机就一直是登录状态 -->
+      <q-item class="profile-row">
+        <q-item-section>
+          <q-item-label class="row items-center no-wrap">
+            <div class="col">{{ t('profile.logout') }}</div>
+            <q-btn dense flat no-caps color="negative" :label="t('profile.logout')" @click="signOut" />
+          </q-item-label>
+          <q-item-label caption>{{ t('profile.logoutHint') }}</q-item-label>
         </q-item-section>
       </q-item>
     </q-list>
@@ -215,20 +227,53 @@ function toggle() {
   newPw.value = ''
 }
 
-async function save(patch: Record<string, unknown>) {
+async function save(patch: Record<string, unknown>): Promise<boolean> {
   try {
     const saved = await auth.updateMe(patch)
     // 头像和名字全站到处在用（账单、账目、分摊面板），本地那份也得跟上
     meta.members = meta.members.map((m) => (m.id === saved.id ? saved : m))
+    return true
   } catch (e) {
     $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e), timeout: 5000 })
+    return false
   }
 }
 
-function saveText(field: 'name' | 'display_name', raw: string) {
-  const value = raw.trim()
-  if (!value || value === auth.me?.[field]) return
-  void save({ [field]: value })
+/**
+ * 失焦即存。**存不上就把框里的字改回服务器那一份。**
+ *
+ * 这两格是非受控写法（`:value` + `@blur`）：保存被拒时 `auth.me.name` 根本没变，
+ * Vue 比对 vnode prop 发现一样就不去 patch DOM —— 用户输的那串字于是一直留在
+ * 屏幕上，看着像是存上了。而登录名是唯一没有自救手段的凭据：记错了，
+ * 换台设备就进不来。清空后失焦原来更静，一句话都没有。
+ */
+async function saveText(field: 'name' | 'display_name', el: HTMLInputElement) {
+  const value = el.value.trim()
+  const current = auth.me?.[field] ?? ''
+  if (!value) {
+    el.value = current
+    $q.notify({ type: 'warning', message: t('errors.name_required'), timeout: 3000 })
+    return
+  }
+  if (value === current) {
+    el.value = current                      // 只是首尾多敲了空格
+    return
+  }
+  if (!(await save({ [field]: value }))) el.value = auth.me?.[field] ?? ''
+}
+
+/** 只退这一台。换人用、或者借别人手机看过账，得有地方下车 */
+function signOut() {
+  $q.dialog({
+    title: t('profile.logout'),
+    message: t('profile.logoutConfirm'),
+    cancel: true,
+    ok: { label: t('profile.logout'), color: 'negative', flat: true },
+  }).onOk(() => {
+    auth.logout()
+    meta.forget()          // 上一位的成员/分类/设置别留给下一位
+    void router.push({ name: 'login' })
+  })
 }
 
 /**

@@ -23,16 +23,18 @@
 
     <q-item v-if="st" class="backup-row">
       <q-item-section>
-        <!-- 做不了的时候，这一行就是全部要说的话 -->
+        <!-- 出错是**多一行**，不是把别的都藏起来。
+             原来这一行 v-if 一成立，「上次 X · 共 N 份」整条就不渲染了 ——
+             而「最新那份打不开」的时候，人比平时更需要知道上次是哪天、还剩几份 -->
         <q-item-label v-if="st.error" class="text-negative">
           {{ errorText(st.error) }}
         </q-item-label>
         <!-- 「这儿还没有」不是警报是指令：刚把目录指到别处的人做的是对的事，
              不该被一盏红灯迎接 —— 而按钮就在这一行的右边 -->
-        <q-item-label v-else-if="!st.last_at" class="text-grey-7">
+        <q-item-label v-if="!st.last_at && !st.error" class="text-grey-7">
           {{ t('backup.never') }}
         </q-item-label>
-        <q-item-label v-else :class="st.stale ? 'text-warning' : ''">
+        <q-item-label v-if="st.last_at" :class="st.stale ? 'text-warning' : ''">
           {{ t('backup.last', { at: when(st.last_at) }) }}
           <span class="text-caption text-grey-6 q-ml-sm">
             {{ t('backup.count', { n: st.count }) }} · {{ size(st.last_bytes) }}
