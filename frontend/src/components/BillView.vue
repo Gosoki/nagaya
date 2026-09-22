@@ -1015,6 +1015,7 @@ function doCut() {
 /* ---- 头一张卡片。三行各自钉死行高，两页才一样高（见模板上那段） ---- */
 .head { padding: 14px 16px 16px; }
 .head-top { height: 28px; }
+.head-meta > .ellipsis { flex: 1 1 auto; min-width: 0; }
 .head-title {
   min-width: 0;
   font-size: var(--nagaya-fs-title);
@@ -1028,6 +1029,7 @@ function doCut() {
 }
 .total { font-size: var(--nagaya-fs-title); font-weight: 600; }
 .head-meta {
+  gap: 8px;                     /* 窄屏上两头的字别贴在一起 */
   height: 22px;
   margin-top: 2px;
   font-size: var(--nagaya-fs-meta);

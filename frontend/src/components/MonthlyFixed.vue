@@ -23,7 +23,11 @@
       <q-item-section>{{ t('monthly.title') }}</q-item-section>
       <!-- 没有保存按钮：离开输入框就存。这里只报状态。
            dirtyCount > 0 只会在存失败时出现 —— 那时必须显眼，别让人以为存好了 -->
-      <q-item-section side class="text-caption" :class="dirtyCount ? 'text-negative' : 'text-grey-6'">
+      <q-item-section
+        side
+        class="text-caption save-state"
+        :class="[dirtyCount ? 'text-negative' : 'text-grey-6', { idle: !busy && !dirtyCount }]"
+      >
         <div class="row items-center">
           <q-spinner v-if="busy" size="14px" class="q-mr-xs" />
           {{ busy ? t('monthly.saving') : dirtyCount ? t('monthly.unsaved', { n: dirtyCount }) : t('monthly.autoSaved') }}
@@ -708,6 +712,13 @@ defineExpose({ reload: load })
    现在是红的：和旁边那句「{n} 项没存上」说同一件事 */
 .amount-input.dirty { box-shadow: inset 0 0 0 1.5px var(--nagaya-neg); color: var(--nagaya-neg); }
 .amount-input.to-delete { color: var(--nagaya-neg); text-decoration: line-through; }
+/* 320 宽（SE 一代）：输入框收窄一点，名字和垫付人才露得出来；
+   「改完自动保存」这句平时的状态收起来，标题才不会折成两行 ——
+   折了的话这一块比已出账那页高一截，两页又不齐了。存失败、正在存照样显示 */
+@media (max-width: 359px) {
+  .amount-input { width: 96px; }
+  .save-state.idle { display: none; }
+}
 /* 块尾那一行。已出账那页是同高的空占位，高度写在同一个变量里 */
 .name-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* line-height 压到 1：12px 的状态字不许顶大行盒，行高交给 14px 名字的 strut 定 */

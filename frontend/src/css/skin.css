@@ -146,8 +146,12 @@ html.dark .bill-tabs .q-tab.q-tab--active { background: var(--nagaya-surface-2);
 
 /* 每块的标题条：比正文粗一档，不再是细细的 14px */
 .section-head .q-item__section--main {
+  min-width: 0;
+  overflow: hidden;
   font-size: 15px;
   font-weight: 600;
+  white-space: nowrap;                /* 标题不折行：两页的块高才对得齐 */
+  text-overflow: ellipsis;
   color: var(--nagaya-ink);
 }
 
