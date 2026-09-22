@@ -396,3 +396,32 @@ def test_a_long_ago_deletion_does_not_disable_carry_forever(session: Session, me
                  amount=1, payer_id=a.id, category_id=c["電気"].id)
     cut_statement(session, actor_id=a.id)
     assert [m["name"] for m in carry_same_as_last(session, actor_id=a.id)["created"]] == ["家賃"]
+
+
+def test_an_exact_rule_cannot_be_pruned_and_says_so(session: Session, members) -> None:
+    """`exact` 模式点名了搬走的人时，剔掉他之后**和必然对不上总额** —— 那就该失败。
+
+    不能替用户把剩下几个人的固定额按比例放大：45,000/40,000/35,000 是按房间大小
+    谈好的数，凭空改成别的数字比不记账更糟。所以这一项进 failed 列表、
+    面板上那行留空、界面弹一条 warning 说清是哪几项 —— 让人自己去把规则重定。
+    """
+    a, b, c_ = members
+    cat = cats(session)["家賃"]
+    cat.same_as_last = True
+    cat.default_rule_json = {
+        "mode": "exact",
+        "exact": {str(a.id): 45_000, str(b.id): 40_000, str(c_.id): 35_000},
+    }
+    session.add(cat)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG,
+                 amount=120_000, payer_id=a.id, category_id=cat.id)
+    cut_statement(session, actor_id=a.id)
+    c_.left_on = dt.date(2026, 8, 31)
+    session.add(c_)
+    session.commit()
+
+    out = carry_same_as_last(session, actor_id=a.id)
+    assert out["created"] == []
+    assert [f["name"] for f in out["failed"]] == ["家賃"]
+    assert "120000" in out["failed"][0]["reason"] or "120,000" in out["failed"][0]["reason"]
+    assert rows_by_name(session)["家賃"]["amount"] is None, "宁可空着，也不许填一个编出来的数"

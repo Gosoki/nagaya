@@ -222,14 +222,20 @@ const valueOf = (row: Row) => Number(row.text.replace(/\D/g, '')) || 0
 const cacheKey = computed(() => (historic.value ? `st:${props.statementId}` : 'draft'))
 
 function build(d: MonthlyData) {
-  const keep = new Map(rows.value.filter((r) => r.dirty).map((r) => [r.category_id, r]))
+  // 留住两种行：**还没保存的**（输入不能被抹掉），和**刚被清空删掉的**
+  // （deleted_rule 要活到用户重新填上那一刻 —— 那一步是「改个金额」，
+  //  不该顺手把分摊换成分类默认）。只按 dirty 挑的话，删完 dirty 已经置回 false，
+  //  重载一次那条规则就没了
+  const keep = new Map(
+    rows.value.filter((r) => r.dirty || r.deleted_rule).map((r) => [r.category_id, r]),
+  )
   data.value = d
   rows.value = d.rows.map((r) => {
     const held = keep.get(r.category_id)
     return reactive({
       ...r,
-      text: held ? held.text : r.amount === null ? '' : formatPlain(r.amount),
-      dirty: Boolean(held),
+      text: held?.dirty ? held.text : r.amount === null ? '' : formatPlain(r.amount),
+      dirty: Boolean(held?.dirty),
       rule_override: held?.rule_override ?? null,
       rule_valid: held?.rule_valid ?? true,
       rule_diff: held?.rule_diff ?? 0,
