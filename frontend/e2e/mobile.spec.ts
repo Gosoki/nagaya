@@ -1154,7 +1154,7 @@ test('结账按钮只在「此刻还欠着」时出现，而且说得出还差�
   }
 })
 
-test('结清了的账单：绿标就占状态那一格，自己那笔划掉', async ({ page }) => {
+test('结清了的账单：绿标就占状态那一格，自己那笔写「已结清」', async ({ page }) => {
   await login(page)
   const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
   const all = await (await page.request.get('/api/statements', { headers })).json()
@@ -1167,15 +1167,22 @@ test('结清了的账单：绿标就占状态那一格，自己那笔划掉', as
   const status = page.locator('.head .row').nth(1)
   await expect(status.locator('.q-badge')).toHaveText('已结清')
   await expect(page.locator('.head'), '结算日提醒撤了').not.toContainText('号前结清')
-  // 钱早就转过了：一个亮着的「你应收」会让人以为现在还欠着
-  await expect(page.locator('.mine')).toHaveCSS('text-decoration-line', 'line-through')
+  // 钱早就转过了：这一格不许再印一个看着还欠着的数字，而且不许用报警色
+  await expect(page.locator('.mine')).toContainText('已结清')
+  await expect(page.locator('.mine'), '红＝还欠着，结清了不能红').not.toHaveClass(/owe/)
+  // 两页签的头块必须一样高，否则来回切下面整块会跳
+  const headH = async () =>
+    (await page.locator('.head').boundingBox())!.height
 
-  // 没结清的那张不划，否则这条断言等于没断言
+  const settledHead = await headH()
+
+  // 没结清的那张要印出真数字，否则上面那条断言等于没断言
   const open = all.find((s: { settled: boolean }) => !s.settled)
   expect(open, '种子数据里该有没结清的账单').toBeTruthy()
   await page.goto(`/bill/${open.id}`)
   await expect(page.locator('.head .row').nth(1)).toContainText('未结清')
-  await expect(page.locator('.mine')).toHaveCSS('text-decoration-line', 'none')
+  await expect(page.locator('.mine')).toContainText('¥')
+  expect(await headH(), '两张单子的头块该一样高').toBe(settledHead)
 })
 
 test('备忘：固定费那几项常驻，自己也能加；就在「记一笔」第四格', async ({ page }) => {
