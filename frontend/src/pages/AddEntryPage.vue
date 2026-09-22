@@ -173,9 +173,11 @@
     </q-dialog>
 
     <!-- 主操作在拇指区；合计对不上时差额就摆在按钮正上方，不用滚回去找。
-         键盘弹起来时整条抬到键盘上沿 —— 见 useKeyboardInset：
-         fixed 钉的是布局视口，不抬的话它会被键盘整条压在下面 -->
-    <div class="actions" :style="kbInset ? { bottom: kbInset + 'px' } : undefined">
+
+         **键盘弹起来时不抬它。** 试过用 visualViewport 把它顶到键盘上沿：
+         位置是对的，但 iOS 的键盘是一段动画，resize 一路分帧抛出来，
+         按钮跟着一格一格挪，卡得很难看。宁可它被键盘压住 —— 收了键盘就在那儿 -->
+    <div class="actions">
       <div v-if="splitDiff !== 0 && amount > 0" class="diff-line text-negative">
         {{ t('split.notBalanced', { n: formatYen(splitDiff) }) }}
       </div>
@@ -226,7 +228,6 @@ import SplitEditor from 'src/components/SplitEditor.vue'
 import { useAuth } from 'src/stores/auth'
 import { KIND_COLOR, KIND_PALETTE } from 'src/theme'
 import { useDrafts } from 'src/stores/drafts'
-import { useKeyboardInset } from 'src/composables/keyboard'
 import { useLedger } from 'src/stores/ledger'
 import { useMemos } from 'src/stores/memos'
 import { useMeta } from 'src/stores/meta'
@@ -239,8 +240,6 @@ const meta = useMeta()
 const auth = useAuth()
 const ledger = useLedger()
 const memos = useMemos()
-/** 键盘占掉的高度：拿来把「记入账」抬到键盘上沿 */
-const kbInset = useKeyboardInset()
 const drafts = useDrafts()
 
 const kind = ref<EntryKind>('expense')
