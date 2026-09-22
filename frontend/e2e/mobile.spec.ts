@@ -1028,6 +1028,11 @@ test('账单两页：未出账 / 已出账，更早的从标题那个名字翻',
 
   // 翻到的是上一张，而且地址照样不动
   await expect(page.locator('.head .pick')).toContainText(all[1].label)
+  // **旧单子上不许再给「确认已完成」**。冻结的方案里那几对，后来可能再也不会有钱
+  // 流过（新开销把债权重新净额化，A 的钱是经 B 绕回来的）—— 那一行于是永远点不亮，
+  // 而按下去会凭空记一笔债：实测全屋余额已经全是 0，按一下就变成 A 倒欠 B 一万
+  await expect(page.getByRole('button', { name: '确认已完成' }),
+    '被取代的方案上不该还有结账按钮').toHaveCount(0)
   await expect(page).toHaveURL(/\/bill$/)
   // 页签没跑掉：翻旧账单仍然在「已出账」这一页里
   await expect(page.locator('.bill-tabs .q-tab').nth(1)).toHaveClass(/q-tab--active/)

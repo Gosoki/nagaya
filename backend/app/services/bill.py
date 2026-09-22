@@ -427,8 +427,11 @@ def cut_statement(
     # 而快照算在 snapshot_json 还没写入的那一刻，plan 为空会被当成「已结清」，
     # 冻结下来就是个假值，早晚误导人
     snapshot = build_bill(session, statement)
-    snapshot.pop("settled", None)
-    snapshot.pop("settled_transfers", None)
+    # settlement_progress 返的每一项都要 pop —— 漏一个就在快照里冻下一份假进度。
+    # 加字段的时候很容易只记得改 settlement_progress 忘了改这儿（settled_paid
+    # 就是这么漏过一次的），所以这里按它的返回值来，不手抄字段名
+    for key in settlement_progress(session, None):
+        snapshot.pop(key, None)
     statement.snapshot_json = snapshot
     session.add(statement)
     session.add(

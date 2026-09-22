@@ -58,6 +58,7 @@ export default {
     toReceive: '应收', toPay: '应付', settled: '已结清',
     total: '合计', unsettled: '未结清',
     plan: '转账方案（{n} 笔）', planEmpty: '大家都平了，不用转账',
+    planSuperseded: '这张的方案已经被后来的账单接手了 —— 要结账去「未出账」那页',
     done: '确认已完成', doneHint: '记一笔 {from} → {to} 的转账',
     doneRecorded: '已记一笔 {from} → {to} {amount}',
     copy: '复制账单', copied: '已复制，去 LINE 粘贴就行',

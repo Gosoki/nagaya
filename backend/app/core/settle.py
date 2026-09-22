@@ -24,6 +24,14 @@ class Transfer(NamedTuple):
 
 
 class SettleError(ValueError):
+    """**故意不注册到 main.py 的错误处理里。**
+
+    它只在 Σ余额 ≠ 0 时抛 —— 那不是「用户输入不对」，是账本本身已经坏了。
+    那种情况就该是 500：前端拿一句翻好的文案糊过去，等于把地基塌了这件事
+    说成一次普通的操作失败。前端那条守卫测试（error-codes.spec.ts）也是照
+    main.py 的注册元组推导要哪些文案的，所以这个类天然、且正确地不在名单里。
+    """
+
     def __init__(self, code: str, message: str, **detail):
         super().__init__(message)
         self.code = code

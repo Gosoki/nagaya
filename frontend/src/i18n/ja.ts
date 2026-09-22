@@ -58,6 +58,7 @@ export default {
     toReceive: '受取', toPay: '支払', settled: '精算済み',
     total: '合計', unsettled: '未精算',
     plan: '送金プラン（{n} 件）', planEmpty: '全員ぴったり。送金不要です',
+    planSuperseded: 'この送金プランは以降の請求書に引き継がれています —— 精算は「未請求」から',
     done: '送金済みにする', doneHint: '{from} → {to} の送金を記帳します',
     doneRecorded: '{from} → {to} {amount} を記帳しました',
     copy: '請求書をコピー', copied: 'コピーしました。LINE に貼り付けてください',

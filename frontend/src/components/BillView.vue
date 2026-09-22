@@ -245,7 +245,7 @@
               size="24px"
             />
             <q-btn
-              v-else-if="auth.me?.id === tr.to_id || auth.me?.id === tr.from_id"
+              v-else-if="isCurrent && (auth.me?.id === tr.to_id || auth.me?.id === tr.from_id)"
               dense
               color="primary"
               no-caps
@@ -257,6 +257,14 @@
             />
           </q-card-section>
         </q-card>
+        <!-- 旧单子上那个按钮必须收掉。**冻结的方案里那几对，后来可能再也不会有钱
+             流过** —— 新开销把债权重新净额化之后，A 的钱是经 B 绕回来的，
+             于是「C→A」那一行永远点不亮、整张永远挂着「未结清」。
+             实测（两种结算模式都一样）：全屋余额已经全是 0，按一下那个按钮
+             凭空造出一万块债。所以旧单子只留绿勾，结账去最新那张。 -->
+        <div v-if="!isCurrent && !bill.settled" class="text-caption text-grey-6 q-mt-sm">
+          {{ t('bill.planSuperseded') }}
+        </div>
         </div>
       </div>
 
@@ -390,6 +398,16 @@ const showCutResult = computed({
 const mine = computed(
   () => bill.value?.members.find((r) => r.member_id === auth.me?.id) ?? null,
 )
+/**
+ * 这是不是「现在这一张」—— 草稿，或者最新出的那张。
+ *
+ * 只有它的转账方案还作数：更早那些的方案是出账那一刻冻结的，
+ * 而后来的开销会把债权重新净额化，冻结的那几对之间可能再也不会有钱流过。
+ */
+const isCurrent = computed(
+  () => bill.value?.is_draft || bill.value?.statement_id === bills.statements?.[0]?.id,
+)
+
 const mineText = computed(() => {
   const row = mine.value
   if (!row) return ''

@@ -519,3 +519,26 @@ def test_unrelated_transfers_do_not_settle_a_bill(session: Session, members) -> 
     create_entry(session, actor_id=a.id, kind=EntryKind.settlement, on=OCT,
                  amount=999_999, payer_id=t["from_id"], to_member_id=other)
     assert build_bill(session, s1)["settled"] is False
+
+
+def test_the_snapshot_freezes_no_settlement_progress(session: Session, members) -> None:
+    """快照里**一个结算进度字段都不许有**。
+
+    进度是实时的（转账是出账之后才发生的），而快照算在 snapshot_json 还没写入的
+    那一刻 —— plan 为空会被当成「已结清」，冻下来就是个假值。
+    这里按 settlement_progress 的返回值逐个 pop 而不是手抄字段名：
+    settled_paid 就是加字段时忘了改这儿漏过一次的。
+    """
+    from app.services.bill import settlement_progress
+
+    a, *_ = members
+    cat = Category(name="日用品", monthly=False)
+    session.add(cat)
+    session.commit()
+    session.refresh(cat)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                 amount=3_000, payer_id=a.id, category_id=cat.id)
+    st = cut_statement(session, actor_id=a.id)
+
+    leaked = [k for k in settlement_progress(session, None) if k in (st.snapshot_json or {})]
+    assert leaked == [], f"这些进度字段被冻进快照了：{leaked}"
