@@ -305,7 +305,10 @@ async function onRefresh(done: () => void) {
 /* 筛选条吸顶。列表很长，翻到一半想换个筛法不该先滚回顶上 */
 .filter-bar {
   position: sticky;
-  top: 0;
+  /* 吸在页签条的**下沿**。写 0 的话它会滚到固定顶栏底下去，
+     于是「翻到一半想换个筛法不该先滚回顶上」这句注释说的效果正好反过来 —— 
+     实测要往回滚三千多像素才找得回来 */
+  top: var(--nagaya-tabs-h);
   z-index: 2;
   background: #fff;
   border-bottom: 1px solid rgba(0, 0, 0, 0.06);
@@ -313,8 +316,10 @@ async function onRefresh(done: () => void) {
 .chip {
   display: inline-flex;
   align-items: center;
-  height: 32px;
-  padding: 0 4px 0 10px;
+  /* 44 是拇指的底线。32 高的 chip 一排三个挨着，点错概率不低，
+     而点错的代价是「筛出来的合计变了但人没察觉」 */
+  height: 44px;
+  padding: 0 8px 0 14px;
   border: none;
   border-radius: 16px;
   background: #f2f2f5;

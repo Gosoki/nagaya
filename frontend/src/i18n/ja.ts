@@ -4,6 +4,7 @@ export default {
     offlineBoot: 'サーバーに接続できず、ローカルにも控えがありません。',
     save: '保存', undo: '元に戻す', cancel: 'キャンセル', delete: '削除', confirm: 'OK',
     today: '今日', retry: '再試行',
+    currency: '円',
   },
   login: {
     name: 'ユーザー名', password: 'パスワード', submit: '入る',
@@ -90,6 +91,7 @@ export default {
     includeMonthly: '固定費を含める',
     monthlyOffHint: '前回の請求書作成から {n} 日しか経っていないため、固定費は既定で含めません。含める場合はチェックしてください。',
     monthlyOffHintToday: '本日すでに請求書を作成しているため、固定費は既定で含めません。含める場合はチェックしてください。',
+    cutBlankFixed: '{names} が未入力です —— このまま作成すると 0 円として締められます',
     draft: '現在の請求書',
     cut: '請求書を作成',
     cutConfirm: 'この時点までの明細をこの請求書にまとめます。以降の記帳は次回分になります。', issued: '発行済み',

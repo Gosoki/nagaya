@@ -34,7 +34,11 @@
           :class="{ dragging: dragIndex === k || dragIndex === k - 1 }"
           :style="{ width: pctOf(segs[k] ?? 0), background: colorOf(p.id) }"
         >
-          <span v-if="pctNum(segs[k] ?? 0) >= 18" class="seg-label">{{ p.display_name }}</span>
+          <!-- 名字放不下时至少给个首字：这条子唯一的信息编码就是颜色，
+               而拖到某人份额很小的那一刻，恰恰是最需要确认「被压小的是谁」的时候 -->
+          <span class="seg-label" :style="{ color: inkOn(colorOf(p.id)) }">
+            {{ pctNum(segs[k] ?? 0) >= 20 ? p.display_name : p.display_name.slice(0, 1) }}
+          </span>
         </div>
         <!-- 手柄单独一层：段是等宽变化的，手柄要压在分界线上，而且可点区域
              得比那道 2px 的杠宽得多（44px），否则手机上根本按不住 -->
@@ -392,6 +396,21 @@ const pctNum = (v: number) => (segTotal.value ? (v / segTotal.value) * 100 : 0)
 const pctOf = (v: number) => `${pctNum(v)}%`
 const colorOf = (id: number) => meta.byId[id]?.color ?? '#90a4ae'
 
+/**
+ * 这块底色上该用白字还是黑字。
+ *
+ * 成员颜色是用户自己挑的，浅到 #ffd54f 也完全可能 —— 一律白字的话对比度
+ * 掉到 1.5:1，拖动过程中根本看不清自己在动谁。按亮度挑一次，两边都够读。
+ */
+function inkOn(hex: string): string {
+  const h = hex.replace('#', '')
+  const n = h.length === 3 ? h.split('').map((c) => c + c).join('') : h
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(n.slice(i, i + 2), 16) / 255)
+  const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
+  const L = 0.2126 * lin(r ?? 0) + 0.7152 * lin(g ?? 0) + 0.0722 * lin(b ?? 0)
+  return (L + 0.05) / 0.05 > 1.05 / (L + 0.05) ? '#1a1a1a' : '#ffffff'
+}
+
 const handles = computed(() => {
   const out: { i: number; left: string }[] = []
   let acc = 0
@@ -418,8 +437,18 @@ function move(e: PointerEvent) {
   e.preventDefault()
   const total = drag.base.reduce((a, b) => a + b, 0)
   const raw = Math.round(((e.clientX - drag.x) / drag.width) * total)
-  // 只在相邻两段之间挪钱，谁都不许被推成负数
-  const delta = Math.max(-(drag.base[drag.i] ?? 0), Math.min(drag.base[drag.i + 1] ?? 0, raw))
+  // **每一段都要留得下一个手柄的宽度**（44px）。
+  // 不留的话，把某人推到 0 之后他两边的手柄就叠在一起，左边那条分界线
+  // 从此按不住 —— 手指再也放不上去，前面拖的全得推倒重来。
+  // 「这笔他不参与」有专门的入口（点头像），不该靠把条子拖到底来表达。
+  // 本来就比下限还窄的段不硬抬，只是不许再窄下去。
+  const minVal = Math.ceil((total * 44) / drag.width)
+  const floorL = Math.min(drag.base[drag.i] ?? 0, minVal)
+  const floorR = Math.min(drag.base[drag.i + 1] ?? 0, minVal)
+  const delta = Math.max(
+    -((drag.base[drag.i] ?? 0) - floorL),
+    Math.min((drag.base[drag.i + 1] ?? 0) - floorR, raw),
+  )
   const next = [...drag.base]
   next[drag.i] = (drag.base[drag.i] ?? 0) + delta
   next[drag.i + 1] = (drag.base[drag.i + 1] ?? 0) - delta
@@ -662,11 +691,11 @@ defineExpose({
 }
 .seg.dragging { filter: brightness(1.08); }
 .seg-label {
-  color: #fff;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.02em;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  white-space: nowrap;
+  overflow: hidden;
   pointer-events: none;
 }
 /* 手柄：屏幕上是一道 4px 的白杠，可点区域 44px —— 拇指按得住 */

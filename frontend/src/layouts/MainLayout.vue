@@ -39,7 +39,10 @@
       >
         <q-tab name="add" icon="add_circle" :label="t('nav.add')" @click="go('add')" />
         <q-tab name="bill" icon="receipt" :label="t('nav.bill')" @click="go('bill')" />
-        <q-tab name="entries" icon="receipt_long" :label="t('nav.entries')" @click="go('entries')" />
+        <!-- 不能再用 receipt_long：和旁边「账单」的 receipt 长得几乎一样，
+             三格底栏里两格一个样，只能靠位置认；而这一格底下装的是
+             流水＋备忘＋设置，跟「小票」也不是一回事 -->
+        <q-tab name="entries" icon="format_list_bulleted" :label="t('nav.entries')" @click="go('entries')" />
       </q-tabs>
     </q-footer>
   </q-layout>
@@ -126,9 +129,16 @@ onMounted(boot)
   --nagaya-max-w: 480px;
   /* 顶栏统一高度：页签、返回条都用它，和底部 Tab（57px）呼应 */
   --nagaya-head-h: 52px;
+  /* 页签条（流水/备忘/设置、未出账/已出账）的实际高度。
+     页面里的吸顶元素要吸在它**下沿**，不是吸到 0 —— 吸到 0 就等于钻进
+     固定顶栏底下，一滚就整条看不见了 */
+  --nagaya-tabs-h: 48px;
   /* 「本期固定费」那一块的尺寸。同一块东西有两套实现 —— 未出账那页是可编辑面板，
      已出账那页是只读列表 —— 两边长得必须一样。数写在这儿一份，免得又各自走散 */
-  --nagaya-fee-row-h: 40px;
+  /* 48 不是 40：这五个格子是每个月真要动手打字的地方，而输入框比行矮 4px。
+     40 的时候框只有 34 高、上下两框之间只隔 7px，拇指往下偏一点就把水费
+     打进了燃气那行 —— 而这一屏「改完自动保存」，没有确认也没有撤销 */
+  --nagaya-fee-row-h: 48px;
   --nagaya-fee-amount-fs: 16px;
   /* 金额列离右边多远。未出账那页那儿站着展开箭头，已出账那页用内边距占出来 */
   --nagaya-fee-amount-gap: 50px;

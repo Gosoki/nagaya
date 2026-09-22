@@ -4,6 +4,7 @@ export default {
     offlineBoot: '连不上服务器，也没有本地缓存。连上网再试一次。',
     save: '保存', undo: '撤销', cancel: '取消', delete: '删除', confirm: '确定',
     today: '今天', retry: '重试',
+    currency: '¥',
   },
   login: {
     name: '用户名', password: '密码', submit: '进入',
@@ -90,6 +91,7 @@ export default {
     includeMonthly: '包括固定费',
     monthlyOffHint: '距上次出账才 {n} 天，固定费默认不含 —— 要一起结就自己勾上。',
     monthlyOffHintToday: '今天已经出过一张了，固定费默认不含 —— 要一起结就自己勾上。',
+    cutBlankFixed: '{names} 还空着 —— 出账后这几项按 0 结算',
     draft: '当前账单',
     cut: '出账单',
     cutConfirm: '把这一刻之前记的账全部归到这张账单上。之后再记的会进下一张。', issued: '已出账',

@@ -5,6 +5,8 @@
       v-for="m in members"
       :key="m.id"
       class="pick"
+      type="button"
+      :aria-pressed="modelValue === m.id"
       :class="{ on: modelValue === m.id }"
       :style="modelValue === m.id ? { background: m.color } : {}"
       :data-label="short(m.display_name)"

@@ -552,3 +552,27 @@ def test_an_old_bill_tells_you_what_is_still_owed_right_now(session: Session, me
     assert live.get((b.id, c_.id), 0) == 0, "b 已经不欠 c 了，此刻的方案里不许还有这一对"
     assert after["live_closing"][b.id] == 0
     assert after["transfers"][1]["amount"] == 10_000, "当初那份方案还是不许变"
+
+
+def test_new_members_do_not_all_come_out_the_same_grey(client: TestClient, auth, session) -> None:
+    """建人时不给颜色就轮着发一个。
+
+    头像圆点、分摊那条分配条、账单上的每人行，三处全靠这个颜色区分谁是谁 ——
+    都留默认灰的话分配条就是一整块灰板，拖完看不出钱挪给了谁。
+    而新家建人走的是命令行或接口，没人会先去挑色板。
+    """
+    from app.models import MEMBER_COLORS
+
+    made = []
+    for i in range(3):
+        r = client.post("/api/members", headers=auth,
+                        json={"name": f"n{i}", "display_name": f"N{i}", "password": "pw123456"})
+        assert r.status_code == 201, r.text
+        made.append(r.json()["color"])
+    assert len(set(made)) == 3, made
+    assert all(c in MEMBER_COLORS for c in made), made
+    # 自己挑了就用自己的
+    r = client.post("/api/members", headers=auth, json={
+        "name": "pick", "display_name": "Pick", "password": "pw123456", "color": "#123456",
+    })
+    assert r.json()["color"] == "#123456"

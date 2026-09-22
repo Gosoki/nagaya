@@ -70,6 +70,8 @@
         v-for="c in gridCategories"
         :key="c.id"
         class="cat"
+        type="button"
+        :aria-pressed="categoryId === c.id"
         :class="{ on: categoryId === c.id }"
         :style="categoryId === c.id ? { background: c.color } : {}"
         @click="pickCategory(c.id)"

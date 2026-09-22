@@ -1,8 +1,12 @@
 <!-- 金额输入：大字号、居中、唤起系统数字键盘。
      日元没有小数，所以 inputmode="numeric" 就够 —— 不需要自绘小键盘。 -->
 <template>
-  <div class="amount-wrap" :style="{ color: props.color }" @click="focus">
-    <span class="sym">{{ symbol }}</span>
+  <!-- 日文里日元是**后缀**（12,345円），中文是前缀（¥12,345）—— 全站的
+       formatYen 一直是这么写的，只有这个最常用的输入框自己拼了个前缀「￥」。
+       录数字时看到的记法和录完之后在账单、流水里看到的不一样，第一反应是
+       「我是不是填错框了」 -->
+  <div class="amount-wrap" :class="{ suffix: symbolAfter }" :style="{ color: props.color }" @click="focus">
+    <span v-if="!symbolAfter" class="sym">{{ symbol }}</span>
     <input
       ref="el"
       class="amount"
@@ -15,6 +19,7 @@
       @input="onInput"
       @focus="onFocus"
     />
+    <span v-if="symbolAfter" class="sym">{{ symbol }}</span>
   </div>
 </template>
 
@@ -25,10 +30,13 @@ import { useI18n } from 'vue-i18n'
 const props = defineProps<{ modelValue: number; color?: string }>()
 const emit = defineEmits<{ 'update:modelValue': [number] }>()
 
-const { locale } = useI18n()
+const { t, locale } = useI18n()
 const el = ref<HTMLInputElement | null>(null)
 
-const symbol = computed(() => (locale.value === 'ja' ? '￥' : '¥'))
+// 符号本身也是文案，走 i18n（有守卫用例钉着「不许把界面文字写死在组件里」）。
+// 日文里日元是后缀，中文是前缀 —— 和全站的 formatYen 对齐
+const symbolAfter = computed(() => locale.value === 'ja')
+const symbol = computed(() => t('common.currency'))
 const display = computed(() => (props.modelValue ? props.modelValue.toLocaleString('en-US') : ''))
 
 // 输入框按内容宽度伸缩，这样 ¥ 始终贴着数字，而不是被甩到屏幕最左边。
@@ -75,6 +83,8 @@ defineExpose({ focus })
   font-size: 26px;
   opacity: 0.5;                 /* 跟着金额一个色，只是淡一档 */
 }
+/* 后缀那一版字略小些：「円」是个汉字，和 ¥ 同号会显得比数字还抢眼 */
+.amount-wrap.suffix .sym { font-size: 22px; }
 .amount {
   color: inherit;
   font-size: 46px;

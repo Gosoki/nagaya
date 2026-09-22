@@ -211,15 +211,19 @@
               <!-- 和旁边四项一个规矩：是 0 就别占一行。
                    刚出完账的草稿页上，三个人各显示一遍「应担 ¥0」，
                    底下还跟着一句「大家都平了，不用转账」—— 同一件事说四遍 -->
-              <span v-if="row.owed">{{ t('bill.owed') }} {{ formatYen(row.owed) }}</span>
-              <span v-if="row.paid">{{ t('bill.paid') }} {{ formatYen(row.paid) }}</span>
-              <span v-if="row.transferred_out">
+              <!-- **每个字段钉死自己那一格**，不许自动流。
+                   自动流的时候，Go 缺「已预付」就会让「上期结转」顶到左列，
+                   而 Kan/Zen 的还在右列 —— 三个人横着比「谁上期结转了多少」，
+                   眼睛得在两列之间来回跳，而那正是要照着打钱的数字 -->
+              <span v-if="row.owed" class="b-owed">{{ t('bill.owed') }} {{ formatYen(row.owed) }}</span>
+              <span v-if="row.paid" class="b-paid">{{ t('bill.paid') }} {{ formatYen(row.paid) }}</span>
+              <span v-if="row.transferred_out" class="b-tx">
                 {{ t('bill.prepaid') }} {{ formatYen(row.transferred_out) }}
               </span>
-              <span v-if="row.transferred_in">
+              <span v-if="row.transferred_in" class="b-tx">
                 {{ t('bill.received') }} {{ formatYen(row.transferred_in) }}
               </span>
-              <span v-if="row.opening">{{ t('bill.carried') }} {{ formatYen(row.opening) }}</span>
+              <span v-if="row.opening" class="b-carry">{{ t('bill.carried') }} {{ formatYen(row.opening) }}</span>
             </div>
           </q-item-section>
         </q-item>
@@ -268,11 +272,10 @@
             />
             <q-btn
               v-else-if="auth.me?.id === tr.to_id || auth.me?.id === tr.from_id"
-              dense
               color="primary"
               no-caps
               unelevated
-              padding="6px 14px"
+              padding="10px 18px"
               :loading="busy === i"
               :label="t('bill.done')"
               @click="confirmReceived(tr, i)"
@@ -342,9 +345,12 @@
             <div class="text-subtitle1 text-weight-medium">{{ formatYen(tr.amount) }}</div>
           </div>
         </q-card-section>
+        <!-- **主色给真正要做的那件事。** 这个弹窗存在的唯一理由就是「把谁给谁
+             多少发到群里」，而原来蓝色的是「确定」（＝关掉它），顺手一点，
+             那两行转账方案就此消失，得自己滚到页底再找一次「复制账单」 -->
         <q-card-actions align="right">
-          <q-btn flat no-caps :label="t('bill.copy')" @click="copyBill" />
-          <q-btn v-close-popup flat no-caps color="primary" :label="t('common.confirm')" />
+          <q-btn v-close-popup flat no-caps color="grey-7" :label="t('common.confirm')" />
+          <q-btn unelevated no-caps color="primary" :label="t('bill.copy')" @click="copyBill" />
         </q-card-actions>
       </q-card>
     </q-dialog>
@@ -652,6 +658,8 @@ async function copyBill() {
   try {
     await navigator.clipboard.writeText(billText.value)
     $q.notify({ type: 'positive', message: t('bill.copied'), timeout: 1500 })
+    cutResult.value = null       // 出账完成那个弹窗：复制完它的事就办完了
+
   } catch {
     // 非安全上下文（局域网 http）下 clipboard 直接抛，退回手动复制
     showFallback.value = true
@@ -723,10 +731,19 @@ function doCut() {
   const withMonthlyByDefault = bill.value?.suggest_monthly !== false
   // 只有默认没勾上时才多说一句。Quasar 的对话框不认换行，要换行就得开 html
   const gap = bill.value?.days_since_prev_cut ?? 0
-  let hint = ''
+  const hints: string[] = []
   if (!withMonthlyByDefault) {
-    hint = gap === 0 ? t('bill.monthlyOffHintToday') : t('bill.monthlyOffHint', { n: gap })
+    hints.push(gap === 0 ? t('bill.monthlyOffHintToday') : t('bill.monthlyOffHint', { n: gap }))
   }
+  // **哪几项固定费还空着，出账前说一声。**
+  // 电、气、水在日本是三张分开寄的账单，到得不齐是常态；漏一项就是这张单子
+  // 少收几千日元，而且要等发进 LINE 群之后才有人发现，三个人的转账方案得推倒重来。
+  // 日常编辑时「空框＝0，不出声」是对的，但出账是不可逆的那一步，这儿不该继续沉默
+  const blank = (bills.monthly.draft?.rows ?? [])
+    .filter((r) => !r.archived && !r.amount)
+    .map((r) => r.name)
+  if (blank.length) hints.push(t('bill.cutBlankFixed', { names: blank.join('、') }))
+  const hint = hints.join('<br><br>')
   $q.dialog({
     title: t('bill.cut'),
     message: hint ? `${t('bill.cutConfirm')}<br><br>${hint}` : t('bill.cutConfirm'),
@@ -777,6 +794,11 @@ function doCut() {
   line-height: 1.4;
 }
 .breakdown > span { white-space: nowrap; }
+/* 「已预付」和「已收到」互斥，共用第 2 行第 1 格 */
+.b-owed { grid-area: 1 / 1; }
+.b-paid { grid-area: 1 / 2; }
+.b-tx { grid-area: 2 / 1; }
+.b-carry { grid-area: 2 / 2; }
 /* 标题当按钮用，但看着还得是标题。
    **只中和浏览器给 button 的默认字体族**，别写 `font: inherit` ——
    那个简写会把 text-subtitle1 的 16px 一并盖成容器的 14px，标题小一号 */

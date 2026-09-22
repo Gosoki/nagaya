@@ -51,6 +51,20 @@ class Lang(str, Enum):
     ja = "ja"
 
 
+#: 建新成员时轮着给的头像色。
+#:
+#: **不能都用同一个灰**：头像圆点、分摊里的分配条、账单上的每人行，
+#: 全靠这个颜色区分谁是谁 —— 三个人一个色的话，分配条就是一整块灰板，
+#: 拖完根本看不出钱挪给了谁。而新家建人走的是命令行/接口，不会有人
+#: 先去挑颜色。
+#: 和面板上那张色板（frontend ProfileCard.vue 的 COLORS）是同一组，
+#: 改一边记得改另一边。
+MEMBER_COLORS = [
+    "#3d4785", "#26a69a", "#ef6c00", "#c62828", "#6a1b9a",
+    "#00838f", "#2e7d32", "#ad1457", "#4e342e", "#455a64",
+]
+
+
 class Member(SQLModel, table=True):
     """成员。退出的人不删，只填 left_on —— 历史账要能追溯到人。"""
 
@@ -59,7 +73,7 @@ class Member(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(index=True, unique=True, description="登录名")
     display_name: str = Field(description="界面上显示的名字")
-    color: str = Field(default="#888888", description="头像/图表配色")
+    color: str = Field(default="#888888", description="头像/图表配色（建人时按 MEMBER_COLORS 轮着给）")
     display_order: int = Field(default=0, index=True, description="固定顺序，也是分摊余数平局时的排序依据")
     joined_on: dt.date = Field(default_factory=today_jst)
     left_on: Optional[dt.date] = Field(default=None, description="退出日；留空＝在籍")
