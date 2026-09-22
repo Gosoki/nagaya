@@ -113,7 +113,7 @@
             :aria-label="t('split.negative')"
             @click="flipAdj(m.id)"
           >
-            −
+            {{ adjNeg(m.id) ? '−' : '+' }}
           </button>
           <input
             class="num-input"
@@ -598,14 +598,15 @@ defineExpose({
   align-items: center;
   padding-left: 4px;
 }
-/* 减号开关。灭着是一小横灰线（「这儿可以变负」），亮着是一颗红药丸 ——
-   那一小横太容易漏看，而「这一格是减的」是这一行里最要紧的一件事 */
+/* 正负开关。默认是灰色的「＋」—— 不点它这一格就是加的，这是常态；
+   点一下翻成一颗红圆点「−」，那一格是减的。
+   两个状态各自印着**当前**是什么，不是印着「点我会变成什么」 */
 .sign {
-  flex: 0 0 auto;
-  width: 22px;
+  flex: 0 0 26px;            /* 不让 flex 把它抻成椭圆 */
+  width: 26px;
   height: 26px;
   border: none;
-  border-radius: 13px;
+  border-radius: 50%;
   background: transparent;
   color: var(--nagaya-ink-4);
   font-size: 17px;
@@ -729,7 +730,7 @@ defineExpose({
   color: inherit;
 }
 .num-input::placeholder { color: var(--nagaya-ink-4); }
-/* 开关亮着时数字跟着变红 —— 红药丸加一个黑数字，是两个半句话；
+/* 开关亮着时数字跟着变红 —— 红圆点加一个黑数字，是两个半句话；
    一整格都红了，「这一格是减的」才是一眼的事，不用回头去看那颗按钮 */
 .num-input.neg {
   color: var(--nagaya-neg);
