@@ -146,6 +146,7 @@
 import { useQuasar } from 'quasar'
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 
 import { ApiError } from 'src/api/client'
 import MemberAvatar from 'src/components/MemberAvatar.vue'
@@ -160,6 +161,7 @@ const COLORS = [
 
 const { t } = useI18n()
 const $q = useQuasar()
+const router = useRouter()
 const auth = useAuth()
 const meta = useMeta()
 
@@ -229,19 +231,42 @@ function saveText(field: 'name' | 'display_name', raw: string) {
   void save({ [field]: value })
 }
 
+/**
+ * 改密码。**两步必须分开报错** —— 它们的含义正好相反：
+ *   第一步失败 ＝ 密码**没改**（旧密码填错之类），原样报出来就行；
+ *   第二步失败 ＝ 密码**已经改了**、手里这张 token 也作废了，只是没换到新的。
+ * 原来两步共用一句 `e.text`，于是第二步失败时人看到的是一句错误提示，
+ * 转身拿**旧密码**去重登 —— 而旧密码已经不作数了。
+ */
 async function savePassword() {
   busy.value = true
   const fresh = newPw.value
+  const who = auth.me!.name
   try {
     await auth.updateMe({ password: fresh, old_password: oldPw.value })
-    // 改完密码，**手里这张 token 也作废了**（后端按密码指纹认 session，
-    // 改密码就是为了把别的设备踢下去）。用新密码当场换一张，别把自己也踢出去 ——
-    // 否则下一个动作会莫名其妙跳回登录页，人还以为密码没改成
-    await auth.login(auth.me!.name, fresh)
-    toggle()
-    $q.notify({ type: 'positive', message: t('profile.passwordChanged'), timeout: 2000 })
   } catch (e) {
     $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e), timeout: 5000 })
+    busy.value = false
+    return
+  }
+  try {
+    // 改完密码手里这张 token 就作废了（后端按密码指纹认 session，
+    // 改密码就是为了把别的设备踢下去）。用新密码当场换一张，别把自己也踢出去
+    await auth.login(who, fresh)
+    toggle()
+    $q.notify({ type: 'positive', message: t('profile.passwordChanged'), timeout: 2000 })
+  } catch {
+    // 先 logout 再跳：路由守卫看到 localStorage 里还有那张死 token 会把 /login
+    // 改道回首页，人就一直卡在一个假的已登录界面里
+    auth.logout()
+    $q.notify({
+      type: 'warning',
+      timeout: 0,
+      multiLine: true,
+      message: t('profile.passwordChangedRelogin'),
+      actions: [{ label: t('common.confirm'), color: 'white' }],
+    })
+    void router.push({ name: 'login' })
   } finally {
     busy.value = false
   }

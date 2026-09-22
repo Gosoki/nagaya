@@ -114,6 +114,7 @@ export default {
     password: 'パスワード', change: '変更',
     oldPassword: '現在のパスワード', newPassword: '新しいパスワード（6 文字以上）',
     passwordChanged: 'パスワードを変更しました',
+    passwordChangedRelogin: 'パスワードは変更できましたが、自動ログインに失敗しました —— **新しいパスワード**でログインしてください（古いものは無効です）',
   },
   settings: {
     system: 'システム設定', count: '{n} 項目',
@@ -161,6 +162,8 @@ export default {
     self_transfer: '自分自身には送金できません',
     missing_to_member: '送金先を選んでください',
     no_participants: 'この日に在籍メンバーがいません',
+    share_too_large: 'この分け方だと負担額が大きすぎます。調整額を確認してください',
+    not_in_range: '分担ルールの数値が範囲外です',
     amount_too_large: '金額が大きすぎます。0 を押しすぎていませんか',
     password_too_long: 'パスワードが長すぎます（最大 72 バイト。漢字は 1 文字 3 バイト）',
     nothing_to_cut: '精算対象の記録がまだありません',

@@ -114,6 +114,7 @@ export default {
     password: '密码', change: '修改',
     oldPassword: '当前密码', newPassword: '新密码（至少 6 位）',
     passwordChanged: '密码改好了',
+    passwordChangedRelogin: '密码已经改好了，但没能自动重新登录 —— 请用**新密码**登录（旧的已经不作数了）',
   },
   settings: {
     system: '系统设置', count: '{n} 项',
@@ -161,6 +162,8 @@ export default {
     self_transfer: '不能转给自己',
     missing_to_member: '转账要选转入人',
     no_participants: '这天没有在籍成员',
+    share_too_large: '这么分下来有人要担的钱太大了，检查一下调整额',
+    not_in_range: '分摊规则里的数字超出范围了',
     amount_too_large: '金额太大了，检查一下是不是多按了几个 0',
     password_too_long: '密码太长了，最多 72 字节（一个汉字算 3 个）',
     nothing_to_cut: '还没有待出账的账目',
