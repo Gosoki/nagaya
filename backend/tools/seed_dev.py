@@ -218,8 +218,11 @@ def finish_cut(s: Session, actor_id: int, label: str, at: dt.datetime):
 def settle_plan(s: Session, st, *, on: dt.date, at: dt.datetime, how_many: int | None) -> None:
     """照这张账单的转账方案记账。how_many=None 表示全转完。
 
-    转账要落在**这张出账之后、下一张出账之前**，结算进度才认得出来
-    （见 bill._settlement_progress）。所以 created_at 得跟着一起往回调。
+    转账要落在**这张出账之后**，结算进度才认得出来（见 bill.settlement_progress）。
+    所以 created_at 得跟着一起往回调。
+
+    上界那一半已经没有了：原来还要求「在下一张出账之前」，于是「拖过一轮再还钱」
+    这条最常见的路径永远点不亮，用户会照着屏幕再转一次。
     """
     plan = (st.snapshot_json or {}).get("transfers") or []
     for t in plan[: how_many if how_many is not None else len(plan)]:
