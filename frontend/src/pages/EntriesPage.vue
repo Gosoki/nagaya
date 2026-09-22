@@ -109,6 +109,7 @@ import { ApiError, api } from 'src/api/client'
 import type { Entry, EntryKind, Statement } from 'src/api/types'
 import { jstDateOf } from 'src/date'
 import { formatYen } from 'src/i18n'
+import { FALLBACK } from 'src/palette'
 import MemoPanel from 'src/components/MemoPanel.vue'
 import SettingsPanel from 'src/components/SettingsPanel.vue'
 import { useLedger } from 'src/stores/ledger'
@@ -262,7 +263,7 @@ const grouped = computed(() => {
 const categoryOf = (e: Entry) =>
   e.category_id === null ? undefined : meta.categoryById[e.category_id]
 const colorOf = (e: Entry) =>
-  e.kind === 'expense' ? (categoryOf(e)?.color ?? '#90a4ae') : KIND_COLOR[e.kind]
+  e.kind === 'expense' ? (categoryOf(e)?.color ?? FALLBACK) : KIND_COLOR[e.kind]
 const iconOf = (e: Entry) =>
   e.kind === 'settlement' ? 'swap_horiz' : e.kind === 'income' ? 'savings' : (categoryOf(e)?.icon ?? 'receipt_long')
 

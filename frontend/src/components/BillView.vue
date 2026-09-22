@@ -412,6 +412,7 @@ import { useRouter } from 'vue-router'
 
 import { ApiError, api } from 'src/api/client'
 import type { Bill, BillTransfer, Entry, Statement } from 'src/api/types'
+import { FALLBACK } from 'src/palette'
 import MemberAvatar from 'src/components/MemberAvatar.vue'
 import MonthlyFixed from 'src/components/MonthlyFixed.vue'
 import { todayJst } from 'src/date'
@@ -666,7 +667,7 @@ const categoryOfEntry = (e: Entry) =>
   e.category_id === null ? undefined : meta.categoryById[e.category_id]
 // 收入没有分类，得有自己的图标色，否则跟「分类丢了」长得一模一样
 const colorOfEntry = (e: Entry) =>
-  e.kind === 'expense' ? (categoryOfEntry(e)?.color ?? '#90a4ae') : KIND_COLOR[e.kind]
+  e.kind === 'expense' ? (categoryOfEntry(e)?.color ?? FALLBACK) : KIND_COLOR[e.kind]
 const iconOfEntry = (e: Entry) =>
   e.kind === 'income' ? 'savings' : (categoryOfEntry(e)?.icon ?? 'receipt_long')
 const labelOfEntry = (e: Entry) => e.title || categoryOfEntry(e)?.name || t(`kind.${e.kind}`)

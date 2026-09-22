@@ -51,17 +51,27 @@ class Lang(str, Enum):
     ja = "ja"
 
 
-#: 建新成员时轮着给的头像色。
+#: 全站唯一的一组「可挑的颜色」。**成员头像和分类共用这一组** ——
+#: 分成两套的话，同一屏上会同时出现一组深色和一组亮色，而这两样在账单页
+#: 就是上下挨着的。色阶跟着品牌色 #3d4785 走：深、略哑；亮色当 30px 实心圆
+#: 的底、上面压白图标时对比度不够，而固定费那一列正是这么画的。
 #:
-#: **不能都用同一个灰**：头像圆点、分摊里的分配条、账单上的每人行，
-#: 全靠这个颜色区分谁是谁 —— 三个人一个色的话，分配条就是一整块灰板，
-#: 拖完根本看不出钱挪给了谁。而新家建人走的是命令行/接口，不会有人
-#: 先去挑颜色。
-#: 和面板上那张色板（frontend ProfileCard.vue 的 COLORS）是同一组，
-#: 改一边记得改另一边。
-MEMBER_COLORS = [
-    "#3d4785", "#26a69a", "#ef6c00", "#c62828", "#6a1b9a",
-    "#00838f", "#2e7d32", "#ad1457", "#ec407a", "#455a64",
+#: 建成员时**轮着发**（见 routers/members.py、tools/add_member.py）：
+#: 都留默认灰的话，头像圆点和账单每人行全靠颜色分辨谁是谁，三个人一个色就全废了；
+#: 而新家建人走的是命令行/接口，不会有人先去挑颜色。
+#:
+#: 和前端那份（frontend/src/palette.ts 的 PALETTE）是同一组，改一边记得改另一边。
+PALETTE = [
+    "#3d4785",  # 靛（品牌色）
+    "#26a69a",  # 青
+    "#ef6c00",  # 橙
+    "#c62828",  # 红
+    "#6a1b9a",  # 紫
+    "#00838f",  # 蓝绿
+    "#2e7d32",  # 绿
+    "#ad1457",  # 玫红
+    "#ec407a",  # 粉
+    "#455a64",  # 蓝灰
 ]
 
 
@@ -73,7 +83,7 @@ class Member(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(index=True, unique=True, description="登录名")
     display_name: str = Field(description="界面上显示的名字")
-    color: str = Field(default="#888888", description="头像/图表配色（建人时按 MEMBER_COLORS 轮着给）")
+    color: str = Field(default="#888888", description="头像/图表配色（建人时按 PALETTE 轮着给）")
     display_order: int = Field(default=0, index=True, description="固定顺序，也是分摊余数平局时的排序依据")
     joined_on: dt.date = Field(default_factory=today_jst)
     left_on: Optional[dt.date] = Field(default=None, description="退出日；留空＝在籍")

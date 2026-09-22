@@ -28,15 +28,4 @@ const { t } = useI18n()
 const bills = useBills()
 </script>
 
-<style scoped>
-.bill-tabs {
-  max-width: var(--nagaya-max-w);     /* 跟页面一样收窄居中，宽屏上别摊开 */
-  margin: 0 auto;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-}
-/* 跟记一笔那屏的顶栏一样高，也跟底部 Tab 那一栏呼应 */
-.bill-tabs :deep(.q-tab) {
-  min-height: var(--nagaya-head-h);
-  font-size: 16px;
-}
-</style>
+<!-- .bill-tabs 的样式在 src/css/tokens.css 里 —— 「更多」那组页签共用同一份 -->

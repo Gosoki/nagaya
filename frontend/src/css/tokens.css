@@ -77,3 +77,25 @@
 .text-grey-9 {
   color: var(--nagaya-ink) !important;
 }
+
+/* ------------------------------------------------------------------
+   顶部页签条（账单的「未出账/已出账」、更多的「流水/备忘/设置」）。
+   **两处共用这一份**：原来只写在 BillTabs 的 scoped 块里，
+   而 EntriesTabs 也挂着 .bill-tabs 这个类名 —— 类名一样、样式够不着，
+   于是宽屏上账单那条跟着页面收窄居中、「更多」那条摊满整个窗口，
+   三个页签缩在中间只有 72px 宽。
+   ------------------------------------------------------------------ */
+.bill-tabs {
+  max-width: var(--nagaya-max-w);     /* 跟页面一样收窄居中，宽屏上别摊开 */
+  margin: 0 auto;
+  border-bottom: 1px solid var(--nagaya-line);
+}
+/* 跟记一笔那屏的顶栏一样高，也跟底部 Tab 那一栏呼应 */
+.bill-tabs .q-tab {
+  min-height: var(--nagaya-head-h);
+  font-size: 16px;
+}
+/* 页签把那一条**平分掉**。不写的话它们各按文字宽度排在中间，
+   两边空出一大片，和底下满宽的内容对不上 */
+.bill-tabs .q-tabs__content { width: 100%; }
+.bill-tabs .q-tab { flex: 1 1 0; }

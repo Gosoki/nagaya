@@ -7,7 +7,7 @@
 <template>
   <q-avatar
     :size="size"
-    :style="member?.avatar ? undefined : { background: member?.color ?? '#90a4ae' }"
+    :style="member?.avatar ? undefined : { background: member?.color ?? FALLBACK }"
     text-color="white"
   >
     <img v-if="member?.avatar" :src="member.avatar" :alt="member.display_name" />
@@ -19,6 +19,7 @@
 import { computed } from 'vue'
 
 import { useMeta } from 'src/stores/meta'
+import { FALLBACK } from 'src/palette'
 
 const props = withDefaults(defineProps<{ memberId?: number | null; size?: string }>(), {
   memberId: null,
