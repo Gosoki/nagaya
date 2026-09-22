@@ -191,9 +191,43 @@ function measureHeader() {
   )
 }
 
+/**
+ * **键盘弹起时把顶栏拽回可视区。**
+ *
+ * iOS 的规矩：`position: fixed` 钉的是**布局视口**，而键盘并不改布局视口，
+ * 它让**可视视口**在里面上下滑。于是键盘一起、手指一滑，顶栏（连同那条
+ * 「支出/收入/转账/备忘」）就滑出屏幕不见了 —— sticky 也一样中招，因为
+ * 两者都不知道可视视口挪了。
+ *
+ * offsetTop 就是「可视视口在布局视口里往下挪了多少」，照着它反向平移即可。
+ *
+ * **只动 transform，不动 top/bottom。** 之前给底部按钮条改 bottom 那一版，
+ * iOS 的键盘动画会分帧抛 resize，按钮一格格挪，卡得难看；transform 走合成器，
+ * 不触发重排。rAF 合并一下，一帧最多写一次。
+ */
+let vvRaf = 0
+function trackHeader() {
+  const vv = window.visualViewport
+  const el = headEl.value?.$el
+  if (!vv || !el) return
+  const keyboard = window.innerHeight - vv.height - vv.offsetTop
+  // 键盘没起就把 transform 摘干净：桌面/安卓上这段等于不存在
+  const y = keyboard > 40 ? Math.round(vv.offsetTop) : 0
+  el.style.transform = y ? `translateY(${y}px)` : ''
+}
+function onViewport() {
+  if (vvRaf) return
+  vvRaf = requestAnimationFrame(() => {
+    vvRaf = 0
+    trackHeader()
+  })
+}
+
 onMounted(() => {
   measureFooter()
   measureHeader()
+  window.visualViewport?.addEventListener('scroll', onViewport)
+  window.visualViewport?.addEventListener('resize', onViewport)
   if (typeof ResizeObserver === 'undefined') return
   if (footEl.value?.$el) {
     footWatch = new ResizeObserver(measureFooter)
@@ -207,6 +241,9 @@ onMounted(() => {
 onBeforeUnmount(() => {
   footWatch?.disconnect()
   headWatch?.disconnect()
+  window.visualViewport?.removeEventListener('scroll', onViewport)
+  window.visualViewport?.removeEventListener('resize', onViewport)
+  if (vvRaf) cancelAnimationFrame(vvRaf)
 })
 
 // 只有流水那页要留着弹性滚动 —— 它的下拉刷新站在「拉到顶还能再拉一截」
