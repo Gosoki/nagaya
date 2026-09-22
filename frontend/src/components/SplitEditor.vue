@@ -744,7 +744,7 @@ defineExpose({
   outline: none;
   background: transparent;
   text-align: right;
-  font-size: 15px;
+  font-size: 16px;           /* 16 是 iOS 的底线：再小一点，聚焦时整页会被放大 */
   padding: 4px 2px;
   height: 40px;              /* 行高 48，输入框占满大半 —— 拇指点得准 */
   font-variant-numeric: tabular-nums;

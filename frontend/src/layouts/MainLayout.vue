@@ -4,10 +4,14 @@
   <q-layout view="hHh lpR fFf">
     <!-- 顶栏固定在布局上，不放进页面里：账单三页之间切换时它不该跟着卸载重建，
          切页只换中间那块内容，上下两条都不动 -->
-    <q-header
-      v-if="drafts.count || stale || onBillTabs || route.name === 'entries'"
-      class="bg-white text-dark"
-    >
+    <!-- **永远渲染，哪怕里头一样都没有。**
+         viewport-fit=cover + black-translucent ＝ 内容铺到屏幕最顶、状态栏压在上面。
+         得有一个东西替所有页面把 safe-area-inset-top 占掉，而这个东西必须是
+         固定定位的顶栏本身（padding 加在 body/layout 上推不动 fixed 元素）。
+         没内容时它的高度就是安全区本身：非刘海机上是 0，和以前一模一样；
+         刘海机上是一条白带子，正好垫在状态栏后面，黑字也才看得清。
+         Quasar 会量它的实际高度去顶下面的内容，所以页面不用各自再算一遍 -->
+    <q-header class="bg-white text-dark">
       <DraftBanner v-if="drafts.count" />
       <!-- **断网时屏幕上的数字是旧的，这件事必须说出来。**
            账单页就是三个人掏手机转账前盯的那一屏；室友刚填了水费、刚点了
@@ -203,7 +207,7 @@ onMounted(boot)
   /* 页签条（流水/备忘/设置、未出账/已出账）的实际高度。
      页面里的吸顶元素要吸在它**下沿**，不是吸到 0 —— 吸到 0 就等于钻进
      固定顶栏底下，一滚就整条看不见了 */
-  --nagaya-tabs-h: 48px;
+  --nagaya-tabs-h: calc(var(--nagaya-head-h) + 1px);   /* 52 的页签 + 1px 下边线 */
   /* 「本期固定费」那一块的尺寸。同一块东西有两套实现 —— 未出账那页是可编辑面板，
      已出账那页是只读列表 —— 两边长得必须一样。数写在这儿一份，免得又各自走散 */
   /* 48 不是 40：这五个格子是每个月真要动手打字的地方，而输入框比行矮 4px。
@@ -261,6 +265,18 @@ onMounted(boot)
 .q-page {
   max-width: var(--nagaya-max-w);
   margin: 0 auto;
+}
+/* 刘海屏/灵动岛：顶栏往下让出安全区 */
+.q-header { padding-top: env(safe-area-inset-top); }
+/*
+  **聚焦时别被顶栏和状态栏盖住。** iOS 弹键盘时会把聚焦的输入框滚到布局视口
+  最顶上，而那儿正是状态栏和固定顶栏所在 —— 金额框就是这么被吃掉的。
+  scroll-margin-top 告诉浏览器「滚到这儿就够了」，Safari 14.5 起支持。
+*/
+input,
+textarea {
+  scroll-margin-top: calc(var(--nagaya-head-h) + env(safe-area-inset-top) + 8px);
+  scroll-margin-bottom: calc(var(--nagaya-footer-h) + 90px);
 }
 </style>
 

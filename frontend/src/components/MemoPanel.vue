@@ -223,7 +223,7 @@ function removeMemo(m: Memo) {
   overflow: hidden;
   padding: 2px 0 0;
   font: inherit;
-  font-size: 13px;
+  font-size: 16px;           /* 16 是 iOS 的底线：再小一点，聚焦时整页会被放大 */
   line-height: 1.5;
   color: rgba(0, 0, 0, 0.6);
 }
@@ -233,7 +233,7 @@ function removeMemo(m: Memo) {
   outline: none;
   background: transparent;
   font: inherit;
-  font-size: 14px;
+  font-size: 16px;           /* 16 是 iOS 的底线：再小一点，聚焦时整页会被放大 */
   padding: 0;
   color: inherit;
 }
@@ -243,7 +243,7 @@ function removeMemo(m: Memo) {
   border: none;
   outline: none;
   background: transparent;
-  font-size: 14px;
+  font-size: 16px;           /* 16 是 iOS 的底线：再小一点，聚焦时整页会被放大 */
   padding: 6px 0;
   color: inherit;
 }

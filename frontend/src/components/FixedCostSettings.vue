@@ -263,7 +263,7 @@ function remove(c: Category) {
   outline: none;
   background: transparent;
   font: inherit;
-  font-size: 14px;
+  font-size: 16px;           /* 16 是 iOS 的底线：再小一点，聚焦时整页会被放大 */
   padding: 0;
   color: inherit;
 }

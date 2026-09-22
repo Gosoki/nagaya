@@ -99,3 +99,11 @@
    两边空出一大片，和底下满宽的内容对不上 */
 .bill-tabs .q-tabs__content { width: 100%; }
 .bill-tabs .q-tab { flex: 1 1 0; }
+
+/*
+  **输入框一律 ≥16px。** iOS 的规矩：聚焦一个字号小于 16px 的输入框，
+  Safari 会把整页放大一点点（然后停在那个放大位上）。Quasar 自己的
+  q-input 默认 14px，也在这条里。
+*/
+.q-field__native,
+.q-field__input { font-size: 16px; }

@@ -308,7 +308,7 @@ async function onRefresh(done: () => void) {
   /* 吸在页签条的**下沿**。写 0 的话它会滚到固定顶栏底下去，
      于是「翻到一半想换个筛法不该先滚回顶上」这句注释说的效果正好反过来 —— 
      实测要往回滚三千多像素才找得回来 */
-  top: var(--nagaya-tabs-h);
+  top: calc(var(--nagaya-tabs-h) + env(safe-area-inset-top));
   z-index: 2;
   background: var(--nagaya-bg);
   border-bottom: 1px solid rgba(0, 0, 0, 0.06);

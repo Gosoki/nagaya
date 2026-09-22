@@ -170,7 +170,7 @@ async function after() {
   outline: none;
   background: transparent;
   font: inherit;
-  font-size: 15px;            /* 低于 16px iOS 聚焦时会放大整页 */
+  font-size: 16px;           /* 16 是 iOS 的底线：再小一点，聚焦时整页会被放大 */
   color: inherit;
   text-align: right;
   padding: 2px 2px 0;

@@ -92,6 +92,7 @@ function toggleLang() {
 .login-page {
   min-height: 100vh;
   min-height: 100dvh;          /* 手机浏览器地址栏收起时也铺满 */
+  padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
 }
 .logo {
