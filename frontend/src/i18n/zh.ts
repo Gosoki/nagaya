@@ -84,8 +84,6 @@ export default {
     youPayLabel: '你要给 {to}',
     youReceiveLabel: '你应收',
     youOweLabel: '你应付',
-    axisPay: '← 要付',
-    axisReceive: '要收 →',
     perMember: '每人',
     others: '本期其他',
     othersEmpty: '这期还没有别的开销',

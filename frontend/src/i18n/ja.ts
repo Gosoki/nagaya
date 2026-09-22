@@ -84,8 +84,6 @@ export default {
     youPayLabel: '{to} に支払う',
     youReceiveLabel: '受け取る',
     youOweLabel: '支払う',
-    axisPay: '← 支払い',
-    axisReceive: '受取 →',
     perMember: '各自の負担',
     others: 'その他の明細',
     othersEmpty: 'まだ他の支出はありません',

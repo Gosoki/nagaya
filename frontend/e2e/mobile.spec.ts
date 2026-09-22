@@ -267,7 +267,9 @@ test('账单：期初/应担/应付对得上，转账方案能把人清零', asy
   // 之类也算进来，然后红在一个跟恒等式毫无关系的地方
   const signed = await page.locator('.per-member .q-item').evaluateAll((items) =>
     items.map((el) => {
-      const amount = Number((el.querySelector('.text-weight-medium')?.textContent ?? '0').replace(/[^\d]/g, ''))
+      // .closing 是「这一行的结论」那个数字，专门给它一个类名 ——
+      // 原来抓的是 .text-weight-medium，那是个通用样式类，换个字重就断
+      const amount = Number((el.querySelector('.closing')?.textContent ?? '0').replace(/[^\d]/g, ''))
       const isPay = el.textContent?.includes('应付')
       return isPay ? -amount : amount
     }),

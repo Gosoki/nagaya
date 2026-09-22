@@ -210,22 +210,13 @@
         <q-item dense class="section-head">
           <q-item-section>{{ t('bill.perMember') }}</q-item-section>
         </q-item>
-        <!-- 「谁欠谁」原来只能靠读三行各 4 个灰数字算出来。
-             这条背景填充**不占一个新像素**（它在背景层），长度就是旁边已经
-             印出来的那个数，左边是要付、右边是要收，中轴贯穿三行 ——
-             于是「谁欠得最多」变成一眼看形状的事，而那 12 个数字一个不删 -->
-        <div class="axis-hint text-grey-6">
-          <span>{{ t('bill.axisPay') }}</span>
-          <span>{{ t('bill.axisReceive') }}</span>
-        </div>
-        <q-list separator class="axis-list">
+        <q-list separator>
         <q-item
           v-for="row in bill.members"
           :key="row.member_id"
-          class="axis-row"
-          :class="{ 'bg-blue-1': row.member_id === auth.me?.id }"
+          class="member-row"
+          :class="{ me: row.member_id === auth.me?.id }"
         >
-          <div class="axis-fill" :style="fillStyle(row)" />
           <q-item-section avatar>
             <MemberAvatar :member-id="row.member_id" />
           </q-item-section>
@@ -240,11 +231,11 @@
               <div v-if="row.closing === 0" class="text-weight-medium text-positive">
                 {{ t('bill.settled') }}
               </div>
-              <div v-else :class="row.closing < 0 ? 'text-negative' : 'text-positive'">
+              <div v-else class="row items-baseline no-wrap" :class="row.closing < 0 ? 'text-negative' : 'text-positive'">
                 <span class="text-caption text-grey-6 q-mr-xs">
                   {{ row.closing > 0 ? t('bill.toReceive') : t('bill.toPay') }}
                 </span>
-                <span class="text-weight-medium">{{ formatYen(Math.abs(row.closing)) }}</span>
+                <span class="closing num">{{ formatYen(Math.abs(row.closing)) }}</span>
               </div>
             </div>
             <div class="breakdown text-caption text-grey-6">
@@ -255,15 +246,21 @@
                    自动流的时候，Go 缺「已预付」就会让「上期结转」顶到左列，
                    而 Kan/Zen 的还在右列 —— 三个人横着比「谁上期结转了多少」，
                    眼睛得在两列之间来回跳，而那正是要照着打钱的数字 -->
-              <span v-if="row.owed" class="b-owed">{{ t('bill.owed') }} {{ formatYen(row.owed) }}</span>
-              <span v-if="row.paid" class="b-paid">{{ t('bill.paid') }} {{ formatYen(row.paid) }}</span>
+              <span v-if="row.owed" class="b-owed">
+                <i>{{ t('bill.owed') }}</i><b class="num">{{ formatYen(row.owed) }}</b>
+              </span>
+              <span v-if="row.paid" class="b-paid">
+                <i>{{ t('bill.paid') }}</i><b class="num">{{ formatYen(row.paid) }}</b>
+              </span>
               <span v-if="row.transferred_out" class="b-tx">
-                {{ t('bill.prepaid') }} {{ formatYen(row.transferred_out) }}
+                <i>{{ t('bill.prepaid') }}</i><b class="num">{{ formatYen(row.transferred_out) }}</b>
               </span>
               <span v-if="row.transferred_in" class="b-tx">
-                {{ t('bill.received') }} {{ formatYen(row.transferred_in) }}
+                <i>{{ t('bill.received') }}</i><b class="num">{{ formatYen(row.transferred_in) }}</b>
               </span>
-              <span v-if="row.opening" class="b-carry">{{ t('bill.carried') }} {{ formatYen(row.opening) }}</span>
+              <span v-if="row.opening" class="b-carry">
+                <i>{{ t('bill.carried') }}</i><b class="num">{{ formatYen(row.opening) }}</b>
+              </span>
             </div>
           </q-item-section>
         </q-item>
@@ -414,11 +411,10 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 
 import { ApiError, api } from 'src/api/client'
-import type { Bill, BillTransfer, Entry, Statement, BillRow } from 'src/api/types'
+import type { Bill, BillTransfer, Entry, Statement } from 'src/api/types'
 import MemberAvatar from 'src/components/MemberAvatar.vue'
 import MonthlyFixed from 'src/components/MonthlyFixed.vue'
 import { todayJst } from 'src/date'
-import { tint } from 'src/color'
 import { statementLabel } from 'src/statement'
 import { formatYen } from 'src/i18n'
 import { useAuth } from 'src/stores/auth'
@@ -620,26 +616,6 @@ const minePart = computed<{ label: string; figure: string }>(() => {
   }
   return { label: '', figure: mineText.value }
 })
-
-/**
- * 每人那一行背景上那条发散填充。
- *
- * 长度按「和这一屏欠得最多的那个人比」算，不是按金额绝对值 —— 这一屏要回答的
- * 是「谁欠得最多、差多少」，而不是「这些钱在全世界算多还是少」。
- * 中轴固定在 50%：要付往左长，要收往右长，三行共用同一条轴才比得出来。
- */
-const maxAbs = computed(() =>
-  Math.max(1, ...(bill.value?.members ?? []).map((r) => Math.abs(r.closing))),
-)
-function fillStyle(row: BillRow): Record<string, string> {
-  const w = `${(Math.abs(row.closing) / maxAbs.value) * 50}%`
-  // 用**这个人自己的颜色**：头像和账单每人行是同一个色，
-  // 「这条是谁的」不用再回头看左边那个圆点
-  const bg = tint(meta.byId[row.member_id]?.color ?? '#90a4ae', 0.32)
-  return row.closing < 0
-    ? { right: '50%', width: w, background: bg }
-    : { left: '50%', width: w, background: bg }
-}
 
 /** 改完数据强制重取这一张。进页面用的是 ensure（缓存先上屏） */
 const load = () => bills.reload(viewKey.value)
@@ -888,14 +864,31 @@ function doCut() {
 .breakdown {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  column-gap: 10px;
-  row-gap: 2px;
-  margin-top: 2px;
+  column-gap: 16px;
+  row-gap: 3px;
+  margin-top: 4px;
   /* text-caption 自带 1.67 的行高，两行叠起来虚高 7px。
      这里是一块密排的数字，收到 1.4 正好 */
   line-height: 1.4;
 }
-.breakdown > span { white-space: nowrap; }
+/* **一格里标签靠左、数字靠右。**
+   原来是「应担 ¥53,627」连着写、整体左对齐，于是三个人的数字左右错开，
+   竖着比「谁垫得多」得一个一个读。靠右之后同一列的数字对齐，扫一眼就行 */
+.breakdown > span {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  white-space: nowrap;
+  min-width: 0;
+}
+.breakdown i { font-style: normal; color: var(--nagaya-ink-3); }
+.breakdown b { font-weight: 400; color: var(--nagaya-ink-2); }
+/* 这一行的结论。它是整块里唯一要人**照着做事**的数字，别和明细一个字号 */
+.closing { font-size: var(--nagaya-fs-figure-s); font-weight: 600; letter-spacing: -0.01em; }
+/* 「我」那一行。原来用 Quasar 的 bg-blue-1，蓝得压过了红绿两种金额色 */
+.member-row.me { background: var(--nagaya-accent-bg); }
+
 /* 「已预付」和「已收到」互斥，共用第 2 行第 1 格 */
 .b-owed { grid-area: 1 / 1; }
 .b-paid { grid-area: 1 / 2; }
@@ -948,39 +941,6 @@ function doCut() {
 .mine.owed { color: var(--nagaya-pos); }
 /* 结清了的那张：数字划掉。颜色留着 —— 还看得出当初是应收还是应付 */
 .mine.done { text-decoration: line-through; }
-
-/* ---------------------------------------------------- 每人那块的发散条 */
-.axis-hint {
-  display: flex;
-  justify-content: space-between;
-  padding: 0 16px 4px;
-  font-size: 11px;
-}
-.axis-list { position: relative; }
-/* 贯穿三行的零轴。画在列表上而不是每行上，三行才是同一条线 */
-.axis-list::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 1px;
-  background: var(--nagaya-line-2);
-  pointer-events: none;
-}
-.axis-row { position: relative; overflow: hidden; }
-/* **一条细横杠，不是一块底色。** 铺满整行高的填充会被读成「这一行被选中了」
-   或者「进度 70%」；压成 6px 贴在行底、配上贯穿三行的那条中轴，
-   它就只能被读成一张图：左边是要付，右边是要收，谁长谁欠得多 */
-.axis-fill {
-  position: absolute;
-  bottom: 6px;
-  height: 6px;
-  border-radius: 3px;
-  pointer-events: none;
-}
-/* 内容得压在填充之上 */
-.axis-row > .q-item__section { position: relative; }
 
 /* 主操作条：压在底部 Tab 之上 */
 .actions :deep(.q-btn) { min-height: 44px; }
