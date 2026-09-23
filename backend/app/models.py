@@ -61,7 +61,8 @@ class Lang(str, Enum):
 #: tools/add_member.py）：都留默认灰的话，头像和账单每人行全靠颜色分辨谁是谁，
 #: 三个人一个色就全废了；而新家建人走的是命令行/接口，不会有人先去挑颜色。
 #:
-#: 和前端那两份（frontend/src/palette.ts）是同一组，改一边记得改另一边。
+#: 和前端那两份（frontend/src/palette.ts）是同一组，改一边记得改另一边
+#: （frontend/test/palette-sync.spec.ts 钉着）。
 CATEGORY_COLORS = [
     "#5c6bc0",  # 靛
     "#26a69a",  # 青
