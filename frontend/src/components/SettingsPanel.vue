@@ -9,6 +9,7 @@
   <div>
     <ProfileCard />
     <AppearanceCard />
+    <MembersCard />
     <FixedCostSettings />
     <!-- 系统设置默认收起来：这些是「定一次就不再动」的规矩，
          而这一页天天要来的是上面的个人设置。摊开着只会把它挤到屏幕外 -->
@@ -173,6 +174,7 @@ import { ApiError, api } from 'src/api/client'
 import { toHalfWidth } from 'src/digits'
 import BackupCard from 'src/components/BackupCard.vue'
 import FixedCostSettings from 'src/components/FixedCostSettings.vue'
+import MembersCard from 'src/components/MembersCard.vue'
 import AppearanceCard from 'src/components/AppearanceCard.vue'
 import ProfileCard from 'src/components/ProfileCard.vue'
 import type { Setting } from 'src/api/types'

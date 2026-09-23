@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import io
 
 from fastapi import APIRouter, Depends, File, Response, UploadFile, status
@@ -51,7 +52,13 @@ def create_member(
     # 删过人、或者有人自己挑过色之后，新来的很可能拿到一个已经在用的颜色 ——
     # 而头像圆点、账单每人行全靠颜色分辨谁是谁
     data.setdefault("color", free_color(m.color for m in session.exec(select(Member))))
+    # 新来的排最后。不给的话是 0，和排第一的那位并列 —— 而排序号也是分摊余数
+    # 平局时的依据，并列就只能靠 id 碰运气
+    if "display_order" not in data:
+        orders = [m.display_order for m in session.exec(select(Member))]
+        data["display_order"] = max(orders, default=-1) + 1
     member = Member(**data)
+    _check_dates(member.joined_on, member.left_on)
     if body.password:
         member.password_hash = hash_password(body.password)
     session.add(member)
@@ -60,6 +67,19 @@ def create_member(
     session.commit()
     session.refresh(member)
     return to_member_out(member)
+
+
+def _check_dates(joined: dt.date, left: dt.date | None) -> None:
+    """搬走日不能早于入住日。
+
+    早了的话这个人**哪一天都不在籍**：之后每笔账都没有他的份，而成员列表里
+    他还在、也看不出哪里不对。搬走日和入住日同一天可以（住了一天）。
+    """
+    if left is not None and left < joined:
+        raise AppError(
+            "member_dates_invalid", "left_on before joined_on",
+            joined=joined.isoformat(), left=left.isoformat(),
+        )
 
 
 @router.patch("/{member_id}", response_model=MemberOut)
@@ -109,6 +129,8 @@ def update_member(
         if clash is not None and clash.id != member_id:
             # 这一条原来会撞穿到数据库的唯一约束，返回 500；POST 那边早就是 409 了
             raise AppError("name_taken", "login name taken", status=409, name=fields["name"])
+    # 先验再改：改到一半抛出去的话，这个 session 里的 member 已经是脏的
+    _check_dates(fields.get("joined_on", member.joined_on), fields.get("left_on", member.left_on))
     before = member.model_copy()
     for key, value in fields.items():
         setattr(member, key, value)

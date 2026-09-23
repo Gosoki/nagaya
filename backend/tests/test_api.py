@@ -406,3 +406,28 @@ def test_changing_the_password_kills_the_other_sessions(client, auth, members) -
     assert again.status_code == 200
     fresh = {"Authorization": f"Bearer {again.json()['token']}"}
     assert client.get("/api/auth/me", headers=fresh).status_code == 200
+
+
+def test_housemates_can_add_and_move_people_out(client, auth, members) -> None:
+    """成员那一屏走的就是这几条：加人（排最后）、标记搬走、撤销、搬走日不许早于入住日。"""
+    me, other, *_ = members
+    r = client.post("/api/members", headers=auth, json={
+        "name": "dan", "display_name": "Dan", "password": "pw123456", "joined_on": "2026-09-01",
+    })
+    assert r.status_code == 201, r.text
+    dan = r.json()
+    assert dan["display_order"] > max(m.display_order for m in members), "新来的排最后，别和排第一的并列"
+    assert dan["is_active"] is True
+
+    # 别人也能替他标搬走（搬走的人多半不会再打开这个 app）
+    r = client.patch(f"/api/members/{other.id}", headers=auth, json={"left_on": "2026-09-10"})
+    assert r.status_code == 200 and r.json()["left_on"] == "2026-09-10"
+    r = client.patch(f"/api/members/{other.id}", headers=auth, json={"left_on": None})
+    assert r.json()["left_on"] is None, "填错了要能撤回来"
+
+    r = client.patch(f"/api/members/{other.id}", headers=auth, json={"left_on": "2025-12-31"})
+    assert r.status_code == 400 and r.json()["code"] == "member_dates_invalid"
+    r = client.patch(f"/api/members/{dan['id']}", headers=auth, json={"joined_on": "2026-09-01", "left_on": "2026-09-01"})
+    assert r.status_code == 200, "住一天也算"
+    listed = {m["id"]: m for m in client.get("/api/members", headers=auth).json()}
+    assert listed[other.id]["left_on"] is None, "被拒的那次一个字段都不许落下"
