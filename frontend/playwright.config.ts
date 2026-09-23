@@ -11,7 +11,9 @@ export default defineConfig({
   testDir: './e2e',
   timeout: 30_000,
   use: {
-    baseURL: process.env.NAGAYA_URL ?? 'http://127.0.0.1:8000',
+    // 没设就打 8765（和 run-e2e.sh 的默认端口一致）：没起测试服务就直接连不上，
+    // 绝不会落到 8000 上那个自用服务去 —— 用例会拿开发账号登录、删「最新一笔」
+    baseURL: process.env.NAGAYA_URL ?? 'http://127.0.0.1:8765',
     ...devices['iPhone SE'],
     viewport: { width: 375, height: 667 },
     deviceScaleFactor: 2,

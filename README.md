@@ -268,7 +268,7 @@ App 名字和图标在「应用设置」那张卡片里改。`settlement_methods
 | `NAGAYA_CORS` | `localhost:9000,5173` | 前端开发服务器的源，只在开发时用得上 |
 | `NAGAYA_YES` | 空 | `deploy.sh` 设了就什么都不问、全用默认 |
 | `NAGAYA_PORT` / `NAGAYA_UID` / `NAGAYA_GID` | 8000 / 0 / 0 | Docker 部署时写在项目根目录的 `.env` 里：对外端口、容器以谁的身份写文件（`deploy.sh --docker` 会替你写） |
-| `NAGAYA_URL` | `http://127.0.0.1:8000` | E2E 打哪个服务（`run-e2e.sh` 会自己设） |
+| `NAGAYA_URL` | `http://127.0.0.1:8765` | E2E 打哪个服务（`run-e2e.sh` 会自己设；默认值故意不是 8000） |
 | `E2E_PORT` | `8765` | `run-e2e.sh` 起测试服务用的端口 |
 
 ---
