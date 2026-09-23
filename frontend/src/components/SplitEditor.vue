@@ -378,7 +378,7 @@ watch(
  */
 const WEIGHT_CHOICES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 /** 一格多宽。**必须和样式里的 .tick 一致** —— 停在第几格是拿它除出来的 */
-const TICK_W = 36
+const TICK_W = 32
 
 /**
  * 现在在拨哪一行的轮子。**没点过就拨不动。**
@@ -592,13 +592,14 @@ defineExpose({
 .member-row {
   display: grid;
   /* 四列在 375 上是挤的，每一列都按它真正要装的东西给：
-       · 比例 108 ＝ 三格 × 36：中间那格算数，左右各一整格 —— 点得到，不是两条边角料
-       · 调整要装得下「12,000」外加一个正负号按钮（26），所以比应担还宽一点
-       · 应担最宽是「¥17,334」＝ 60，留一点余量就够
+       · 比例 96 ＝ 三格 × 32：中间那格算数，左右各一整格 —— 点得到，不是两条边角料
+       · 调整要装得下**六位数**「-123,456」（16px 实测 65px）外加一个正负号按钮（24），
+         所以是四列里最宽的。原来按「12,000」给，六位数在 390 宽上只露得出四位
+       · 应担最宽是「¥43,914」≈ 56，留一点余量就够
        · 名字那列只剩头像 + 两三个字，超了省略号 */
-  grid-template-columns: minmax(0, 0.62fr) 108px minmax(0, 0.92fr) minmax(0, 0.70fr);
+  grid-template-columns: minmax(0, 0.56fr) 96px minmax(0, 1.04fr) minmax(0, 0.66fr);
   align-items: center;
-  column-gap: 4px;
+  column-gap: 2px;
 }
 .head-row {
   padding-bottom: 4px;
@@ -634,16 +635,16 @@ defineExpose({
 .adj-col {
   display: flex;
   align-items: center;
-  padding-left: 4px;
+  padding-left: 2px;
 }
 /* 正负开关。默认是灰色的「＋」—— 不点它这一格就是加的，这是常态；
    点一下翻成一颗红圆点「−」，那一格是减的。
    两个状态各自印着**当前**是什么，不是印着「点我会变成什么」 */
 .sign {
   position: relative;
-  flex: 0 0 26px;            /* 不让 flex 把它抻成椭圆 */
-  width: 26px;
-  height: 26px;
+  flex: 0 0 24px;            /* 不让 flex 把它抻成椭圆 */
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: none;
   border-radius: 50%;
@@ -690,13 +691,13 @@ html.dark .sign.on { color: var(--nagaya-surface); }
 /* 数字框本身要够高：44px 说的是**可点区域**，输入框太矮拇指点不准 */
 /* 比例那颗药丸：44px 是可点区域的底线，拇指点得准 */
 .weight-col { position: relative; display: flex; justify-content: center; }
-/* 行内的小轮子。窗口 108px ＝ 三格：中间那格算数，两边各露一格说明「还有」 */
+/* 行内的小轮子。窗口 96px ＝ 三格：中间那格算数，两边各露一格说明「还有」 */
 .wheel {
   /* 不给 z-index：凹槽在 DOM 里排在它**前面**，本来就画在下面。
      给了反而会越过固定操作条画到「记入账」按钮上面去 */
   position: relative;
   display: flex;
-  width: 108px;                 /* 三格：中间那格算数，左右各一格整整齐齐，点得到 */
+  width: 96px;                  /* 三格：中间那格算数，左右各一格整整齐齐，点得到 */
   height: 44px;                 /* 拇指的底线 */
   /* **没激活就滚不动**：默认只是个显示当前值的格子，两边的数被遮住，
      手势也不接。点一下（.live）才露出来、才开始拨 */
@@ -704,8 +705,8 @@ html.dark .sign.on { color: var(--nagaya-surface); }
   outline: none;
   /* 一格一停。没有 snap 它会停在两格之间，「到底算几」就说不清了 */
   scroll-snap-type: x mandatory;
-  /* 首尾两格也要停得到中间：(108 − 36) / 2 */
-  padding: 0 36px;
+  /* 首尾两格也要停得到中间：(96 − 32) / 2 */
+  padding: 0 32px;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
   /* **横向归轮子、竖向归页面**，只去掉双击放大和捏合。原来写的是 pan-x ——
@@ -730,8 +731,8 @@ html.dark .sign.on { color: var(--nagaya-surface); }
      而不是把旁边那个半露的数字选中 */
   pointer-events: none;
   /* **flex-shrink 必须是 0**：默认会被压扁成一格 3px，整条轮子就不滚了 */
-  flex: 0 0 36px;
-  width: 36px;
+  flex: 0 0 32px;              /* 和脚本里的 TICK_W 必须一致 */
+  width: 32px;
   height: 44px;
   padding: 0;
   scroll-snap-align: center;
@@ -750,11 +751,11 @@ html.dark .sign.on { color: var(--nagaya-surface); }
 @media (max-width: 359px) {
   .member-row,
   .head-row {
-    grid-template-columns: minmax(0, 0.62fr) 84px minmax(0, 0.92fr) minmax(0, 0.70fr);
+    grid-template-columns: minmax(0, 0.56fr) 80px minmax(0, 1.04fr) minmax(0, 0.66fr);
   }
   .wheel {
-    width: 84px;
-    padding: 0 24px;            /* (84 − 36) / 2 */
+    width: 80px;
+    padding: 0 24px;            /* (80 − 32) / 2 */
   }
 }
 .tick.on { color: var(--nagaya-ink); font-weight: 600; }
@@ -763,9 +764,9 @@ html.dark .sign.on { color: var(--nagaya-surface); }
   position: absolute;
   top: 0;
   left: 50%;
-  width: 36px;
+  width: 32px;
   height: 44px;
-  margin-left: -18px;
+  margin-left: -16px;
   border-radius: var(--nagaya-r-sm);
   background: var(--nagaya-fill);
   pointer-events: none;
@@ -796,7 +797,8 @@ html.dark .sign.on { color: var(--nagaya-surface); }
   text-align: right;
   font-family: inherit;
   font-size: 16px;           /* 16 是 iOS 的底线：再小一点，聚焦时整页会被放大 */
-  padding: 0 8px;
+  /* 左边只留 3px：数字右对齐，左内边距只在填满（六位数带负号）时才用得到 */
+  padding: 0 6px 0 3px;
   height: 38px;              /* 行高 52，输入框占满大半 —— 拇指点得准 */
   font-variant-numeric: tabular-nums;
   color: inherit;
