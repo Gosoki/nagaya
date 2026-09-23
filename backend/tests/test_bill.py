@@ -16,6 +16,7 @@ from sqlmodel import Session, select
 from app.models import Category, EntryKind, Statement, jst_date, now_utc
 from app.services import settings as settings_svc
 from app.services.bill import (
+    _opening,
     BillError,
     build_bill,
     cut_statement,
@@ -618,3 +619,87 @@ def test_small_cut_does_not_reset_the_monthly_clock(session: Session, members) -
     draft = build_bill(session, None)
     assert draft["days_since_prev_cut"] == 25
     assert draft["suggest_monthly"] is True
+
+
+def test_the_opening_balance_is_read_in_one_statement(session: Session, members) -> None:
+    """上期结转必须**一条 SQL 数完** —— 一条语句才是一个快照。
+
+    分成「垫付」「应担」两条 SELECT 的话它们各取各的最新状态（pysqlite 不为 SELECT
+    开事务）。别人在这两条之间改了一笔已出账的账，这边就数到了新的垫付、旧的应担，
+    算出一本不平的账，GET /api/bill 当场 500。
+    实测：旧写法在「一边改已出账的账、一边看账单」6 秒里 3582 次读炸了 248 次，
+    改成一条 UNION ALL 之后 3420 次读 0 次。这里钉的就是「别再拆回两条」。
+    """
+    from sqlalchemy import event
+
+    a, *_ = members
+    cat = Category(name="日用品", monthly=False)
+    session.add(cat)
+    session.commit()
+    session.refresh(cat)
+    for i in range(3):
+        create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                     amount=1000 + i, payer_id=a.id, category_id=cat.id)
+    cut_statement(session, actor_id=a.id, label="上一期", on=SEP)
+
+    seen: list[str] = []
+    bind = session.get_bind()
+
+    def _count(conn, cursor, statement, *args):  # noqa: ANN001, ARG001
+        seen.append(statement)
+
+    event.listen(bind, "before_cursor_execute", _count)
+    try:
+        opening = _opening(session, None)
+    finally:
+        event.remove(bind, "before_cursor_execute", _count)
+
+    assert opening, "这一期之前确实有账，结转不该是空的"
+    # 一条数 statement 的（_earlier_ids，草稿时不查）+ 一条数钱的
+    assert len(seen) == 1, "\n---\n".join(seen)
+
+
+def test_an_old_bill_tells_you_what_is_still_owed_right_now(session: Session, members) -> None:
+    """已出账那张单子要同时说两件事：**当初**的方案，和**此刻**还该转多少。
+
+    少了后者，界面只能拿冻结方案当行动指示 —— 于是：
+      * 已经还清的人被继续命令「你要给 Zen ¥10,000」，他真会再转一次；
+      * 出账后大家换了条路结清（现金、经第三人），冻结方案里那一对再也不走钱，
+        而「确认已完成」按钮还亮着 —— 按一下凭空造一笔债。
+    """
+    a, b, c_ = members
+    cat = Category(name="日用品", monthly=False)
+    session.add(cat)
+    session.commit()
+    session.refresh(cat)
+    create_entry(session, actor_id=c_.id, kind=EntryKind.expense, on=SEP,
+                 amount=30_000, payer_id=c_.id, category_id=cat.id)
+    st = cut_statement(session, actor_id=a.id, label="上一期", on=SEP)
+
+    frozen = build_bill(session, st)
+    assert {(t["from_id"], t["to_id"], t["amount"]) for t in frozen["transfers"]} == {
+        (a.id, c_.id, 10_000), (b.id, c_.id, 10_000)
+    }
+    # 一分没转时，此刻 = 当初
+    assert frozen["live_transfers"] == frozen["transfers"]
+
+    # a 还了一半
+    create_entry(session, actor_id=a.id, kind=EntryKind.settlement, on=SEP,
+                 amount=4_000, payer_id=a.id, to_member_id=c_.id)
+    now = build_bill(session, st)
+    assert now["transfers"][0]["amount"] == 10_000, "当初那份方案不许变"
+    live = {(t["from_id"], t["to_id"]): t["amount"] for t in now["live_transfers"]}
+    assert live[(a.id, c_.id)] == 6_000, "此刻只该再转 6,000"
+    assert now["live_closing"][a.id] == -6_000
+
+    # b 的钱**绕 a 还了**（现金/并单转都是这个形状）：冻结方案里 b→c 那一对
+    # 从此再也不会走钱，此刻的方案里它必须消失，否则按钮会叫 b 再转一次
+    create_entry(session, actor_id=b.id, kind=EntryKind.settlement, on=SEP,
+                 amount=10_000, payer_id=b.id, to_member_id=a.id)
+    create_entry(session, actor_id=a.id, kind=EntryKind.settlement, on=SEP,
+                 amount=10_000, payer_id=a.id, to_member_id=c_.id)
+    after = build_bill(session, st)
+    live = {(t["from_id"], t["to_id"]): t["amount"] for t in after["live_transfers"]}
+    assert live.get((b.id, c_.id), 0) == 0, "b 已经不欠 c 了，此刻的方案里不许还有这一对"
+    assert after["live_closing"][b.id] == 0
+    assert after["transfers"][1]["amount"] == 10_000, "当初那份方案还是不许变"

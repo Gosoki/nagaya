@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
-from app.models import Category, EntryKind
+from app.models import Category, Entry, EntryKind, Member
 from app.services.bill import carry_same_as_last, cut_statement, monthly_rows, unbilled
 from app.services.ledger import create_entry, delete_entry
 
@@ -603,3 +603,105 @@ def test_an_issued_bill_still_lists_the_fixed_items_that_were_zero(session: Sess
     small = cut_statement(session, actor_id=a.id, include_monthly=False)
     assert build_bill(session, small)["monthly_ids"] == []
     assert build_bill(session, None)["monthly_ids"] is None, "草稿那页用的是面板，不给这个"
+
+
+def test_two_people_opening_the_bill_page_at_once_do_not_double_the_rent(tmp_path) -> None:
+    """群里一句「出账了」，三个人同时点开账单页 —— 房租不能记两笔。
+
+    原来账单页一挂载就 POST /api/monthly/carry；现在改成人点按钮，两个人同时点、
+    或者一个人连点照样是这条路。
+    「读一遍本期已经有哪几项 → 把缺的记上」中间隔着几十毫秒，两个请求都会在对方
+    commit 之前读到「本期还没记房租」。面板一行只显示得下一笔，所以屏幕上金额是对的、
+    合计是两倍 —— 用户得自己去账目列表里翻出那笔重复的删掉。
+
+    用真文件库 + 两条连接：内存库那套 StaticPool 只有一条连接，会把这个race 盖住。
+    """
+    import threading
+
+    from sqlmodel import SQLModel, create_engine
+
+    from app.services import settings as settings_svc
+    from app.services.settings import seed_settings
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'race.db'}",
+                           connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as s:
+        seed_settings(s)
+        settings_svc.set_(s, "backup_path", str(tmp_path / "backups"))
+        a = Member(name="a", display_name="A", display_order=0, joined_on=dt.date(2026, 1, 1))
+        s.add(a)
+        s.commit()
+        s.refresh(a)
+        aid = a.id
+        cat = Category(name="房租", monthly=True, same_as_last=True, default_payer_id=aid)
+        s.add(cat)
+        s.commit()
+        s.refresh(cat)
+        cid = cat.id
+        create_entry(s, actor_id=aid, kind=EntryKind.expense, on=SEP,
+                     amount=90_000, payer_id=aid, category_id=cid)
+        cut_statement(s, actor_id=aid, label="上一期", on=SEP)
+
+    gate = threading.Barrier(2)
+
+    def go() -> None:
+        with Session(engine) as s:
+            gate.wait()
+            carry_same_as_last(s, actor_id=aid)
+
+    ts = [threading.Thread(target=go) for _ in range(2)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+
+    with Session(engine) as s:
+        draft = [e for e in unbilled(s) if e.category_id == cid]
+    assert len(draft) == 1, f"本期房租记了 {len(draft)} 笔，当期账单凭空翻倍"
+
+
+def test_fixing_an_old_bill_does_not_switch_this_months_carry_off(session: Session, members) -> None:
+    """回头删掉一笔**已经出过账**的固定费，不该让本期的「和上期一样」停摆。
+
+    已出账的账目软删之后 statement_id 还留着；「本期删掉的不碰」那一条只该认草稿里的。
+    分不开的话：9 月初去把 8 月手滑多记的那笔房租删了 → 整个 9 月房租都不再自动记，
+    而它既不进 created 也不进 failed，屏幕上一句提示都没有，出账时按 0 结。
+    """
+    a, *_ = members
+    cat = Category(name="房租", monthly=True, same_as_last=True, default_payer_id=a.id)
+    session.add(cat)
+    session.commit()
+    session.refresh(cat)
+    for _ in range(2):
+        create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                     amount=120_000, payer_id=a.id, category_id=cat.id)
+    cut_statement(session, actor_id=a.id, label="8 月", on=SEP)
+
+    extra = session.exec(
+        select(Entry).where(Entry.category_id == cat.id).order_by(Entry.id.desc())
+    ).first()
+    delete_entry(session, entry=extra, actor_id=a.id)
+
+    out = carry_same_as_last(session, actor_id=a.id)
+    assert [c["name"] for c in out["created"]] == ["房租"], out
+
+
+def test_carry_refuses_to_pay_rent_with_a_roommate_who_moved_out(session: Session, members) -> None:
+    """垫付人搬走了就别再替他垫 —— 账单会反过来叫留下的人给他转账。"""
+    a, b, c_ = members
+    cat = Category(name="房租", monthly=True, same_as_last=True, default_payer_id=c_.id)
+    session.add(cat)
+    session.commit()
+    session.refresh(cat)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                 amount=120_000, payer_id=c_.id, category_id=cat.id)
+    cut_statement(session, actor_id=a.id, label="上一期", on=SEP)
+
+    c_.left_on = SEP - dt.timedelta(days=1)
+    session.add(c_)
+    session.commit()
+
+    out = carry_same_as_last(session, actor_id=a.id)
+    assert out["created"] == [], "搬走的人不该又垫了一次房租"
+    assert [f["reason"] for f in out["failed"]] == ["payer_left"], out

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import io
 
+from fastapi.testclient import TestClient
+
 from app.auth import hash_password
 
 SEP = "2026-09-10"
@@ -42,6 +44,18 @@ def test_create_entry_returns_shares(client, auth, members):
     assert sum(body["shares"].values()) == 10_000
     assert body["statement_id"] is None      # 还没出账，在当前草稿里
     assert body["version"] == 1
+
+
+def test_same_client_key_records_only_once(client: TestClient, auth, members) -> None:
+    """离线草稿补交：请求其实到过后端、只是响应丢了 —— 带同一个键再来，不许记第二笔。"""
+    a = members[0]
+    body = {"kind": "expense", "date": SEP, "amount_jpy": 1_200, "payer_id": a.id,
+            "client_key": "k-0123456789abcdef"}
+    first = client.post("/api/entries", json=body, headers=auth)
+    again = client.post("/api/entries", json=body, headers=auth)
+    assert first.status_code == again.status_code == 201
+    assert first.json()["id"] == again.json()["id"]
+    assert len([e for e in client.get("/api/entries", headers=auth).json() if e["amount_jpy"] == 1_200]) == 1
 
 
 def test_balances_sum_to_zero_over_http(client, auth, members):
@@ -428,6 +442,30 @@ def test_housemates_can_add_and_move_people_out(client, auth, members) -> None:
     assert r.status_code == 200, "住一天也算"
     listed = {m["id"]: m for m in client.get("/api/members", headers=auth).json()}
     assert listed[other.id]["left_on"] is None, "被拒的那次一个字段都不许落下"
+
+
+def test_new_members_do_not_all_come_out_the_same_grey(client: TestClient, auth, session) -> None:
+    """建人时不给颜色就轮着发一个。
+
+    头像圆点、分摊那条分配条、账单上的每人行，三处全靠这个颜色区分谁是谁 ——
+    都留默认灰的话分配条就是一整块灰板，拖完看不出钱挪给了谁。
+    而新家建人走的是命令行或接口，没人会先去挑色板。
+    """
+    from app.models import MEMBER_COLORS
+
+    made = []
+    for i in range(3):
+        r = client.post("/api/members", headers=auth,
+                        json={"name": f"n{i}", "display_name": f"N{i}", "password": "pw123456"})
+        assert r.status_code == 201, r.text
+        made.append(r.json()["color"])
+    assert len(set(made)) == 3, made
+    assert all(c in MEMBER_COLORS for c in made), made
+    # 自己挑了就用自己的
+    r = client.post("/api/members", headers=auth, json={
+        "name": "pick", "display_name": "Pick", "password": "pw123456", "color": "#123456",
+    })
+    assert r.json()["color"] == "#123456"
 
 
 def test_login_names_are_only_visible_to_their_owner(client, auth, members) -> None:
