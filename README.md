@@ -283,8 +283,8 @@ cd frontend && npm run dev          # localhost:9000，/api 代理到 8000，改
 ### 测试
 
 ```bash
-cd backend  && .venv/bin/python -m pytest   # 240 条：算法 / 账本 / 账单 / API / 边界输入 / 随机操作序列 / 备份恢复 / 迁移
-cd frontend && npm test                     # 161 条：分摊引擎（对后端 fixture）+ 若干守卫（对比度、缓存竞态……）
+cd backend  && .venv/bin/python -m pytest   # 241 条：算法 / 账本 / 账单 / API / 边界输入 / 随机操作序列 / 备份恢复 / 迁移
+cd frontend && npm test                     # 182 条：分摊引擎（对后端 fixture）+ 若干守卫（对比度、缓存竞态……）
 ./run-e2e.sh                                # 47 条：375px 手机视口，真浏览器（WebKit）
 ```
 
@@ -328,6 +328,9 @@ backend/
     core/          分摊算法、规则解析、转账方案（纯函数，不碰库）
     services/      账本、账单、出账、固定费（照上期）、审计、备份
     routers/       REST 接口
+    main.py        只做装配：挂路由、中间件、错误处理   middleware.py  请求体上限、空闲时归还内存
+    spa.py         托管打包好的前端（回退、缓存头、把 App 名字写进 HTML）
+    images.py      上传图片的安全解码（头像、图标共用）
     models.py      表结构        migrate.py  开机升级
     settings_spec.py  设置项登记表（加一个面板可改的设置，从这里下手）
     errors.py      路由层的错误码（前端按码出中日文案）
@@ -336,9 +339,10 @@ backend/
   tests/
 frontend/
   src/
-    pages/ components/ layouts/   界面
-    stores/        Pinia：账本、账单缓存、成员分类设置、草稿
-    core/          分摊算法（和后端同一份用例）
+    pages/ components/ layouts/   界面（components/ 顶层是几屏共用的，settings/ 是设置页那几张卡片）
+    stores/        Pinia：账本、账单缓存、成员分类设置、草稿、页签
+    core/          分摊算法（和后端同一份用例）、账单上「此刻还欠多少」的判定
+    composables/   一笔账长什么样、账单左右滑、在线状态
     i18n/          zh.ts / ja.ts
     css/           tokens.css（颜色、字号、深色）/ skin.css
   test/            vitest        e2e/  Playwright
