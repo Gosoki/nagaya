@@ -3,7 +3,7 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { installPlatform } from '../src/installGuide'
+import { installPlatform, isLoopback } from '../src/installGuide'
 
 const UA = {
   iphoneSafari:
@@ -39,5 +39,12 @@ describe('installPlatform', () => {
     expect(installPlatform(UA.ipadDesktop, 5)).toBe('ios-safari')
     expect(installPlatform(UA.ipadDesktop, 0)).toBe('other')
     expect(installPlatform(UA.macChrome, 0)).toBe('other')
+  })
+})
+
+describe('isLoopback', () => {
+  it('跑服务的那台电脑自己打开的地址，别的手机打不开', () => {
+    for (const h of ['localhost', 'nagaya.localhost', '127.0.0.1', '127.1.2.3', '[::1]', '0.0.0.0', '[::]']) expect(isLoopback(h)).toBe(true)
+    for (const h of ['10.0.0.89', '192.168.1.5', 'nagaya.local', 'ledger.example.com']) expect(isLoopback(h)).toBe(false)
   })
 })

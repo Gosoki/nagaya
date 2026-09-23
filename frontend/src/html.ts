@@ -10,3 +10,15 @@ export function escapeHtml(text: string): string {
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c,
   )
 }
+
+/**
+ * 这一下回车是「提交」，还是输入法在「确认候选」。
+ *
+ * 日文/中文输入法按回车选字时，keydown 的 isComposing 是 true（Safari 上则是 keyCode 229）。
+ * 原来写的是 `@keyup.enter`：打「すーぱー」、回车变成「スーパー」的那一下，
+ * 这笔账当场就记下了，备注只到确认的那一截
+ */
+export function isSubmitEnter(e: Event): boolean {
+  const k = e as KeyboardEvent
+  return !k.isComposing && k.keyCode !== 229
+}

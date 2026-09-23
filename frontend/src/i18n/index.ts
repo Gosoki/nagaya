@@ -35,6 +35,9 @@ export const i18n = createI18n({
   fallbackLocale: 'zh',
   messages: { zh, ja },
 })
+// index.html 里写死的是 zh。没登录时（登录页）没人调 setLang，日文系统的手机上
+// 日文就一直按简体中文的字形渲染、VoiceOver 用中文念
+if (typeof document !== 'undefined') document.documentElement.lang = i18n.global.locale.value
 
 /**
  * Quasar 自带的文案（弹框的取消/确定、日历的星期）是另一套，得跟着一起切。

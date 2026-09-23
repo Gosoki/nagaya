@@ -479,7 +479,15 @@ def update_entry(
     session.flush()
 
     _write_shares(session, entry, expanded, payer_id)
-    _audit(session, actor_id, "update", "entry", entry.id, before, _snapshot(session, entry))
+    after = _snapshot(session, entry)
+    same = ("updated_at", "version")
+    if {k: v for k, v in after.items() if k not in same} == {k: v for k, v in before.items() if k not in same}:
+        # 原样点了一次「保存」：什么都没变，就当没来过 —— 不推 version（别让另一台正开着
+        # 编辑页的手机平白撞冲突），也不记审计（已出的账单会因此挂上「出账后被改过」）
+        session.rollback()
+        session.refresh(entry)
+        return entry
+    _audit(session, actor_id, "update", "entry", entry.id, before, after)
     session.commit()
     session.refresh(entry)
     return entry

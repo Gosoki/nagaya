@@ -18,12 +18,21 @@ from sqlmodel import Session, create_engine
 DB_PATH = Path(os.getenv("NAGAYA_DB", Path(__file__).parents[1] / "data" / "nagaya.db"))
 DATABASE_URL = f"sqlite:///{DB_PATH}"
 
+# 新建的文件只给自己读写。run.sh 里那句 umask 管不到先于它建库的入口 ——
+# 照 README 先跑 tools.add_member 的话，账本（含密码哈希）就是 0644，
+# 而 SQLite 之后建的 -wal/-shm 照抄主库的权限，从此一直是别人可读。每个入口都 import 这里
+os.umask(0o077)
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 engine = create_engine(
     DATABASE_URL,
     echo=False,
     connect_args={"check_same_thread": False},
+    # 常驻 1 条，忙的时候最多再开 4 条。默认是常驻 5 条、最多 15 条 —— 每条都揣着
+    # 自己的页缓存和表结构，开了就不还。三个人的账本同一时刻真在查库的也就一两个请求；
+    # 而且 SQLite 同一时刻只许一个人写，多开的连接只是在排队抢锁（实测连接少了反而快）
+    pool_size=1,
+    max_overflow=4,
 )
 
 

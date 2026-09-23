@@ -41,7 +41,9 @@ router.beforeEach((to) => {
 })
 
 setUnauthorizedHandler(() => {
-  void router.push({ name: 'login' })
+  // 已经在登录页（输错密码也是 401）就别再跳：跳一次会把 ?next= 冲掉，
+  // 群里贴的账单链接点开、输错一次密码，登录完就回不到那张账单了
+  if (router.currentRoute.value.name !== 'login') void router.push({ name: 'login' })
 })
 
 /**

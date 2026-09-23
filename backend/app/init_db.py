@@ -1,6 +1,6 @@
 """建库 / 初始化。
 
-表结构走 Alembic（app/migrate.py）：新库从头建，老库升到最新。
+表结构走 Alembic（app/migrate.py）：新库从头建，已有的库升到最新。
 设计阶段用的是 create_all，它不会给已有的表加列 —— 那一段到 D18 为止。
 """
 

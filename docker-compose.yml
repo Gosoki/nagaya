@@ -20,6 +20,11 @@ services:
     user: "${NAGAYA_UID:-0}:${NAGAYA_GID:-0}"
     ports:
       - "${NAGAYA_PORT:-8000}:8000"
+    environment:
+      # 前面套了 HTTPS 反代（Caddy、cloudflared……）时，在同目录 .env 里写
+      # FORWARDED_ALLOW_IPS=127.0.0.1,::1,<反代的 IP 或网段>（见 README「HTTPS」）。
+      # 写在 .env 不写在这儿：这个文件在 git 里，改了之后 git pull 可能拉不下来
+      - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-127.0.0.1,::1}
     volumes:
       # 账本、签名密钥（.secret）、表结构升级前的快照 —— 和裸机部署是同一个目录
       - ./backend/data:/app/backend/data

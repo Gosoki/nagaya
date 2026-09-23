@@ -127,7 +127,7 @@
                 class="text"
                 type="text"
                 :value="String(s.value ?? '')"
-                @blur="save(s, ($event.target as HTMLInputElement).value)"
+                @blur="saveText(s, $event.target as HTMLInputElement)"
               />
               <!-- 一行一个的列表：输入框在下面整行铺开，这儿不再重复一遍 -->
               <div v-else-if="s.type === 'string_list'" class="text-caption text-grey-6">
@@ -148,7 +148,7 @@
                 class="list"
                 rows="2"
                 :value="(s.value as string[] ?? []).join('\n')"
-                @blur="saveList(s, ($event.target as HTMLTextAreaElement).value)"
+                @blur="saveList(s, $event.target as HTMLTextAreaElement)"
               />
             </q-item-label>
           </q-item-section>
@@ -310,11 +310,20 @@ async function saveNumber(s: Setting, el: HTMLInputElement) {
   shown()
 }
 
-function saveList(s: Setting, raw: string) {
-  void save(
+/** 生效的那份。存完（成没成都一样）按它重画框里的字：被拒的值不许留在框里装作存上了 */
+const current = (s: Setting) => meta.settings.find((x) => x.key === s.key)?.value ?? null
+
+async function saveText(s: Setting, el: HTMLInputElement) {
+  await save(s, el.value)
+  el.value = String(current(s) ?? '')
+}
+
+async function saveList(s: Setting, el: HTMLTextAreaElement) {
+  await save(
     s,
-    raw.split('\n').map((x) => x.trim()).filter(Boolean),
+    el.value.split('\n').map((x) => x.trim()).filter(Boolean),
   )
+  el.value = ((current(s) as string[] | null) ?? []).join('\n')
 }
 </script>
 

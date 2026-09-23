@@ -449,16 +449,17 @@ def _edited_after_cut(
     # 再对每一条调两次 `session.get(Entry, ...)` —— 两次不会被 identity map 挡掉：
     # 它存的是**弱引用**，推导式里第一次 get 的返回值当场没人持有就被回收了。
     # 5 年规模的库上实测 503 次 SQL / 71ms，而且随「改过多少笔账」无上界地涨
-    edited = select(AuditLog.target_id).where(
+    after_cut = (
         AuditLog.target_table == "entry",
         AuditLog.at > statement.cut_at,
         AuditLog.action.in_(["update", "delete", "restore"]),
     )
-    n_touched = session.exec(
-        select(func.count())
-        .select_from(Entry)
-        .where(Entry.id.in_(edited), Entry.statement_id == statement.id)
-    ).one()
+    touched = session.exec(
+        select(Entry).where(
+            Entry.id.in_(select(AuditLog.target_id).where(*after_cut)), Entry.statement_id == statement.id
+        )
+    ).all()
+    n_touched = _really_changed(session, touched, after_cut) if touched else 0
 
     snapshot = statement.snapshot_json or {}
     frozen_closing = {r["member_id"]: r["closing"] for r in snapshot.get("members", [])}
@@ -475,6 +476,38 @@ def _edited_after_cut(
         # 这张单子自己一笔没动，是更早那张被改了才漂的
         "from_earlier": not n_touched and drifted,
     }
+
+
+def _really_changed(session: Session, touched: list[Entry], after_cut: tuple[Any, ...]) -> int:
+    """出账之后动过的这几笔里，**现在和出账那一刻真不一样**的有几笔。
+
+    只数「有过改动记录」的话，原样点一次「保存」、删了又点「撤销」、改了又改回来，
+    那张已经发进群里的账单都会永远挂着「当初 ¥30,000，现在 ¥30,000」。
+    出账那一刻的样子就是出账之后**第一条**审计的 before（restore 那条没有 before：
+    出账时它是删掉的状态）。只看出账后被动过的那几笔，平时是 0 笔，不多查。
+    """
+    ids = [e.id for e in touched]
+    first = (
+        select(func.min(AuditLog.id)).where(*after_cut, AuditLog.target_id.in_(ids)).group_by(AuditLog.target_id)
+    )
+    at_cut = {a.target_id: a.before_json for a in session.exec(select(AuditLog).where(AuditLog.id.in_(first)))}
+    shares: dict[int, dict[str, int]] = {i: {} for i in ids}
+    for entry_id, member_id, amount in session.exec(
+        select(EntryShare.entry_id, EntryShare.member_id, EntryShare.amount_jpy).where(EntryShare.entry_id.in_(ids))
+    ):
+        shares[entry_id][str(member_id)] = amount
+
+    n = 0
+    for e in touched:
+        now = e.model_dump(mode="json") | {"shares": shares[e.id]}
+        was = at_cut.get(e.id)
+        if was is None:
+            same = now["deleted_at"] is not None
+        else:
+            # updated_at、version 每动一次都变，不算内容；出账之后才加的列老记录里没有，不比
+            same = all(now.get(k) == v for k, v in was.items() if k not in ("updated_at", "version"))
+        n += not same
+    return n
 
 
 def list_totals(session: Session) -> dict[int, int]:

@@ -9,6 +9,8 @@ sum_mismatch 要红字显示差额），message 只是给开发看的兜底。
 from __future__ import annotations
 
 import asyncio
+import ctypes
+import gc
 import logging
 import os
 import re
@@ -74,6 +76,9 @@ async def _daily_backup() -> None:
             made = await asyncio.to_thread(_backup_once)
             if made is not None:
                 log.info("备份完成：%s（%d 字节）", made["name"], made["bytes"])
+            # 备份不走 HTTP，IdleRelease 看不见它：半夜那次 VACUUM INTO 把整本库读进了
+            # 连接的页缓存，不在这儿还的话要一直攥到第二天有人来
+            await asyncio.to_thread(release_memory)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -85,6 +90,66 @@ def _backup_once() -> dict | None:
     """在线程里跑：sqlite 那几步是阻塞的，别占着事件循环。"""
     with Session(engine) as session:
         return backup_svc.run_if_due(session)
+
+
+#: 最后一个请求之后这么多秒没人再用，就把内存还回去
+IDLE_RELEASE = 60
+
+
+def release_memory() -> None:
+    """没人在用的时候，能还的都还回去。
+
+    三个人的账本一天里绝大多数时候没人在点，可进程手里一直攥着：数据库连接
+    （每条带着自己的页缓存、表结构、编译好的语句）、刚才那几个大响应用过的堆。
+    Python 释放掉的内存，C 库不一定还给系统 —— 最后那一下 trim 才是真还。
+    """
+    engine.dispose()   # 连接全关（正在用的那条用完再关）。下个请求再开一条，毫秒级
+    gc.collect()
+    try:
+        libc = ctypes.CDLL(None)
+        if hasattr(libc, "malloc_trim"):                       # Linux（glibc）
+            libc.malloc_trim(0)
+        elif hasattr(libc, "malloc_zone_pressure_relief"):     # macOS
+            libc.malloc_zone_pressure_relief.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+            libc.malloc_zone_pressure_relief(None, 0)
+    except OSError:
+        pass
+
+
+class IdleRelease:
+    """纯 ASGI：最后一个请求结束 IDLE_RELEASE 秒后还没有新请求，就 release_memory() 一次。
+
+    只在「刚闲下来」时收一次，之后一直没人用就一直不动 —— 不定时空转，也不跟请求抢。
+    """
+
+    def __init__(self, inner) -> None:  # noqa: ANN001
+        self.inner = inner
+        self.busy = 0
+        self.timer: asyncio.TimerHandle | None = None
+
+    async def __call__(self, scope, receive, send) -> None:  # noqa: ANN001
+        # 探活不算「有人在用」：Docker 的 HEALTHCHECK 每 30 秒来一次，算进来的话
+        # 60 秒的空闲永远等不到。它也不碰数据库，没什么可收的
+        if scope["type"] != "http" or scope.get("path") == "/api/health":
+            await self.inner(scope, receive, send)
+            return
+        self.busy += 1
+        if self.timer is not None:
+            self.timer.cancel()
+            self.timer = None
+        try:
+            await self.inner(scope, receive, send)
+        finally:
+            self.busy -= 1
+            if not self.busy:
+                self.timer = asyncio.get_running_loop().call_later(IDLE_RELEASE, self._release)
+
+    def _release(self) -> None:
+        self.timer = None
+        try:
+            release_memory()
+        except Exception:
+            log.exception("归还内存失败")
 
 
 app = FastAPI(title="nagaya 長屋", description="合租记账", version="0.1.0", lifespan=lifespan)
@@ -212,6 +277,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
 # 最后挂 ＝ 最外层：CORS 和路由都还没碰到请求体之前就先卡住
 app.add_middleware(BodyLimit)
+app.add_middleware(IdleRelease)
 
 
 @app.api_route("/api/health", methods=["GET", "HEAD"])

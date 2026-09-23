@@ -28,3 +28,17 @@ export function installPlatform(ua: string, touchPoints = 0): InstallPlatform {
   if (/Android/.test(ua)) return 'android'
   return 'other'
 }
+
+/**
+ * 是不是用只有本机认得的地址打开的（跑服务的那台电脑自己）：localhost、127.x，
+ * 还有照 uvicorn 启动日志点开的 0.0.0.0。这时 `location.origin` 念给室友、
+ * 贴进 LINE 群，别的手机上都打不开
+ */
+export function isLoopback(hostname: string): boolean {
+  return (
+    hostname === 'localhost' ||
+    hostname.endsWith('.localhost') ||
+    ['[::1]', '0.0.0.0', '[::]'].includes(hostname) ||
+    /^127\./.test(hostname)
+  )
+}

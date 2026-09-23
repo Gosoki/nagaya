@@ -61,7 +61,7 @@
                 class="memo-title col"
                 :value="m.title"
                 :placeholder="t('memo.namePlaceholder')"
-                @blur="saveTitle(m, ($event.target as HTMLInputElement).value)"
+                @blur="saveTitle(m, $event.target as HTMLInputElement)"
               />
               <q-btn
                 dense flat round size="sm" icon="delete_outline" color="grey-6"
@@ -92,7 +92,7 @@
           type="text"
           maxlength="30"
           :placeholder="t('memo.namePlaceholder')"
-          @keyup.enter="addMemo"
+          @keydown.enter="isSubmitEnter($event) && addMemo()"
         />
         <q-btn
           dense flat no-caps color="primary"
@@ -113,6 +113,7 @@ import { useI18n } from 'vue-i18n'
 
 import { ApiError, api } from 'src/api/client'
 import type { Category, Memo } from 'src/api/types'
+import { isSubmitEnter } from 'src/html'
 import { useMemos } from 'src/stores/memos'
 import { useMeta } from 'src/stores/meta'
 
@@ -155,14 +156,16 @@ async function sizeAll() {
   root.value?.querySelectorAll('textarea').forEach((el) => size(el as HTMLTextAreaElement))
 }
 
-async function save(run: () => Promise<unknown>) {
+async function save(run: () => Promise<unknown>): Promise<boolean> {
   busy.value = true
   try {
     await run()
     failed.value = 0
+    return true
   } catch (e) {
     failed.value += 1
     $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e), timeout: 5000 })
+    return false
   } finally {
     busy.value = false
   }
@@ -176,9 +179,14 @@ function saveCategory(c: Category, note: string) {
   })
 }
 
-function saveTitle(m: Memo, title: string) {
-  if (title.trim() === m.title || !title.trim()) return
-  void save(() => memos.update(m.id, { title: title.trim() }))
+/** 标题清空了、或者没存上，框里写回原来的 —— 空着的框看上去像这条备忘没了名字 */
+async function saveTitle(m: Memo, el: HTMLInputElement) {
+  const title = el.value.trim()
+  if (!title || title === m.title) {
+    el.value = m.title
+    return
+  }
+  if (!(await save(() => memos.update(m.id, { title })))) el.value = m.title
 }
 
 function saveBody(m: Memo, body: string) {
@@ -188,7 +196,8 @@ function saveBody(m: Memo, body: string) {
 
 async function addMemo() {
   const title = newTitle.value.trim()
-  if (!title) return
+  // 回车是 keydown：按久一点会自动连发，在途的那一个没回来之前别再建
+  if (!title || adding.value) return
   adding.value = true
   try {
     await memos.create(title)

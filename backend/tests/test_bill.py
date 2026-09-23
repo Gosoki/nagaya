@@ -22,7 +22,7 @@ from app.services.bill import (
     cut_statement,
     entries_of,
 )
-from app.services.ledger import balances, create_entry, update_entry
+from app.services.ledger import balances, create_entry, delete_entry, restore_entry, update_entry
 
 SEP = dt.date(2026, 9, 10)
 OCT = dt.date(2026, 10, 10)
@@ -433,6 +433,30 @@ def test_overpayment_comes_back_in_the_next_bill(session: Session, members) -> N
         (a.id, c.id, 4_000),
     ]
     assert sum(balances(session).values()) == 0
+
+
+def test_touching_without_changing_does_not_mark_issued_bill(session: Session, members) -> None:
+    """原样点「保存」、删了又撤销、改了又改回来 —— 已出的账单上不该挂「出账后被改过」。
+
+    那句话会跟着复制进群里，写的却是「当初 ¥30,000，现在 ¥30,000」，而且消不掉。
+    """
+    a, *_ = members
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=30_000, payer_id=a.id)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=900, payer_id=a.id)
+    st = cut_statement(session, actor_id=a.id)
+    big, small = sorted(entries_of(session, st.id), key=lambda x: -x.amount_jpy)
+
+    v = big.version
+    saved = update_entry(session, big, actor_id=a.id, version=v, fields={"amount_jpy": 30_000})
+    assert saved.version == v                      # 没变就不推 version，别人的编辑页不会平白撞冲突
+    delete_entry(session, small, actor_id=a.id)
+    restore_entry(session, small, actor_id=a.id)
+    assert build_bill(session, st)["edited_after_cut"] is None
+
+    update_entry(session, big, actor_id=a.id, version=big.version, fields={"amount_jpy": 3_000})
+    assert build_bill(session, st)["edited_after_cut"]["count"] == 1
+    update_entry(session, big, actor_id=a.id, version=big.version, fields={"amount_jpy": 30_000})
+    assert build_bill(session, st)["edited_after_cut"] is None
 
 
 def test_cut_stamps_monthly_entries_with_the_cut_date(session: Session, members) -> None:

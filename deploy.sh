@@ -240,7 +240,14 @@ deploy_docker() {
 
   docker compose up -d
   PYRUN=(docker compose exec -T nagaya .venv/bin/python)
-  wait_healthy || { say "❌ 容器起来了，但端口 ${PORT} 没有应答。最近的日志："; docker compose logs --tail 40 nagaya; exit 1; }
+  if ! wait_healthy; then
+    say "❌ 容器起来了，但端口 ${PORT} 没有应答。最近的日志："
+    docker compose logs --tail 40 nagaya
+    # 停掉：restart: unless-stopped 会一直把它拉起来，而每次开机都可能拍一张升级前的快照
+    docker compose stop nagaya >/dev/null 2>&1 || true
+    say "容器已经停下。修好之后重跑 deploy.sh --docker；账本没动过，升级前的快照在 $BACKEND/data/before-migrate-*.db"
+    exit 1
+  fi
   say "✔ 服务起来了"
 
   # 导入的旧账本里记着旧机器的备份目录（多半是那台的路径），容器里用不了：改回挂出来的那个。
@@ -268,6 +275,7 @@ deploy_docker() {
   say ""
   say "   日志: docker compose logs -f     重启: docker compose restart"
   say "   升级: git pull && bash deploy.sh --docker"
+  say "   恢复: docker compose stop nagaya; docker compose run --rm --no-deps nagaya .venv/bin/python -m tools.restore; docker compose start nagaya"
 }
 
 if [ "${1:-}" = "--docker" ]; then

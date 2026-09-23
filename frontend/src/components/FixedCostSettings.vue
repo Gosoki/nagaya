@@ -64,7 +64,7 @@
               type="text"
               maxlength="20"
               :value="c.name"
-              @blur="rename(c, ($event.target as HTMLInputElement).value)"
+              @blur="rename(c, $event.target as HTMLInputElement)"
             />
             <q-btn
               dense flat round size="sm" icon="delete_outline" color="grey-6"
@@ -115,7 +115,7 @@
         type="text"
         maxlength="20"
         :placeholder="t('monthly.addPlaceholder')"
-        @keyup.enter="add"
+        @keydown.enter="isSubmitEnter($event) && add()"
       />
       <q-btn
         dense flat no-caps color="primary"
@@ -135,6 +135,7 @@ import { useI18n } from 'vue-i18n'
 
 import { ApiError, api } from 'src/api/client'
 import type { Category } from 'src/api/types'
+import { isSubmitEnter } from 'src/html'
 import { useMeta } from 'src/stores/meta'
 import { CATEGORY_COLORS } from 'src/palette'
 
@@ -176,10 +177,15 @@ async function save(c: Category, patch: Record<string, unknown>): Promise<boolea
   }
 }
 
-function rename(c: Category, raw: string) {
-  const name = raw.trim()
-  if (!name || name === c.name) return
-  void save(c, { name })
+/** 改名。清空了、或者存不上（重名、断网），框里写回生效的那个名字 ——
+ *  不然框里写着「网费」，面板和账单上它还叫「电费」 */
+async function rename(c: Category, el: HTMLInputElement) {
+  const name = el.value.trim()
+  if (!name || name === c.name) {
+    el.value = c.name
+    return
+  }
+  if (!(await save(c, { name }))) el.value = c.name
 }
 
 async function add() {

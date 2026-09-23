@@ -29,8 +29,12 @@ async function login(page: import('@playwright/test').Page, who: string = USER) 
 const TEMP_PASSWORD = 'e2e-new-password'
 
 async function restoreKanPassword(page: import('@playwright/test').Page) {
+  // 先拿原密码试：每条收尾都拿临时密码去撞的话，每条都记一次输错，
+  // 五次之后登录节流就把 kan 挡在门外，后面登 kan 的用例全部 429
+  const ok = await page.request.post('/api/auth/login', { data: { name: 'kan', password: PASSWORD } })
+  if (ok.ok()) return          // 没被改过，正常
   const r = await page.request.post('/api/auth/login', { data: { name: 'kan', password: TEMP_PASSWORD } })
-  if (!r.ok()) return          // 没被改过，正常
+  if (!r.ok()) return
   const headers = { Authorization: `Bearer ${(await r.json()).token}` }
   const me = await (await page.request.get('/api/auth/me', { headers })).json()
   await page.request.patch(`/api/members/${me.id}`, {

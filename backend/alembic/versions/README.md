@@ -1,6 +1,7 @@
 # 改表结构
 
-2026-09-23 起表结构走 Alembic（SPEC D18）。基线 `0001_baseline.py` 就是那天的整套表。
+2026-09-23 起表结构走 Alembic（SPEC D18）。基线 `0001_baseline.py` 就是那天的整套表
+（当晚把最初的 0001、0002 合成了这一份）。那之前 create_all 建的旧格式库不再接管，开机时认出来就拒绝。
 
 ## 改了 models.py 之后
 
@@ -25,7 +26,8 @@ rm /tmp/nagaya-gen.db*
 
 `app/init_db.py` → `app/migrate.py`：
 
-1. 有要升的版本就先 `VACUUM INTO` 拍一张快照，放在 `data/before-migrate-*.db`；
+1. 有要升的版本就先 `VACUUM INTO` 拍一张快照，放在 `data/before-migrate-*.db`
+   （升级失败、服务反复重启时，库没动过就沿用上一张，不再一次一张）；
 2. 关掉外键升级（SQLite 改列是整表重建，外键开着会连带删行）；
 3. 升完核对库和模型，对不上就**拒绝启动**并说清缺了什么。
 

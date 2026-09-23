@@ -149,9 +149,10 @@
             type="text"
             inputmode="numeric"
             autofocus
-            :prefix="t('common.currency')"
+            :prefix="locale === 'ja' ? undefined : t('common.currency')"
+            :suffix="locale === 'ja' ? t('common.currency') : undefined"
             :label="t('entry.amountLabel')"
-            @keyup.enter="confirmAsk"
+            @keydown.enter="isSubmitEnter($event) && confirmAsk()"
           />
           <q-input
             v-model="askNote"
@@ -159,7 +160,7 @@
             type="text"
             maxlength="40"
             :label="t('entry.title')"
-            @keyup.enter="confirmAsk"
+            @keydown.enter="isSubmitEnter($event) && confirmAsk()"
           />
         </q-card-section>
         <q-card-actions align="right">
@@ -248,6 +249,7 @@ import { ApiError, api } from 'src/api/client'
 import { jstDateOf, todayJst } from 'src/date'
 import { newClientKey } from 'src/clientKey'
 import { digitsOf } from 'src/digits'
+import { isSubmitEnter } from 'src/html'
 import { formatYen } from 'src/i18n'
 import { statementLabel } from 'src/statement'
 import type { Entry, EntryKind } from 'src/api/types'
@@ -262,7 +264,7 @@ import { useLedger } from 'src/stores/ledger'
 import { useMemos } from 'src/stores/memos'
 import { useMeta } from 'src/stores/meta'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const $q = useQuasar()
 const route = useRoute()
 const router = useRouter()

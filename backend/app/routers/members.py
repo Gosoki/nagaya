@@ -5,7 +5,6 @@ import datetime as dt
 import io
 
 from fastapi import APIRouter, Depends, File, Response, UploadFile, status
-from PIL import Image, ImageOps
 from sqlmodel import Session, select
 
 from app.auth import MIN_PASSWORD_LEN, current_member, hash_password, verify_password
@@ -167,6 +166,8 @@ def _compress_avatar(raw: bytes) -> bytes:
       * 转成 WebP —— 同画质下比 JPEG 小三成左右
       * 丢掉所有元数据 —— EXIF 里有拍摄地点的 GPS
     """
+    from PIL import Image, ImageOps   # 用到才载：Pillow 常驻要 6MB，而换头像一年没几次
+
     try:
         img = Image.open(io.BytesIO(raw), formats=IMAGE_FORMATS)
         if img.width * img.height > MAX_PIXELS:

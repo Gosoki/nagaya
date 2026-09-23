@@ -16,7 +16,6 @@ import io
 import time
 
 from fastapi import APIRouter, Depends, File, Response, UploadFile
-from PIL import Image, ImageOps
 from sqlmodel import Session
 
 from app.auth import current_member
@@ -49,6 +48,8 @@ def _to_master(raw: bytes) -> bytes:
         老一点的 iOS 不认 WebP 的主屏图标；
       * 保留透明通道 —— 圆角/异形图标在深色主屏上不该多一个白方块。
     """
+    from PIL import Image, ImageOps   # 用到才载：Pillow 常驻要 6MB，而没换过图标的屋子一次都用不上
+
     try:
         img = Image.open(io.BytesIO(raw), formats=IMAGE_FORMATS)
         if img.width * img.height > MAX_PIXELS:
@@ -129,6 +130,8 @@ def get_icon(
         # 而这个端点不要求登录，谁都能拿它反复刷
         content = row.png
     else:
+        from PIL import Image
+
         img = Image.open(io.BytesIO(row.png)).resize((size, size), Image.Resampling.LANCZOS)
         buf = io.BytesIO()
         img.save(buf, "PNG", optimize=True)

@@ -459,6 +459,7 @@ import type { Bill, BillTransfer, Entry, Statement } from 'src/api/types'
 import { leftOf as leftOfPlan } from 'src/core/transfers'
 import { toHalfWidth } from 'src/digits'
 import { escapeHtml } from 'src/html'
+import { isLoopback } from 'src/installGuide'
 import { FALLBACK } from 'src/palette'
 import MemberAvatar from 'src/components/MemberAvatar.vue'
 import MonthlyFixed from 'src/components/MonthlyFixed.vue'
@@ -867,8 +868,11 @@ function textOf(b: Bill): string {
   // **不带转账方案**（你定的）：复制出去的是「大家都要看的那份」—— 这一期花了多少、
   // 每人应担/垫付/该收该付多少。谁给谁转、转了没有，点链接进来看（方案会随后来的
   // 转账和新账变，贴出去的文字不会跟着变，贴旧了反而误导人）
-  lines.push('')
-  lines.push(t('bill.linkLine', { url: linkOf(b) }))
+  // 在跑服务的那台电脑上用 localhost 打开时不带链接：贴进群里谁都点不开
+  if (!isLoopback(window.location.hostname)) {
+    lines.push('')
+    lines.push(t('bill.linkLine', { url: linkOf(b) }))
+  }
   return lines.join('\n')
 }
 

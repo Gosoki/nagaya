@@ -99,8 +99,9 @@ bash deploy.sh --docker         # 用 Docker：NAS、或者任何装了 Docker �
 **Docker** 做的事：打镜像（Node 只在打包那一段用，最终镜像里只有 Python）→ `docker compose up -d`。
 账本和备份挂在宿主机的 `backend/data`、`backend/backups`（和直接装是同一个位置），
 删容器、重建镜像都不碰它们；容器以这两个目录主人的身份写文件，在宿主机上不用 sudo 就打得开。
-端口和身份记在项目根目录的 `.env` 里。不想用脚本的话，`docker compose up -d --build` 一句也行。
-日志 `docker compose logs -f`。
+端口和身份记在项目根目录的 `.env` 里。不想用脚本的话，`docker compose up -d --build` 一句也行，
+再建第一个账号：`docker compose exec nagaya .venv/bin/python -m tools.add_member go Go`。
+日志 `docker compose logs -f`。下面 `tools.*` 的命令在 Docker 下都是 `docker compose exec nagaya .venv/bin/python -m tools.…`。
 
 ### 更新到新版本
 
@@ -114,7 +115,7 @@ git pull && sudo bash deploy.sh          # Docker：git pull && bash deploy.sh -
 
 ### 手动装（不想用脚本、或者在 Mac 上直接跑）
 
-要 **Python 3.10+**（开发用的 3.12）和 **Node 22.12+ 或 24**（只在打包前端时要）。
+要 **Python 3.11+**（开发用的 3.12；锁定的依赖里有要 3.11 的）和 **Node 22.12+ 或 24**（只在打包前端时要）。
 
 ```bash
 cd backend
@@ -133,7 +134,8 @@ cd ../backend
 实测 sqlmodel 0.0.46 起拒收不带时区的时间，全新部署直接起不来。lock 是全部测试在上面过了的那一组。
 
 **先打包前端再起服务**：后端开机时认一次 `frontend/dist/pwa` 在不在。
-`run.sh` 带着 `umask 077`：库、日志、签名密钥新建出来都只有自己能读。
+库、日志、签名密钥新建出来都只有自己能读（后端和 `tools.*` 一律 `umask 077`）。
+以前装的、账本别人也能读的话，收紧一次就行：`chmod 700 data && chmod 600 data/nagaya.db*`。
 
 `tools.add_member` 之后也能接着用：`--list` 看有谁；`--reset go` 重置某人的密码（顺带把他所有设备
 踢下线）—— **忘了密码只能走这条**，界面上密码只许本人改。其他人也可以在界面上加（更多 → 设置 → 成员）。
@@ -161,6 +163,18 @@ cd ../backend
 
 要出门在外也能用，或者想要上面这些，前面套一层 TLS：**Tailscale**（`tailscale serve`）、
 **Cloudflare Tunnel** 或 **Caddy** 反代都行。仓库里不带这些配置。
+
+反代和后端**在同一台机器**上（`tailscale serve`、本机的 cloudflared / Caddy）什么都不用配：
+后端默认就认 127.0.0.1 转过来的真实来源。反代在**别的机器**上、或者用 Docker 的话，
+要把反代的地址告诉后端，不然后端看到的「来源」全是反代，登录节流就从「按机器」退化成「按名字」——
+外面谁对着你的登录名连错几次，你在新手机上也会被挡一阵：
+
+- 直接装：`sudo systemctl edit nagaya`，写 `[Service]` 和 `Environment=FORWARDED_ALLOW_IPS=127.0.0.1,::1,<反代的 IP>`
+  （写在这儿的，升级时 deploy.sh 不会覆盖；别直接改 `nagaya.service`，那个每次部署都重写）
+- Docker：宿主机上的反代连进容器时，来源是 Docker 网络的网关（多半在 `172.16.0.0/12` 里）。
+  在项目根目录的 `.env` 里加一行 `FORWARDED_ALLOW_IPS=127.0.0.1,::1,172.16.0.0/12`，再 `docker compose up -d`
+
+填的值会**整个替换**默认的 `127.0.0.1,::1`，所以这两个要一起写上。**别写成 `*`**：那样谁都能伪造来源绕过节流。
 
 ---
 
@@ -190,9 +204,18 @@ cd backend
 .venv/bin/python -m tools.restore --dir=/Volumes/USB/backups --yes   # 备份不在默认目录 / 不问直接做
 ```
 
+Docker 部署的：服务停了 `exec` 就进不去，用一次性容器跑（`--dir` 写容器里的路径）：
+
+```bash
+docker compose run --rm --no-deps nagaya .venv/bin/python -m tools.restore --list
+docker compose stop nagaya
+docker compose run --rm --no-deps nagaya .venv/bin/python -m tools.restore      # 用最新那份
+docker compose start nagaya
+```
+
 脚本会先验那份备份、**再把它的一份拷贝升到现在的表结构**（和开机同一套迁移，原件不动），
 然后把现在的账本整个挪到 `data/replaced-*/`（不删，恢复错了还能回头），最后才换上去。
-所以改表结构之前做的备份照样能恢复；升不上来的（比如更新的代码做的备份）当场拦下，现有的账本不动。
+所以改表结构之前做的备份照样能恢复；升不上来的（更新的代码做的、2026-09-23 之前的旧格式）当场拦下，现有的账本不动。
 **库彻底没了、换了新机器**也能跑 —— 那正是最需要它的时候。
 
 > **为什么不手工拷。** 恢复只有一步危险，而它长得完全不像危险：把 `.db` 拷回去却

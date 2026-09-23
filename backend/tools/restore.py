@@ -84,9 +84,8 @@ def _pick(name: str | None, argv: list[str]) -> Path:
 def _upgraded_copy(src: Path) -> Path:
     """把备份拷一份到临时目录，按开机那一套升到最新表结构。升不上来就抛。
 
-    原来这里是一份「缺哪些列」的核对，旧备份一律拦下 —— 那时候项目还是
-    create_all，没有迁移，旧备份确实恢复不了。现在有了 Alembic：旧备份照样
-    升上来，升不上的（比迁移基线还旧、或者是更新的代码做的）才拦。
+    有了 Alembic 之后，加字段之前做的备份照样升上来；升不上的才拦：
+    更新的代码做的、或者 2026-09-23 切 Alembic 之前的旧格式（不再接管）。
     **升的是拷贝**：出了任何事，备份原件一个字节都没动。
     """
     tmp = Path(tempfile.mkdtemp(prefix="nagaya-restore-")) / src.name
@@ -141,7 +140,7 @@ def main(argv: list[str]) -> None:
         sys.exit(
             f"这份备份升不到现在的表结构：{e}\n"
             "多半是它比现在的代码**新**（换回做这份备份时的代码版本），"
-            "或者比迁移的基线还旧。什么都没动，换一份试试（--list 看有哪些）。"
+            "或者是 2026-09-23 之前的旧格式备份。什么都没动，换一份试试（--list 看有哪些）。"
         )
     # 升完的那份，原有的每张表行数得一行不差（升级只许加东西）
     after = backup_svc.verify_file(ready)

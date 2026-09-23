@@ -73,7 +73,8 @@ export const useAuth = defineStore('auth', () => {
         // 没连上、或者服务器那边 5xx（重启中、反代 502）—— token 没说不行，
         // 先用上次认识的那个人。原来除了断网一律当 token 失效，身份被清掉，
         // 「确认已完成」和个人设置凭空消失，要整页刷新才回来
-        me.value = cachedMe()
+        // 本机存不了东西（iOS「阻止所有 Cookie」）时缓存读出来是 null：别拿它盖掉内存里认识的这位
+        me.value = cachedMe() ?? me.value
         if (me.value) setLang(me.value.lang)
       }
     } finally {

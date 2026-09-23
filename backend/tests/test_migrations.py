@@ -39,50 +39,31 @@ def test_migrations_build_exactly_the_models(tmp_path: Path) -> None:
 
 
 def _legacy(tmp_path: Path) -> Path:
-    """D18 之前的库：create_all 建的，没有 alembic_version。再故意少一张表、少一个索引 ——
-    create_all 只在建表时建索引，老库上后加的索引本来就是缺的"""
+    """切 Alembic 之前的库：create_all 建的，没有 alembic_version"""
     db = tmp_path / "legacy.db"
     engine = create_engine(f"sqlite:///{db}")
     SQLModel.metadata.create_all(engine)
     engine.dispose()
-    con = sqlite3.connect(db)
-    con.executescript("""
-        drop table member_pref;
-        drop index ix_entry_date;
-        insert into member (name, display_name, color, display_order, joined_on, password_hash,
-                            lang, avatar_version, created_at)
-        values ('go', 'Go', '#3d4785', 0, '2026-01-01', '', 'zh', 0, '2026-01-01 00:00:00');
-    """)
-    con.commit()
-    con.close()
     return db
 
 
-def test_a_create_all_ledger_is_adopted_in_place(tmp_path: Path) -> None:
-    """现在这本账本就是这样一个库：升上来只补缺的，数据一行不动，升之前先拍快照。"""
+def test_a_create_all_ledger_is_refused_with_a_reason(tmp_path: Path) -> None:
+    """2026-09-23 把迁移合成了一份基线，旧格式的库不再接管。
+
+    拒绝要说清为什么；不许先拍快照（反正升不了），也不许动它一个字节
+    """
     db = _legacy(tmp_path)
-    shot = migrate.upgrade(db)
-
-    assert _version(db) == migrate.head()
-    con = sqlite3.connect(db)
-    names = {r[0] for r in con.execute("select name from sqlite_master")}
-    assert "member_pref" in names, "缺的表要补上"
-    assert "ix_entry_date" in names, "缺的索引要补上"
-    assert "ix_entry_deleted_at" not in names, "0002 去掉的索引不许留着"
-    assert con.execute("select display_name from member").fetchall() == [("Go",)]
-    con.close()
-
-    assert shot and Path(shot).exists(), "真有要升的版本时，升之前得先留一份"
-    con = sqlite3.connect(shot)
-    assert con.execute("select count(*) from member").fetchone()[0] == 1
-    con.close()
-
-    assert migrate.upgrade(db) is None, "已经是最新的就什么都不做，也不再拍快照"
+    before = db.read_bytes()
+    with pytest.raises(migrate.SchemaDrift, match="旧格式"):
+        migrate.upgrade(db)
+    assert db.read_bytes() == before
+    assert not list(tmp_path.glob("before-migrate-*"))
 
 
-def test_a_ledger_older_than_the_baseline_refuses_to_start(tmp_path: Path) -> None:
-    """缺列的库补不了 —— 那就别起来，说清楚缺了什么。起来了、查到那一列才 500 更糟"""
-    db = _legacy(tmp_path)
+def test_a_ledger_missing_columns_refuses_to_start(tmp_path: Path) -> None:
+    """版本号对、却缺列的库 —— 别起来，说清楚缺了什么。起来了、查到那一列才 500 更糟"""
+    db = tmp_path / "x.db"
+    migrate.upgrade(db)
     con = sqlite3.connect(db)
     con.execute("alter table category drop column same_as_last")
     con.commit()
@@ -91,13 +72,14 @@ def test_a_ledger_older_than_the_baseline_refuses_to_start(tmp_path: Path) -> No
         migrate.upgrade(db)
 
 
-def test_restore_upgrades_an_old_backup_but_not_a_newer_one(tmp_path: Path) -> None:
-    """旧备份升上来再装（原件不动）；更新的代码做的备份认不出版本，拦下"""
-    old = _legacy(tmp_path)
-    before = old.read_bytes()
-    ready = _upgraded_copy(old)
+def test_restore_takes_a_current_backup_but_not_a_newer_or_legacy_one(tmp_path: Path) -> None:
+    """现在这版的备份照装（升的是拷贝，原件不动）；更新的代码做的、切 Alembic 之前的，拦下"""
+    ok = tmp_path / "ok.db"
+    migrate.upgrade(ok)
+    before = ok.read_bytes()
+    ready = _upgraded_copy(ok)
     assert _version(ready) == migrate.head()
-    assert old.read_bytes() == before, "升的是拷贝，备份原件一个字节都不许动"
+    assert ok.read_bytes() == before, "升的是拷贝，备份原件一个字节都不许动"
     assert not Path(str(ready) + "-wal").exists() or Path(str(ready) + "-wal").stat().st_size == 0, \
         "升级写的东西不许还躺在 -wal 里 —— 接下来只拷主文件"
 
@@ -109,3 +91,44 @@ def test_restore_upgrades_an_old_backup_but_not_a_newer_one(tmp_path: Path) -> N
     con.close()
     with pytest.raises(Exception, match="ffff"):
         _upgraded_copy(newer)
+
+    with pytest.raises(migrate.SchemaDrift, match="旧格式"):
+        _upgraded_copy(_legacy(tmp_path))
+
+
+def test_a_failing_upgrade_does_not_pile_up_snapshots(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    """升级在这本账上失败 → 服务一遍遍重启（Docker 的 restart: unless-stopped 就会这样）。
+
+    每次开机都先拍一整份的话，盘迟早写满。库没动过就只留一张；
+    库比代码新（代码回滚了）根本升不了，一张都不拍
+    """
+    db = tmp_path / "x.db"
+    migrate.upgrade(db)
+    con = sqlite3.connect(db)
+    con.execute("insert into bundle (title, created_at) values ('x', '2026-01-01 00:00:00')")
+    con.commit()
+    con.close()
+
+    def boom(*_a, **_k) -> None:
+        raise RuntimeError("迁移在这本账上失败")
+
+    # 假装代码里多了一个 0002，而它在这本账上跑不过去
+    monkeypatch.setattr(migrate, "head", lambda: "0002")
+    monkeypatch.setattr(migrate.command, "upgrade", boom)
+    for _ in range(3):
+        with pytest.raises(RuntimeError):
+            migrate.upgrade(db)
+    shots = list(tmp_path.glob("before-migrate-*"))
+    assert len(shots) == 1 and shots[0].suffix == ".db" and shots[0].stat().st_size > 0
+    monkeypatch.undo()
+
+    newer = tmp_path / "sub" / "newer.db"
+    newer.parent.mkdir()
+    migrate.upgrade(newer)
+    con = sqlite3.connect(newer)
+    con.execute("update alembic_version set version_num = 'ffff'")
+    con.commit()
+    con.close()
+    with pytest.raises(migrate.SchemaDrift, match="ffff"):
+        migrate.upgrade(newer)
+    assert not list(newer.parent.glob("before-migrate-*"))

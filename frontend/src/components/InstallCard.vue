@@ -30,7 +30,8 @@
       <!-- 地址：在电脑上看到这一屏、或者要念给室友听的时候用。长按就能复制 -->
       <div v-if="standalone || platform === 'other'" class="address row items-center no-wrap">
         <span class="text-grey-7 q-mr-sm">{{ t('install.address') }}</span>
-        <span class="col url">{{ origin }}</span>
+        <span v-if="loopback" class="col">{{ t('install.addressLocal', { port: port || '80' }) }}</span>
+        <span v-else class="col url">{{ origin }}</span>
       </div>
 
       <div class="notes text-caption text-grey-7">
@@ -45,7 +46,7 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { installPlatform, isStandalone } from 'src/installGuide'
+import { installPlatform, isLoopback, isStandalone } from 'src/installGuide'
 
 const { t } = useI18n()
 
@@ -53,6 +54,9 @@ const open = ref(false)
 const standalone = isStandalone()
 const platform = installPlatform(navigator.userAgent, navigator.maxTouchPoints)
 const origin = window.location.origin
+/** 在跑服务的那台电脑上用 localhost 打开的：这个地址别的手机打不开，换成一句指路 */
+const loopback = isLoopback(window.location.hostname)
+const port = window.location.port
 
 const IOS = ['iosSafari1', 'iosSafari2', 'iosSafari3']
 const ANDROID = ['android1', 'android2']
