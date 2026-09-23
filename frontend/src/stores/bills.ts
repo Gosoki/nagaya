@@ -239,8 +239,23 @@ export const useBills = defineStore('bills', () => {
     monthlyStamp += 1
   }
 
+  /**
+   * 同一份固定费同时只取一份：进账单页时预热和面板自己会一起要它。
+   * 按「哪一份 + 中间有没有存过 + 有没有出过账」去重 —— 存过之后的新请求
+   * 不许复用存之前发出去的那一发
+   */
+  const monthlyTasks = new Map<string, Promise<MonthlyData>>()
+  function loadMonthly(ck: string): Promise<MonthlyData> {
+    const k = `${ck}|${monthlyStamp}|${generation}`
+    const hit = monthlyTasks.get(k)
+    if (hit) return hit
+    const task = fetchMonthly(ck).finally(() => monthlyTasks.delete(k))
+    monthlyTasks.set(k, task)
+    return task
+  }
+
   /** 固定费面板。ck 是缓存 key（'draft' 或 'st:4'），面板自己算得出来 */
-  async function loadMonthly(ck: string): Promise<MonthlyData> {
+  async function fetchMonthly(ck: string): Promise<MonthlyData> {
     const gen = generation
     const stamp = monthlyStamp
     const d = await api.get<MonthlyData>(
@@ -308,8 +323,16 @@ export const useBills = defineStore('bills', () => {
   function refreshViews(): void {
     const cks = Object.keys(views.value)
     if (!cks.length) return
+    // 只刷草稿、最新那张（'current' 顺带重取单子列表）和正在看的那张。
+    // 原来是缓存过的每一张都重取：最新那张被 'current' 和 'st:N' 各取一遍，
+    // 这次会话翻过的旧单子每次切回前台都挨个重算（5 年的库上一张十几毫秒）——
+    // 而进那一页时 ensure() 本来就会重取
     run('current', true).catch(() => {})
-    for (const ck of cks) run(ck as BillKey, true).catch(() => {})
+    if (views.value.draft) run('draft', true).catch(() => {})
+    const onScreen = detail.value === null ? null : (`st:${detail.value}` as const)
+    if (onScreen && views.value[onScreen] && onScreen !== cacheKey('current')) {
+      run(onScreen, true).catch(() => {})
+    }
     // 草稿的固定费面板也重取：面板盯着这份缓存重建，而重建会留住还没存的输入 ——
     // 不刷的话，室友出完账这一块还挂着上一期的房租
     if (monthly.value.draft) loadMonthly('draft').catch(() => {})

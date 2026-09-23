@@ -9,7 +9,14 @@ import { VitePWA } from 'vite-plugin-pwa'
 const BUILD = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Tokyo' }).slice(0, 16)
 
 export default defineConfig({
-  define: { __BUILD__: JSON.stringify(BUILD) },
+  define: {
+    __BUILD__: JSON.stringify(BUILD),
+    // vue-i18n 里用不上的几块：老式 API、全局注册的 <i18n-t> 组件、生产环境的调试钩子。
+    // 关掉之后框架那一块小 14KB
+    __VUE_I18N_LEGACY_API__: false,
+    __VUE_I18N_FULL_INSTALL__: false,
+    __INTLIFY_PROD_DEVTOOLS__: false,
+  },
   plugins: [
     vue({ template: { transformAssetUrls } }),
     quasar({ sassVariables: 'src/quasar-variables.sass' }),
@@ -41,6 +48,9 @@ export default defineConfig({
         // 不另写 runtimeCaching 的 NetworkOnly 规则：没匹配上的请求本来就直接走网络，
         // 多一层规则等于多一层可能出问题的东西。
         navigateFallbackDenylist: [/^\/api/],
+        // 图标字体也进预缓存。不进的话 iOS 把 HTTP 缓存清掉之后，断网冷启动时
+        // 底栏和按钮上的图标全是空白，三秒后变成「add_circle」这种英文字
+        globPatterns: ['**/*.{js,css,html,woff2}'],
 
         // **导航请求（刷新、点链接、打开 PWA）先问服务器。**
         // 默认行为是把 index.html 预缓存起来、导航一律吃缓存，于是发了新版要刷好几次
@@ -100,5 +110,14 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist/pwa',   // 后端 main.py 就挂这个目录，单端口部署
+    rollupOptions: {
+      output: {
+        // 框架（Vue、路由、Pinia、vue-i18n）单独一块。原来它和文案、API 客户端打在一起，
+        // 改一个字那 200KB 的哈希就变，每台手机都得整块重下
+        codeSplitting: {
+          groups: [{ name: 'vendor', test: /node_modules[\\/](@vue|vue|pinia|vue-router|vue-i18n|@intlify)[\\/]/ }],
+        },
+      },
+    },
   },
 })

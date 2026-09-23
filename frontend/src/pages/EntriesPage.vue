@@ -107,12 +107,13 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 
-import { ApiError, api } from 'src/api/client'
+import { ApiError } from 'src/api/client'
 import type { Entry, EntryKind, Statement } from 'src/api/types'
 import { jstDateOf } from 'src/date'
 import { formatYen } from 'src/i18n'
 import { FALLBACK } from 'src/palette'
 import SettingsPanel from 'src/components/SettingsPanel.vue'
+import { useBills } from 'src/stores/bills'
 import { useLedger } from 'src/stores/ledger'
 import { useMemos } from 'src/stores/memos'
 import { KIND_COLOR } from 'src/theme'
@@ -123,6 +124,7 @@ const { t } = useI18n()
 const $q = useQuasar()
 const meta = useMeta()
 const ledger = useLedger()
+const bills = useBills()
 const memos = useMemos()
 
 const statements = ref<Statement[]>([])
@@ -139,12 +141,27 @@ onMounted(async () => {
     memos.tab = 'ledger'
     fCategory.value = wanted
   }
-  statements.value = await api.get<Statement[]>('/api/statements')
+  // 和账单页共用同一份（同时只取一发）
+  statements.value = await bills.loadStatements()
 })
 
 /** 某一天出过的账单。cut_at 是 UTC 时间戳，得按**日本时间**归日 —— 见 src/date.ts */
-const statementsOn = (date: string) =>
-  statements.value.filter((st) => jstDateOf(st.cut_at) === date)
+/**
+ * 按日本时间的那一天归好。原来每个日期组都把全部单子过滤一遍、每张都格式化一次日期，
+ * 模板里还调两次 —— 5 年的数据一次重画要 1.8 万次日期格式化（实测 17ms）
+ */
+const statementsByDay = computed(() => {
+  const out = new Map<string, Statement[]>()
+  for (const st of statements.value) {
+    const day = jstDateOf(st.cut_at)
+    const list = out.get(day)
+    if (list) list.push(st)
+    else out.set(day, [st])
+  }
+  return out
+})
+const NONE: Statement[] = []
+const statementsOn = (date: string) => statementsByDay.value.get(date) ?? NONE
 
 /**
  * 点一条就去改它。已出账的也能改，差额进下一张账单的「上期结转」。

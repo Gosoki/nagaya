@@ -44,10 +44,12 @@ export const useLedger = defineStore('ledger', () => {
     try {
       // 不拉 /api/balances：它存下来之后没有任何组件读过（余额页早就并进账单页了），
       // 每次开 App、每记一笔都白跑一个来回
-      const [e, bill] = await Promise.all([
+      const [e, sts] = await Promise.all([
         // 筛选在前端做，拉少了就筛不全
         api.get<Entry[]>(`/api/entries?limit=${LIMIT}`),
-        api.get<{ prev_cut_at: string | null; prev_label: string | null }>('/api/bill'),
+        // 「上一次出账」就是单子列表的第一张。原来为这两个字段去拉整张草稿账单
+        // （后端要把整本账算一遍），而账单页切回前台时自己还要再拉一次同一张
+        useBills().loadStatements(),
       ])
       if (my !== seq) return                       // 后面还有更新的一发，交给它
       // 我出发之后本地写过（记了一笔、删了一笔）：这份列表里没有它。
@@ -62,8 +64,8 @@ export const useLedger = defineStore('ledger', () => {
         entries.value = e
       }
       truncated.value = e.length >= LIMIT
-      prevCutAt.value = bill.prev_cut_at
-      prevLabel.value = bill.prev_label
+      prevCutAt.value = sts[0]?.cut_at ?? null
+      prevLabel.value = sts[0]?.label ?? null
     } finally {
       loading.value = false
     }

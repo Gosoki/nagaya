@@ -377,7 +377,8 @@ watch(
 // meta 一到手就手动贴上去（见 src/appearance.ts）
 watch(
   () => [meta.setting<string>('app_name', ''), meta.setting<number>('app_icon_version', 0)] as const,
-  ([name, version]) => applyAppearance(name, version),
+  // 设置还没到手时别贴：先贴一份「没名字、没图标」、再贴真的，主屏清单会被取好几遍
+  ([name, version]) => meta.settings.length && applyAppearance(name, version),
   { immediate: true },
 )
 
@@ -390,8 +391,20 @@ watch(
  *
  * 只在真的回到前台时拉，失败不打扰：这一下纯属「顺手对一下表」。
  */
+/** 上一次整套对表是什么时候 */
+let lastSync = Date.now()
+/**
+ * 切出去没多久就回来的（去 LINE 贴个账单、看一眼消息），不用整套重取一遍 ——
+ * 一次对表是十来个请求，而这种来回一天能有几十次
+ */
+const RESYNC_AFTER_MS = 30_000
+
 function onVisible() {
   if (document.visibilityState !== 'visible') return
+  // 从后台切回来，iOS 同样可能按旧视口摆 fixed 元素 —— 这一条每次都要做
+  remeasure()
+  if (Date.now() - lastSync < RESYNC_AFTER_MS) return
+  lastSync = Date.now()
   void meta.load().catch(() => {})
   // 自己的资料和偏好也对一下：语言、深浅色、主题色都跟着账号走，
   // 在另一台设备上改过的，切回来就该换上。顺带把「上次冷启动时没认出自己」补上
@@ -401,8 +414,6 @@ function onVisible() {
   // 一直要到整页刷新才看得到
   void ledger.refresh().catch(() => {})
   bills.refreshViews()
-  // 从后台切回来，iOS 同样可能按旧视口摆 fixed 元素
-  remeasure()
 }
 
 onMounted(() => {
