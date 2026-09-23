@@ -12,6 +12,7 @@
 
 脚本做三件事，缺一不可：
   1. **先验备份**：打不开的、零张表的，当场拒绝，不动现有的库；
+     再把它的一份拷贝升到现在的表结构（和开机同一套 Alembic），升不上来也拒绝；
   2. **现有的库挪走不删**：万一恢复错了那份，原来的还在；
   3. **连 -wal / -shm 一起处理**，不给旧 WAL 留下任何盖上来的机会。
 """
@@ -23,13 +24,14 @@ import json
 import shutil
 import sqlite3
 import sys
+import tempfile
 from pathlib import Path
 
 from sqlalchemy.exc import SQLAlchemyError
-from sqlmodel import Session, SQLModel
+from sqlmodel import Session
 
+from app import migrate
 from app.db import DB_PATH, engine
-from app.models import Member  # noqa: F401 —— 导入即注册表，_schema_drift 要读 metadata
 from app.services import backup as backup_svc
 
 SIDECARS = ("-wal", "-shm")
@@ -79,59 +81,27 @@ def _pick(name: str | None, argv: list[str]) -> Path:
     return hit
 
 
-def _columns(path: Path) -> dict[str, list[tuple[str, int, object]]]:
-    """一份库里每张表有哪些列，以及它们是不是 NOT NULL、有没有默认值。
+def _upgraded_copy(src: Path) -> Path:
+    """把备份拷一份到临时目录，按开机那一套升到最新表结构。升不上来就抛。
 
-    两个方向的漂移都要靠它：缺列（恢复后一查就 500）和多出的 NOT NULL 无默认列
-    （恢复后一写就失败）。`pragma table_info` 本来就在跑，三项在同一行里。
+    原来这里是一份「缺哪些列」的核对，旧备份一律拦下 —— 那时候项目还是
+    create_all，没有迁移，旧备份确实恢复不了。现在有了 Alembic：旧备份照样
+    升上来，升不上的（比迁移基线还旧、或者是更新的代码做的）才拦。
+    **升的是拷贝**：出了任何事，备份原件一个字节都没动。
     """
-    # as_uri() 而不是手拼：路径里带 # 或 ? 时手拼会打开别的东西
-    con = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+    tmp = Path(tempfile.mkdtemp(prefix="nagaya-restore-")) / src.name
+    shutil.copy2(src, tmp)
+    migrate.upgrade(tmp, snapshot=False)
+    # 升级时开的是 WAL，写进去的东西可能还躺在拷贝的 -wal 里，而接下来只拷主文件 ——
+    # 正是这个脚本开头说的那个坑。切回普通日志模式：WAL 并回主文件、-wal 删掉，
+    # 装上去的和一份普通备份长得一样（服务起来会自己再切成 WAL）。
+    # 留在 WAL 模式的话，只读打开（mode=ro）连 -shm 都建不出来，直接打不开
+    con = sqlite3.connect(tmp)
     try:
-        names = [
-            r[0] for r in con.execute(
-                "select name from sqlite_master where type='table' and name not like 'sqlite_%'"
-            )
-        ]
-        return {
-            n: [(r[1], r[3], r[4]) for r in con.execute(f'pragma table_info("{n}")')]
-            for n in names
-        }
+        con.execute("PRAGMA journal_mode=DELETE")
     finally:
         con.close()
-
-
-def _schema_drift(path: Path) -> tuple[list[str], list[str], list[str]]:
-    """这份备份缺了今天的代码要用的哪些列。
-
-    **这是恢复路上最阴的一条。** 项目至今是 `create_all` 没有迁移
-    （SPEC D18：录真账之前再切 Alembic），而 create_all 对已存在的表**只加表不加列**。
-    于是恢复一份改字段之前做的备份：服务起得来、完整性检查也过，
-    然后每一条碰到新列的查询都是 `no such column` → 500 ——
-    而那时旧库已经被挪走了。宁可现在拦下来。
-    """
-    want = {t.name: {c.name: c for c in t.columns} for t in SQLModel.metadata.tables.values()}
-    got = _columns(path)
-    tables: list[str] = []
-    cols: list[str] = []
-    extra: list[str] = []
-    for table, spec in want.items():
-        if table not in got:
-            # **缺整张表不致命**：开机 init_db() 的 create_all 会把它建成空表，
-            # 服务和查询都正常。拦下来的话，等于在出事那天拒绝一份完全能用的备份
-            tables.append(table)
-            continue
-        gone = set(spec) - {c for c, _, _ in got[table]}
-        if gone:
-            cols.append(f"{table}.{'/'.join(sorted(gone))}")
-        # 反方向：备份比代码**多**一列。多出来的列如果是 NOT NULL 且没有默认值
-        # （SQLModel 的 Field(default=0) 生成的正是这种），恢复上去读账正常，
-        # 但每一条写进这张表的记录都会 NOT NULL constraint failed ——
-        # 而那时旧库已经被挪走了
-        for name, notnull, dflt in got[table]:
-            if name not in spec and notnull and dflt is None:
-                extra.append(f"{table}.{name}")
-    return tables, cols, extra
+    return tmp
 
 
 def main(argv: list[str]) -> None:
@@ -164,31 +134,20 @@ def main(argv: list[str]) -> None:
     print(f"要恢复的这份：{src.name}（{src.stat().st_size:,} 字节，"
           f"{len(counts)} 张表，{sum(counts.values())} 行）")
 
-    tables, cols, extra = _schema_drift(src)
-    blocking = []
-    if cols:
-        blocking.append(
-            "这份备份比现在的代码**旧**，缺这些列：\n  " + "\n  ".join(cols) +
-            "\n恢复上去服务起得来，但一查到这些列就是 500。"
-        )
-    if extra:
-        blocking.append(
-            "这份备份是比现在的代码**新**的版本做的，多出这些列（NOT NULL 且无默认值）：\n  "
-            + "\n  ".join(extra) +
-            "\n恢复上去读账正常，但每一条写进这些表的记录都会失败。"
-        )
-    if blocking and "--force" not in argv:
+    # 旧备份按开机那一套升到最新；升不上来就停，现有的账本不动
+    try:
+        ready = _upgraded_copy(src)
+    except Exception as e:  # noqa: BLE001 —— Alembic 认不出版本、缺列、外键对不上，都是「这份用不了」
         sys.exit(
-            "\n\n".join(blocking) +
-            "\n\n而那时旧库已经被挪走了。换一份（--list 看看），或者把代码切回做这份备份时的版本；\n"
-            "确实要硬来就加 --force。什么都没动。"
+            f"这份备份升不到现在的表结构：{e}\n"
+            "多半是它比现在的代码**新**（换回做这份备份时的代码版本），"
+            "或者比迁移的基线还旧。什么都没动，换一份试试（--list 看有哪些）。"
         )
-    if blocking:
-        print("⚠️ " + " / ".join(cols + extra) + "（--force 了，继续）")
-    if tables:
-        # 不拦：开机 create_all 会把这些表建成空表
-        print(f"提示：这份备份里没有 {'、'.join(tables)} —— 开机会自动建成空表。"
-              f"要是其中有存账目的表，那部分数据这份备份里本来就没有。")
+    # 升完的那份，原有的每张表行数得一行不差（升级只许加东西）
+    after = backup_svc.verify_file(ready)
+    lost = [t for t, n in counts.items() if after.get(t) != n]
+    if lost:
+        sys.exit(f"升级之后这几张表的行数变了：{lost} —— 什么都没动。")
 
     if DB_PATH.exists():
         # 这句 --yes 时也要印：服务没停的话它还开着旧库的文件句柄，
@@ -222,7 +181,9 @@ def main(argv: list[str]) -> None:
             Path(str(DB_PATH) + suffix).unlink(missing_ok=True)
 
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src, DB_PATH)
+    # 放上去的是**升过的那份拷贝**：验过的就是装上的，开机不用再升一遍
+    shutil.copy2(ready, DB_PATH)
+    shutil.rmtree(ready.parent, ignore_errors=True)
     print(f"恢复完成：{DB_PATH}")
     # **设置表也一起恢复了**，包括备份目录它自己。恢复一份「目录还指着旧移动盘」
     # 时代的备份，备份目录会跟着回滚 —— 而这恰好是刚出完事、最不该再丢一次备份的时候

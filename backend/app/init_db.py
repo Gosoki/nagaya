@@ -1,14 +1,17 @@
 """建库 / 初始化。
 
-**设计阶段用 create_all**：表结构还在改，每次都生成一份迁移纯属添乱。
-等 schema 稳下来、准备录真实账目之前，改走 Alembic（见 alembic/versions/README.md）。
+表结构走 Alembic（app/migrate.py）：新库从头建，老库升到最新。
+设计阶段用的是 create_all，它不会给已有的表加列 —— 那一段到 D18 为止。
 """
 
 from __future__ import annotations
 
-from sqlmodel import Session, SQLModel, select
+import logging
 
-from app.db import engine
+from sqlmodel import Session, select
+
+from app import migrate
+from app.db import DB_PATH, engine
 from app.models import CATEGORY_COLORS, Category, Member
 from app.services import settings as settings_svc
 from app.services.settings import seed_settings
@@ -33,7 +36,9 @@ DEFAULT_CATEGORIES = [
 
 
 def init_db() -> None:
-    SQLModel.metadata.create_all(engine)
+    shot = migrate.upgrade(DB_PATH)
+    if shot:
+        logging.getLogger("nagaya").warning("表结构升级前的快照：%s", shot)
     with Session(engine) as session:
         seed_settings(session)
         if not session.exec(select(Category)).first():

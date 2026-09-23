@@ -35,7 +35,7 @@
 | D15 | **离线＝草稿本地保存** | 没网也能填完一笔存本地，联网后提示提交。不做完整离线同步队列 |
 | D16 | **PWA 启动默认页＝记一笔** | 打开就是金额框，余额看板放第二个 tab |
 | D17 | **项目名＝`nagaya`（長屋）** | 江户合住排屋，和 hiyori / soroban / nagisa 同一取名逻辑 |
-| D18 | **设计阶段不做数据库迁移** | 表结构还在改，先用 `create_all`；**schema 稳下来、录真账之前**再切 Alembic |
+| D18 | **设计阶段不做数据库迁移** | 表结构还在改，先用 `create_all`；**schema 稳下来、录真账之前**再切 Alembic。**2026-09-23 已切**：基线 `0001`，开机自动升级 |
 | D19 | **分类分「月度 / 日常」两类** | `category.monthly`，**用户可改的字段，不是代码里的名字列表**。日常记账网格只放天天会用的三个：日用品/伙食/其他。真正常记的就这些，硬凑第四个只会让人每次都想「这笔算哪个」 |
 | D20 | **固定费随时可填，不锁在账单页** | 独立 `/monthly` 一屏，记一笔那屏也有入口；账单页同样内嵌。出账单只是「划一条线，把这一刻之前的都算进来」 |
 | D21 | **上期金额只有开了「和上期一样」才进来，进来就是黑字实数** | 参考值就摆在输入框那个位置，跟亲手填的长得一样，某月忘改就带着上月数字发出去且无人察觉。所以这一屏不摆参考值：没填就是空框，出账按 0 结；要自动填的项去设置里开开关，记成真值并当场报出来。见 §6 F3 |
@@ -231,9 +231,9 @@ n 个人**最多 n−1 笔**（3 人最多 2 笔）。
 
 ## 5. 数据模型
 
-SQLite（WAL）。**设计阶段用 `create_all`**（D18）——表结构还在改，每次生成迁移纯属添乱；
-Alembic 的配置已经搭好（env.py、`import sqlmodel` 模板坑、SQLite 必需的 `render_as_batch`），
-**等 schema 稳下来、准备录真实账目之前**跑一次 autogenerate 生成第一版。
+SQLite（WAL）。表结构走 **Alembic**（D18，2026-09-23 切过来）：基线 `0001` 就是切换那天的整套表；
+开机自动升到最新（`app/migrate.py`），老的 `create_all` 库和老备份都能直接升上来。
+改表的流程见 `backend/alembic/versions/README.md`。
 
 ```
 member        成员
@@ -460,7 +460,7 @@ NiceGUI 是服务端持状态 + WebSocket 每次交互往返。而手机会把�
 | PWA | **`vite-plugin-pwa`**（非 Quasar CLI） | service worker + manifest 自动生成。**选它而不是 `quasar build -m pwa`**：Quasar CLI 自带一整套构建系统且脚手架是交互式的；Vite + `@quasar/vite-plugin` 既拿到同一套 Quasar 组件，形态又和 soroban 的 Vite+Vue 一致。图标已生成在 `frontend/public/icons/` |
 | 后端 | **FastAPI + SQLModel** | 纯 REST，**只返数据不返文案** |
 | 数据库 | **SQLite (WAL)** | 4 个人的量，十年用不满 |
-| 迁移 | **Alembic，但推迟到 schema 稳定**（D18） | 设计阶段 `create_all`；录真账之前必须切过去，否则改表就丢数据 |
+| 迁移 | **Alembic**（D18，2026-09-23 已切） | 开机自动升级，升之前留快照；改了模型没写迁移，`test_migrations.py` 会红 |
 | 金额 | `int` 日元，前后端都是 int | **禁 float**，JS 那边尤其要盯 |
 | i18n | **vue-i18n**，只在前端一处 | 后端不碰文案，账单文本也在前端生成，自然跟随界面语言 |
 | 草稿 | `localStorage`（D15） | IndexedDB 对这个量级是过度设计 |

@@ -22,7 +22,9 @@ config = context.config
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
-if config.config_file_name is not None:
+# 开机升级时（app/migrate.py 递了连接进来）**不许**重配日志：fileConfig 默认会把
+# 已经存在的 logger 全部停掉，uvicorn 的访问日志从此一行都不出
+if config.config_file_name is not None and "connection" not in config.attributes:
     fileConfig(config.config_file_name)
 
 # add your model's MetaData object here
@@ -68,6 +70,15 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
+    # 开机升级走 app/migrate.py：它自己开好连接（关掉外键、开好事务）递进来。
+    # 命令行（alembic revision --autogenerate）才走下面按 DATABASE_URL 连的那条
+    given = config.attributes.get("connection")
+    if given is not None:
+        context.configure(connection=given, target_metadata=target_metadata, render_as_batch=True)
+        with context.begin_transaction():
+            context.run_migrations()
+        return
+
     config.set_main_option("sqlalchemy.url", DATABASE_URL)
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
