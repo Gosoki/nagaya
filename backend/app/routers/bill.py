@@ -15,7 +15,7 @@ from app.services import bill as bill_svc
 from app.services import monthly as monthly_svc
 from app.services import ledger as ledger_svc
 
-router = APIRouter(prefix="/api", tags=["ledger"])
+router = APIRouter(prefix="/api", tags=["bill"])
 
 
 @router.get("/balances", response_model=BalancesOut)

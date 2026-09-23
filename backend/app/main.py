@@ -34,7 +34,7 @@ from app.services.backup import BackupError
 from app.services.bill import BillError
 from app.core.split import SplitError
 from app.init_db import init_db
-from app.routers import appearance, auth, backup, categories, entries, ledger, members, memos, prefs, settings
+from app.routers import appearance, auth, backup, bill, categories, entries, members, memos, prefs, settings
 from app.services.ledger import LedgerError
 
 log = logging.getLogger("nagaya")
@@ -268,7 +268,7 @@ def _id_too_big(request, exc):  # noqa: ANN001, ARG001
     """
     return _error_response(not_found("row"))
 
-for module in (auth, members, prefs, categories, entries, ledger, memos, settings, backup, appearance):
+for module in (auth, members, prefs, categories, entries, bill, memos, settings, backup, appearance):
     app.include_router(module.router)
 
 # 压缩。前面没有 nginx，没人替它压：流水 500 笔的 JSON 是 230KB（压完 18KB），
