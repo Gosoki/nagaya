@@ -105,14 +105,15 @@ def test_a_failing_upgrade_does_not_pile_up_snapshots(tmp_path: Path, monkeypatc
     db = tmp_path / "x.db"
     migrate.upgrade(db)
     con = sqlite3.connect(db)
-    con.execute("insert into bundle (title, created_at) values ('x', '2026-01-01 00:00:00')")
+    con.execute("insert into memo (title, body, display_order, created_at, updated_at) "
+                "values ('x', '', 0, '2026-01-01 00:00:00', '2026-01-01 00:00:00')")
     con.commit()
     con.close()
 
     def boom(*_a, **_k) -> None:
         raise RuntimeError("迁移在这本账上失败")
 
-    # 假装代码里多了一个 0002，而它在这本账上跑不过去
+    # 假装代码里多了一个新版本，而它在这本账上跑不过去
     monkeypatch.setattr(migrate, "head", lambda: "0002")
     monkeypatch.setattr(migrate.command, "upgrade", boom)
     for _ in range(3):

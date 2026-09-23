@@ -121,7 +121,6 @@ class EntryIn(SQLModel):
     to_member_id: Optional[int] = None
     member_ids: Optional[list[int]] = None
     rule: Optional[dict[str, Any]] = None
-    bundle_id: Optional[int] = None
     #: 幂等键（见 models.RequestKey）。同一个键只记一次，不落在 entry 上
     client_key: Optional[str] = Field(default=None, min_length=8, max_length=64)
 
@@ -146,7 +145,6 @@ class EntryPatch(SQLModel):
     to_member_id: Optional[int] = None
     member_ids: Optional[list[int]] = None
     rule: Optional[dict[str, Any]] = None
-    bundle_id: Optional[int] = None
 
     _amount_not_bool = field_validator("amount_jpy", mode="before")(_no_bool_amount)
 
@@ -165,7 +163,6 @@ class EntryOut(SQLModel):
     #: 所属那张账单的出账时刻。老账单的 label 是空的（名字由前端按出账日渲染），
     #: 只给 label 的话编辑页那条「这笔已经出过账」的提示永远拼不出来
     statement_cut_at: Optional[dt.datetime] = None
-    bundle_id: Optional[int]
     split_rule_json: dict[str, Any]
     note: str
     created_by: Optional[int]

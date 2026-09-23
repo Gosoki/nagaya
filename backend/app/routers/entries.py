@@ -139,7 +139,6 @@ def _create(session: Session, body: EntryIn, member: Member) -> Entry:
         category_id=body.category_id,
         title=body.title,
         note=body.note,
-        bundle_id=body.bundle_id,
         client_key=body.client_key,
     )
 

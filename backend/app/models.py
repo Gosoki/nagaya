@@ -292,22 +292,6 @@ class Statement(SQLModel, table=True):
     )
 
 
-class Bundle(SQLModel, table=True):
-    """光熱費套餐：一次录入电/煤/水/网多项，挂同一个 bundle 方便一起看、一起改。
-
-    **M3 的坑，现在还没人写它** —— 没有端点能建 Bundle，前端也从不设 bundle_id，
-    所以 entry.bundle_id 至今恒为 null。留着是因为 SPEC §5 就是这么规划的
-    （M3：光熱費套餐 / 复制上月 / 模板），不是忘了删。
-    真做的时候记得：ledger._check_refs 已经会验 bundle_id 存在性了。
-    """
-
-    __tablename__ = "bundle"
-
-    id: Optional[int] = Field(default=None, primary_key=True)
-    title: str
-    created_at: dt.datetime = Field(default_factory=now_utc)
-
-
 class Entry(SQLModel, table=True):
     """一笔账（支出 / 收入 / 转账三合一）。"""
 
@@ -329,19 +313,12 @@ class Entry(SQLModel, table=True):
     #: 出账时一次性打上，之后不再变 —— 账单是对「那一刻」的陈述。
     statement_id: Optional[int] = Field(default=None, foreign_key="statement.id", index=True)
 
-    # 光熱費套餐的坑（M3），至今恒为 null，见 Bundle 的 docstring
-
-    bundle_id: Optional[int] = Field(default=None, foreign_key="bundle.id", index=True)
-
     split_rule_json: dict[str, Any] = Field(
         default_factory=dict,
         sa_column=Column(JSON),
         description="原始规则，为了编辑时能把界面还原回去。真正的钱以 entry_share 为准",
     )
     note: str = ""
-    #: 收据照片。**M4 的坑**（SPEC §8「M4（可选）：统计图表、收据拍照…」），
-    #: 现在全项目没有一处读写它，EntryOut 也没带 —— 不是忘了删
-    receipt_path: Optional[str] = None
 
     created_by: Optional[int] = Field(default=None, foreign_key="member.id")
     created_at: dt.datetime = Field(default_factory=now_utc)
@@ -369,40 +346,13 @@ class EntryShare(SQLModel, table=True):
     amount_jpy: int = Field(description="这个人在这笔账里应担多少。可负")
 
 
-class Template(SQLModel, table=True):
-    """模板：房租这种固定额一键生成；光熱費套餐存 items_json。
-
-    **M3 的坑，一行代码都还没写** —— 没有端点、没有界面、表是空的。
-    留着是因为 SPEC §5 就是这么规划的（M3：光熱費套餐 / 复制上月 / 模板），
-    不是忘了删。
-    """
-
-    __tablename__ = "template"
-
-    id: Optional[int] = Field(default=None, primary_key=True)
-    name: str
-    kind: EntryKind = Field(default=EntryKind.expense)
-    category_id: Optional[int] = Field(default=None, foreign_key="category.id")
-    payer_default_id: Optional[int] = Field(default=None, foreign_key="member.id")
-    amount_default: Optional[int] = Field(default=None, description="房租这种固定额")
-    rule_json: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
-    items_json: Optional[list[dict[str, Any]]] = Field(
-        default=None, sa_column=Column(JSON), description="套餐模板：电/煤/水/网各一项"
-    )
-    display_order: int = Field(default=0)
-    archived: bool = Field(default=False)
-
-
 class Setting(SQLModel, table=True):
-    """key-value 配置。说明文字在 settings_spec.py，接口从那儿拿；
-    note_zh / note_ja 两列是早先存说明用的，现在没人读写（表结构不动，留着）。"""
+    """key-value 配置。每一项的类型、范围、中日文说明登记在 settings_spec.py，接口从那儿拿，不进库。"""
 
     __tablename__ = "setting"
 
     key: str = Field(primary_key=True)
     value_json: Any = Field(default=None, sa_column=Column(JSON))
-    note_zh: str = ""
-    note_ja: str = ""
     updated_at: dt.datetime = Field(default_factory=now_utc)
 
 

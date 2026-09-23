@@ -55,16 +55,6 @@ def test_absurd_amount_is_refused_not_crashed(session: Session, members) -> None
 # ---------------------------------------------------------------- 引用
 
 
-def test_unknown_bundle_is_a_400_not_a_foreign_key_crash(session: Session, members) -> None:
-    """bundle 是 _check_refs 唯一漏掉过的外键，乱指一个就撞穿约束返回 500。"""
-    a, *_ = members
-    c = _cat(session)
-    with pytest.raises(ledger.LedgerError) as e:
-        ledger.create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=TODAY,
-                            amount=100, payer_id=a.id, category_id=c.id, bundle_id=424242)
-    assert e.value.code == "unknown_bundle"
-
-
 def test_rule_naming_a_stranger_is_a_400_on_patch_too(session: Session, members) -> None:
     """同一个输入走 POST 是规矩的 400，走 PATCH 原来是 500。
 

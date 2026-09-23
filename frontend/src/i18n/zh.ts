@@ -260,7 +260,6 @@ export default {
     nothing_to_cut: '还没有待出账的账目',
     entry_deleted: '这笔账已经删掉了，先撤销删除再改',
     unknown_category: '分类不存在，刷新一下再试',
-    unknown_bundle: '套餐不存在',
     unknown_mode: '这条分摊规则用不了，去设置里改一下',
     unknown_remainder_to: '「余数归谁」这一项的值不对，去设置里改一下',
     duplicate_member: '参与人里有重复',

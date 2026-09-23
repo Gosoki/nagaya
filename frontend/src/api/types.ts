@@ -56,7 +56,6 @@ export interface Entry {
   statement_label: string | null
   /** 所属那张账单的出账时刻（naive UTC）。老账单 label 是空的，名字靠它渲染 */
   statement_cut_at?: string | null
-  bundle_id: number | null
   split_rule_json: Record<string, unknown>
   note: string
   created_by: number | null
@@ -195,7 +194,6 @@ export interface EntryPayload {
   to_member_id?: number | null
   member_ids?: number[] | null
   rule?: Record<string, unknown> | null
-  bundle_id?: number | null
   /** 幂等键：离线草稿补交时带着同一个，后端认出来就不再记第二遍 */
   client_key?: string
 }

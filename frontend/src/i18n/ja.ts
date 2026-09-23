@@ -260,7 +260,6 @@ export default {
     nothing_to_cut: '請求書にまとめる記録がまだありません',
     entry_deleted: 'この記録は削除済みです。元に戻してから編集してください',
     unknown_category: 'カテゴリが見つかりません。画面を更新してください',
-    unknown_bundle: 'セットが見つかりません',
     unknown_mode: 'この分担ルールは使えません。設定で直してください',
     unknown_remainder_to: '「端数を誰が負担するか」の値が不正です。設定で直してください',
     duplicate_member: '参加者が重複しています',

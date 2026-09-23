@@ -15,7 +15,6 @@ from sqlmodel import Session, select
 from app.core.rules import expand, mkey, named_members, participants, pick_rule
 from app.core.split import split
 from app.models import (
-    Bundle,
     Category,
     Entry,
     EntryKind,
@@ -112,9 +111,8 @@ def _check_refs(
     to_member_id: int | None = None,
     member_ids: Sequence[int] | None = None,
     category_id: int | None = None,
-    bundle_id: int | None = None,
 ) -> None:
-    """引用到的成员/分类/套餐必须真实存在。
+    """引用到的成员/分类必须真实存在。
 
     不查的话，不存在的 id 会一路撞到数据库的外键约束上，返回 500 ——
     客户端拿到的是一句「服务器错误」，既看不出是哪个字段，也不知道能不能重试。
@@ -127,10 +125,6 @@ def _check_refs(
             raise LedgerError("unknown_member", f"参与人不存在：{mid}", member_id=mid)
     if category_id is not None and session.get(Category, category_id) is None:
         raise LedgerError("unknown_category", f"分类不存在：{category_id}", category_id=category_id)
-    # bundle 是这里唯一漏掉过的外键：乱指一个 id 会一路撞到数据库的约束上返回 500，
-    # 而这个函数存在的全部理由就是别让那种事发生
-    if bundle_id is not None and session.get(Bundle, bundle_id) is None:
-        raise LedgerError("unknown_bundle", f"套餐不存在：{bundle_id}", bundle_id=bundle_id)
 
 
 def create_entry(
@@ -148,7 +142,6 @@ def create_entry(
     category_id: int | None = None,
     title: str = "",
     note: str = "",
-    bundle_id: int | None = None,
     client_key: str | None = None,
 ) -> Entry:
     """记一笔，并把分摊结果**固化**成 entry_share。
@@ -156,7 +149,7 @@ def create_entry(
     分摊只在这一刻算一次。之后改默认比例、加成员、删分类，这条账都不会变。
     """
     _check_refs(session, payer_id=payer_id, to_member_id=to_member_id,
-                member_ids=member_ids, category_id=category_id, bundle_id=bundle_id)
+                member_ids=member_ids, category_id=category_id)
     _validate_amount(kind, amount)
     _validate_text(title, note)
     _validate_date(on)
@@ -188,7 +181,6 @@ def create_entry(
         category_id=category_id,
         payer_id=payer_id,
         to_member_id=to_member_id,
-        bundle_id=bundle_id,
         split_rule_json=expanded,
         note=note,
         created_by=actor_id,
@@ -312,7 +304,7 @@ def update_entry(
     # PATCH 里**显式传 null** 的字段：不能留空的那几个一律当成错误挡下来。
     # 原来是直接 setattr 下去，title=None 撞 NOT NULL、kind=None 撞 _validate_amount，
     # 两条都是 500 —— 而客户端拿到「服务器错误」既看不出哪个字段，也不知道能不能重试。
-    # left_on / category_id / to_member_id / bundle_id 不在这张表里：它们**可以**被清空
+    # left_on / category_id / to_member_id 不在这张表里：它们**可以**被清空
     nulled = [k for k in _NOT_NULLABLE if k in fields and fields[k] is None]
     if nulled:
         raise LedgerError(
@@ -352,17 +344,16 @@ def update_entry(
     on = fields.get("date", entry.date)
     payer_id = fields.get("payer_id", entry.payer_id)
     to_member_id = fields.get("to_member_id", entry.to_member_id)
-    # **先验再改。** 原来先把 category_id / bundle_id 写到 entry 上再验：验的时候
+    # **先验再改。** 原来先把 category_id 写到 entry 上再验：验的时候
     # session.get() 触发 autoflush，把一个不存在的分类 id 先 UPDATE 进库 —— 撞外键，
     # 裸 500。同一个输入走 POST 是规规矩矩的 400 unknown_category
     _check_refs(session, payer_id=payer_id, to_member_id=to_member_id,
-                member_ids=member_ids, category_id=fields.get("category_id"),
-                bundle_id=fields.get("bundle_id"))
+                member_ids=member_ids, category_id=fields.get("category_id"))
     _validate_amount(kind, amount)
     _validate_text(fields.get("title", entry.title), fields.get("note", entry.note))
     _validate_date(on)
 
-    for key in ("title", "note", "category_id", "bundle_id"):
+    for key in ("title", "note", "category_id"):
         if key in fields:
             setattr(entry, key, fields[key])
 

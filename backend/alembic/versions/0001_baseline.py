@@ -1,11 +1,15 @@
-"""基线：2026-09-23 的整套表结构（D18 那天切 Alembic；当晚把 0001、0002 合成了这一份）。
+"""基线：2026-09-24 的整套表结构。
+
+历史：2026-09-23 切 Alembic（D18），当晚把最初的 0001、0002 合成一份；
+2026-09-24 删掉从没实现的表和列（template、bundle、entry.bundle_id / receipt_path、
+setting 的说明列）之后，又把那一步合了进来 —— 这份就是现在的样子。
 
 从空库建起。切 Alembic 之前 create_all 建的旧格式库（没有 alembic_version）
 **不再接管**：app/migrate.py 开机时认出来就拒绝启动，并说清为什么。
 
 Revision ID: 0001
 Revises:
-Create Date: 2026-09-23
+Create Date: 2026-09-24
 
 """
 from typing import Sequence, Union
@@ -30,13 +34,6 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
 
-    op.create_table('bundle',
-    sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('title', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.PrimaryKeyConstraint('id')
-    )
-
     op.create_table('member',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('name', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
@@ -58,8 +55,6 @@ def upgrade() -> None:
     op.create_table('setting',
     sa.Column('key', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('value_json', sa.JSON(), nullable=True),
-    sa.Column('note_zh', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-    sa.Column('note_ja', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('updated_at', sa.DateTime(), nullable=False),
     sa.PrimaryKeyConstraint('key')
     )
@@ -148,16 +143,13 @@ def upgrade() -> None:
     sa.Column('payer_id', sa.Integer(), nullable=False),
     sa.Column('to_member_id', sa.Integer(), nullable=True),
     sa.Column('statement_id', sa.Integer(), nullable=True),
-    sa.Column('bundle_id', sa.Integer(), nullable=True),
     sa.Column('split_rule_json', sa.JSON(), nullable=True),
     sa.Column('note', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-    sa.Column('receipt_path', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
     sa.Column('created_by', sa.Integer(), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=False),
     sa.Column('updated_at', sa.DateTime(), nullable=False),
     sa.Column('version', sa.Integer(), nullable=False),
     sa.Column('deleted_at', sa.DateTime(), nullable=True),
-    sa.ForeignKeyConstraint(['bundle_id'], ['bundle.id'], ),
     sa.ForeignKeyConstraint(['category_id'], ['category.id'], ),
     sa.ForeignKeyConstraint(['created_by'], ['member.id'], ),
     sa.ForeignKeyConstraint(['payer_id'], ['member.id'], ),
@@ -165,28 +157,11 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['to_member_id'], ['member.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_index('ix_entry_bundle_id', 'entry', ['bundle_id'], unique=False)
     op.create_index('ix_entry_category_id', 'entry', ['category_id'], unique=False)
     op.create_index('ix_entry_date', 'entry', ['date'], unique=False)
     op.create_index('ix_entry_kind', 'entry', ['kind'], unique=False)
     op.create_index('ix_entry_payer_id', 'entry', ['payer_id'], unique=False)
     op.create_index('ix_entry_statement_id', 'entry', ['statement_id'], unique=False)
-
-    op.create_table('template',
-    sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('name', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-    sa.Column('kind', sa.Enum('expense', 'income', 'settlement', name='entrykind'), nullable=False),
-    sa.Column('category_id', sa.Integer(), nullable=True),
-    sa.Column('payer_default_id', sa.Integer(), nullable=True),
-    sa.Column('amount_default', sa.Integer(), nullable=True),
-    sa.Column('rule_json', sa.JSON(), nullable=True),
-    sa.Column('items_json', sa.JSON(), nullable=True),
-    sa.Column('display_order', sa.Integer(), nullable=False),
-    sa.Column('archived', sa.Boolean(), nullable=False),
-    sa.ForeignKeyConstraint(['category_id'], ['category.id'], ),
-    sa.ForeignKeyConstraint(['payer_default_id'], ['member.id'], ),
-    sa.PrimaryKeyConstraint('id')
-    )
 
     op.create_table('entry_share',
     sa.Column('id', sa.Integer(), nullable=False),
