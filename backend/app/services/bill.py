@@ -39,7 +39,7 @@ from app.models import (
     jst_date,
     today_jst,
 )
-from app.services import ledger
+from app.services import audit, ledger
 from app.services import settings as settings_svc
 
 
@@ -499,7 +499,7 @@ def _really_changed(session: Session, touched: list[Entry], after_cut: tuple[Any
 
     n = 0
     for e in touched:
-        now = e.model_dump(mode="json") | {"shares": shares[e.id]}
+        now = audit.entry_snapshot(e, shares[e.id])   # 和审计写进去的 before 同一个形状
         was = at_cut.get(e.id)
         if was is None:
             same = now["deleted_at"] is not None
@@ -665,15 +665,8 @@ def cut_statement(
     ] if include_monthly else []
     statement.snapshot_json = snapshot
     session.add(statement)
-    session.add(
-        AuditLog(
-            member_id=actor_id,
-            action="cut_statement",
-            target_table="statement",
-            target_id=statement.id,
-            after_json={"label": statement.label, "entries": len(entries)},
-        )
-    )
+    audit.write(session, actor_id, "cut_statement", "statement", statement.id,
+                None, {"label": statement.label, "entries": len(entries)})
     session.commit()
     session.refresh(statement)
     return statement

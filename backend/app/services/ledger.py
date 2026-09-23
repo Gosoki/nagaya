@@ -5,19 +5,16 @@
 
 from __future__ import annotations
 
-import json
-
 import datetime as dt
 from typing import Any, Iterable, Sequence
 
 from sqlalchemy import func, union_all
 from sqlalchemy import update as sa_update
-from sqlmodel import Session, SQLModel, select
+from sqlmodel import Session, select
 
 from app.core.rules import expand, mkey, named_members, participants, pick_rule
 from app.core.split import split
 from app.models import (
-    AuditLog,
     Bundle,
     Category,
     Entry,
@@ -28,6 +25,7 @@ from app.models import (
     now_utc,
     today_jst,
 )
+from app.services import audit
 from app.services import settings as settings_svc
 
 
@@ -199,7 +197,7 @@ def create_entry(
     session.flush()
 
     _write_shares(session, entry, expanded, payer_id)
-    _audit(session, actor_id, "create", "entry", entry.id, None, _snapshot(session, entry))
+    audit.write(session, actor_id, "create", "entry", entry.id, None, audit.snapshot(session, entry))
     if client_key is not None:
         # 幂等键和这笔账**同一个事务**落库：分两次 commit 的话，第二次撞上锁超时或者
         # 进程重启，账记上了键却没存下，补交时照样再记一遍
@@ -292,68 +290,6 @@ def balances(session: Session) -> dict[int, int]:
     return {m: net.get(m, 0) for m in member_ids}
 
 
-# ------------------------------------------------------------------ 留痕
-
-
-def _snapshot(session: Session, entry: Entry) -> dict[str, Any]:
-    shares = session.exec(select(EntryShare).where(EntryShare.entry_id == entry.id)).all()
-    data = entry.model_dump(mode="json")
-    data["shares"] = {str(s.member_id): s.amount_jpy for s in shares}
-    return data
-
-
-def _audit(
-    session: Session,
-    actor_id: int | None,
-    action: str,
-    table: str,
-    target_id: int | None,
-    before: dict[str, Any] | None,
-    after: dict[str, Any] | None,
-) -> None:
-    session.add(
-        AuditLog(
-            at=now_utc(),
-            member_id=actor_id,
-            action=action,
-            target_table=table,
-            target_id=target_id,
-            before_json=before,
-            after_json=after,
-        )
-    )
-
-
-def audit_config(
-    session: Session,
-    actor_id: int | None,
-    action: str,
-    table: str,
-    target_id: int | None,
-    before: SQLModel | dict[str, Any] | None,
-    after: SQLModel | dict[str, Any] | None,
-    *,
-    drop: tuple[str, ...] = (),
-) -> None:
-    """成员、分类、设置这类**会影响分钱的配置**也留痕（不 commit，跟着调用方的那次）。
-
-    原来审计只盖 entry：谁把房租的默认分摊改了、谁把某人的搬出日往前挪了一个月、
-    谁把「余数归谁」换了 —— 这些都会让之后的每一笔账换一种分法，却查不到是谁动的。
-    `drop` 里的字段不进日志（密码哈希、头像这种）。
-    """
-
-    def plain(x: SQLModel | dict[str, Any] | None) -> dict[str, Any] | None:
-        if x is None:
-            return None
-        # 先排除再序列化：头像是二进制，交给 JSON 序列化会直接抛错
-        data = json.loads(x.model_dump_json(exclude=set(drop))) if isinstance(x, SQLModel) else dict(x)
-        for key in drop:
-            data.pop(key, None)
-        return data
-
-    _audit(session, actor_id, action, table, target_id, plain(before), plain(after))
-
-
 # ------------------------------------------------------------------ 改 / 删
 
 
@@ -407,7 +343,7 @@ def update_entry(
             got=version,
         )
     entry.version = version + 1     # ORM 手里那份跟上，后面 add() 才不会写回旧值
-    before = _snapshot(session, entry)
+    before = audit.snapshot(session, entry)
     prev_kind = entry.kind          # 下面几行就要被覆盖掉，先留一份
     prev_category_id = entry.category_id
 
@@ -479,7 +415,7 @@ def update_entry(
     session.flush()
 
     _write_shares(session, entry, expanded, payer_id)
-    after = _snapshot(session, entry)
+    after = audit.snapshot(session, entry)
     same = ("updated_at", "version")
     if {k: v for k, v in after.items() if k not in same} == {k: v for k, v in before.items() if k not in same}:
         # 原样点了一次「保存」：什么都没变，就当没来过 —— 不推 version（别让另一台正开着
@@ -487,7 +423,7 @@ def update_entry(
         session.rollback()
         session.refresh(entry)
         return entry
-    _audit(session, actor_id, "update", "entry", entry.id, before, after)
+    audit.write(session, actor_id, "update", "entry", entry.id, before, after)
     session.commit()
     session.refresh(entry)
     return entry
@@ -503,7 +439,7 @@ def delete_entry(
     """
     if entry.deleted_at is not None:
         return
-    before = _snapshot(session, entry)
+    before = audit.snapshot(session, entry)
     # **认领和删除是一条 UPDATE**（和 update_entry 同一个写法）：先读 version 再写的话，
     # 中间正好有人出账或者改了这笔，核过的 version 就不作数了 —— 刚发出去的账单
     # 上的一笔被删掉，也没有 409
@@ -524,7 +460,7 @@ def delete_entry(
     # version 也推进了：别人手里那份就此过期。不推的话，另一台手机拿着删除前的
     # version 去改，乐观锁还以为没人动过
     session.refresh(entry)
-    _audit(session, actor_id, "delete", "entry", entry.id, before, None)
+    audit.write(session, actor_id, "delete", "entry", entry.id, before, None)
     session.commit()
 
 
@@ -537,5 +473,5 @@ def restore_entry(session: Session, entry: Entry, *, actor_id: int | None) -> No
     entry.deleted_at = None
     entry.version += 1
     session.add(entry)
-    _audit(session, actor_id, "restore", "entry", entry.id, None, _snapshot(session, entry))
+    audit.write(session, actor_id, "restore", "entry", entry.id, None, audit.snapshot(session, entry))
     session.commit()

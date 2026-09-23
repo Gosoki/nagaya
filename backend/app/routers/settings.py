@@ -12,6 +12,7 @@ from app.db import get_session
 from app.errors import AppError, not_found
 from app.models import Category, Member, today_jst
 from app.schemas import SettingIn, SettingOut
+from app.services import audit
 from app.services import ledger as ledger_svc
 from app.services import settings as settings_svc
 from app.services.backup import resolve_backup_path as backup_dir_for
@@ -134,7 +135,7 @@ def update_setting(
 
     # 留痕：余数归谁、兜底规则、默认垫付人这些一改，之后每一笔都换一种分法。
     # set_ 自己 commit，审计那一行跟着它一起进库
-    ledger_svc.audit_config(
+    audit.config(
         session, me.id, "update", "setting", None,
         {"key": key, "value": settings_svc.get(session, key)}, {"key": key, "value": value},
     )

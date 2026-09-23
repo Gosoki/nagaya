@@ -14,7 +14,7 @@ from app.models import Member, free_color
 from app.routers.auth import to_member_out
 from app.routers.appearance import IMAGE_FORMATS, MAX_PIXELS
 from app.schemas import MemberIn, MemberOut
-from app.services import ledger
+from app.services import audit
 
 #: 成员这张表进审计时不带的字段：密码哈希不该躺在日志里，头像是一坨二进制
 _NOT_AUDITED = ("password_hash", "avatar")
@@ -61,7 +61,7 @@ def create_member(
     member.password_hash = hash_password(body.password)   # 空密码上面已经挡掉了
     session.add(member)
     session.flush()
-    ledger.audit_config(session, actor.id, "create", "member", member.id, None, member, drop=_NOT_AUDITED)
+    audit.config(session, actor.id, "create", "member", member.id, None, member, drop=_NOT_AUDITED)
     session.commit()
     session.refresh(member)
     return to_member_out(member)
@@ -136,10 +136,10 @@ def update_member(
         member.password_hash = hash_password(body.password)
     session.add(member)
     after = member.model_copy()
-    ledger.audit_config(session, me.id, "update", "member", member.id, before, after, drop=_NOT_AUDITED)
+    audit.config(session, me.id, "update", "member", member.id, before, after, drop=_NOT_AUDITED)
     if body.password:
         # 改密码只记「改了」，不记任何和密码有关的值
-        ledger.audit_config(session, me.id, "password", "member", member.id, None, {"password_changed": True})
+        audit.config(session, me.id, "password", "member", member.id, None, {"password_changed": True})
     session.commit()
     session.refresh(member)
     return to_member_out(member, viewer=me.id)

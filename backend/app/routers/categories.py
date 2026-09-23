@@ -10,7 +10,7 @@ from app.db import get_session
 from app.errors import AppError, not_found, reject_nulls
 from app.models import Category, Member
 from app.schemas import CategoryIn, CategoryOut
-from app.services import ledger
+from app.services import audit
 
 router = APIRouter(prefix="/api/categories", tags=["categories"])
 
@@ -76,7 +76,7 @@ def create_category(
     row = Category(**body.model_dump(exclude_none=True))
     session.add(row)
     session.flush()
-    ledger.audit_config(session, me.id, "create", "category", row.id, None, row)
+    audit.config(session, me.id, "create", "category", row.id, None, row)
     session.commit()
     session.refresh(row)
     return row
@@ -106,7 +106,7 @@ def update_category(
     for key, value in data.items():
         setattr(row, key, value)
     session.add(row)
-    ledger.audit_config(session, me.id, "update", "category", row.id, before, row)
+    audit.config(session, me.id, "update", "category", row.id, before, row)
     session.commit()
     session.refresh(row)
     return row
