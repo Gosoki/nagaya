@@ -1,4 +1,4 @@
-"""HTTP 层回归：认证、错误码、乐观锁、关账保护。"""
+"""HTTP 层回归：认证、错误码、乐观锁、成员 / 头像 / 偏好接口。"""
 
 from __future__ import annotations
 

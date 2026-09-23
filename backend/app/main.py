@@ -156,8 +156,8 @@ app = FastAPI(title="nagaya 長屋", description="合租记账", version="0.1.0"
 
 #: 请求体上限。原来没有：未登录的请求就能 POST 一个几个 G 的体，
 #: 在鉴权之前就被整个读进内存/临时文件，把进程或磁盘撑满。
-#: 头像和 App 图标自己有 5MB 的闸（带文案），这里给它们留到 16MB，
-#: 让 5〜16MB 的照片还能走到那道闸、拿到「图片不能超过 5MB」那句话
+#: 头像和 App 图标各有自己带文案的闸（members.MAX_AVATAR_BYTES 1MB、appearance.MAX_ICON_BYTES 2MB），
+#: 这里给这两条路留到 16MB，让超了自己那道闸的图还能走到那儿、拿到带上限的那句话
 MAX_BODY = 1024 * 1024
 MAX_UPLOAD_BODY = 16 * 1024 * 1024
 

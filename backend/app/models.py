@@ -272,7 +272,7 @@ class Statement(SQLModel, table=True):
     __tablename__ = "statement"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    label: str = Field(index=True, description="'9/28 出账'，给人看的")
+    label: str = Field(index=True, description="出账时存空串（接口不收名字），展示名由前端按 cut_at 渲染（src/statement.ts）；老库里的「M/D 出账」前端照样认")
     cut_at: dt.datetime = Field(default_factory=now_utc, index=True, description="划线的那一刻")
     #: 覆盖期的**起点是上一次出账那天**，不是这张单子里最早那笔的日期。
     #: 「7 月那张从 7/2 开始」是错觉 —— 7/1 只是没人花钱，它管的是 6/30 出账之后的一切。
@@ -314,7 +314,7 @@ class Entry(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     kind: EntryKind = Field(default=EntryKind.expense, index=True)
-    date: dt.date = Field(index=True, description="费用发生日 / 转账日。归期只看它")
+    date: dt.date = Field(index=True, description="费用发生日 / 转账日。归哪张账单看 statement_id，不看它；固定费出账时盖成出账日（D30）")
     title: str = Field(default="", description="选填，粗放写法即可（「日用品」就够）")
     amount_jpy: int = Field(description="整数日元。收入为负。禁 float")
 
@@ -328,7 +328,7 @@ class Entry(SQLModel, table=True):
     #: 出账时一次性打上，之后不再变 —— 账单是对「那一刻」的陈述。
     statement_id: Optional[int] = Field(default=None, foreign_key="statement.id", index=True)
 
-    # 仅用于账单上标注「含 7–8 月水费」「10月分 房租」，不参与任何计算（SPEC §4.4）
+    # 光熱費套餐的坑（M3），至今恒为 null，见 Bundle 的 docstring
 
     bundle_id: Optional[int] = Field(default=None, foreign_key="bundle.id", index=True)
 
@@ -413,7 +413,7 @@ class AuditLog(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     at: dt.datetime = Field(default_factory=now_utc, index=True)
     member_id: Optional[int] = Field(default=None, foreign_key="member.id", index=True)
-    action: str = Field(index=True, description="create / update / delete / restore / close_period / reopen_period …")
+    action: str = Field(index=True, description="create / update / delete / restore / cut_statement / password")
     target_table: str = Field(index=True)
     target_id: Optional[int] = Field(default=None, index=True)
     before_json: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
