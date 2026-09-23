@@ -109,7 +109,7 @@ export default defineConfig({
     proxy: { '/api': 'http://localhost:8000' },
   },
   build: {
-    outDir: 'dist/pwa',   // 后端 main.py 就挂这个目录，单端口部署
+    outDir: 'dist/pwa',   // 后端 app/spa.py 挂这个目录（main.py 调 spa.mount），单端口部署
     rollupOptions: {
       output: {
         // 框架（Vue、路由、Pinia、vue-i18n）单独一块。原来它和文案、API 客户端打在一起，

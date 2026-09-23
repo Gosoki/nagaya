@@ -54,7 +54,8 @@ def error_response(exc: Any) -> JSONResponse:
     """业务错误 → `{code, message, detail}`。
 
     exc 是 main.py 注册的那六族之一（都带 code / detail）。参数不写成那几个类：
-    那样 errors.py 就得反过来 import services，而 services 本来就 import 这里。
+    那样 errors.py 就得反过来 import services —— 它是 auth、中间件、路由共用的底层模块，
+    不该依赖业务层。
     """
     # AppError 自己带状态码（404/403/409 都有），别的那几种统一 400，
     # 只有 version_conflict 要 409 —— 前端靠它知道该刷新再重试

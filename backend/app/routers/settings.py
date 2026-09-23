@@ -20,7 +20,7 @@ from app.settings_spec import SETTINGS_SPEC
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
-#: 前端产物所在的整个前端目录（main.py 里 DIST 的上两级）。备份不许落在这下面
+#: 前端产物所在的整个前端目录（app/spa.py 里 DIST 的上两级）。备份不许落在这下面
 WEB_ROOT = (Path(__file__).resolve().parents[3] / "frontend").resolve()
 
 
