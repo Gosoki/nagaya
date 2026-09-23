@@ -971,8 +971,12 @@ function doCut() {
   // 电、气、水在日本是三张分开寄的账单，到得不齐是常态；漏一项就是这张单子
   // 少收几千日元，而且要等发进 LINE 群之后才有人发现，三个人的转账方案得推倒重来。
   // 日常编辑时「空框＝0，不出声」是对的，但出账是不可逆的那一步，这儿不该继续沉默
+  // 开了「和上期一样」、这期还没记的：出账这一步多给一个勾（默认勾上）替人按上期记上。
+  // 这一步原来是打开账单页就自动做的，改成人点之后，忘了点就是房租按 0 出账 ——
+  // 所以在出账这道门口再问一次，而不是只在上面列成一个空框
+  const carryable = (bills.monthly.draft?.rows ?? []).filter((r) => r.carry_amount && !r.amount)
   const blank = (bills.monthly.draft?.rows ?? [])
-    .filter((r) => !r.archived && !r.amount)
+    .filter((r) => !r.archived && !r.amount && !r.carry_amount)
     .map((r) => r.name)
   if (blank.length) hints.push(t('bill.cutBlankFixed', { names: blank.join('、') }))
   // 开 html 只为换行，每一段都先转义：固定费的名字是用户起的，
@@ -985,11 +989,35 @@ function doCut() {
     cancel: true,
     options: {
       type: 'checkbox',
-      model: withMonthlyByDefault ? ['monthly'] : [],
-      items: [{ label: t('bill.includeMonthly'), value: 'monthly' }],
+      model: [...(withMonthlyByDefault ? ['monthly'] : []), ...(carryable.length ? ['carry'] : [])],
+      items: [
+        { label: t('bill.includeMonthly'), value: 'monthly' },
+        ...(carryable.length
+          ? [{
+              label: t('bill.cutCarry', {
+                list: carryable.map((r) => `${r.name} ${formatYen(r.carry_amount ?? 0)}`).join('、'),
+              }),
+              value: 'carry',
+            }]
+          : []),
+      ],
     },
   }).onOk(async (picked: string[]) => {
     try {
+      if (picked.includes('carry')) {
+        // 先记上再出账。记不上（断网、后端出错）就整个停下：
+        // 带着一个空的房租把账单出掉，比晚一步出账糟糕得多
+        const { failed } = await api.post<{ failed: { name: string }[] }>('/api/monthly/carry', {
+          category_ids: carryable.map((r) => r.category_id),
+        })
+        if (failed.length) {
+          $q.notify({
+            type: 'warning',
+            timeout: 8000,
+            message: t('monthly.carryFailed', { list: failed.map((f) => f.name).join('、') }),
+          })
+        }
+      }
       const withMonthly = picked.includes('monthly')
       const st = await api.post<Statement>(`/api/statements?include_monthly=${withMonthly}`)
       // 出完账立刻把「谁给谁多少」摆出来 —— 这是出账之后马上要做的事，

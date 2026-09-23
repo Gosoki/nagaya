@@ -9,8 +9,10 @@
   1. **不填就是 0，而且照样能出账。**
      这一屏不摆「上期是多少」当参考 —— 参考值就在输入框那个位置，
      长得跟亲手填的没两样，某个月忘了改就带着上月的电费把账单发出去了。
-     每期真的不变的项（房租这种）去设置里开「和上期一样」，出账前自动记成
-     **黑字实数**，而且当场报出来；没开的项空着就空着，按 0 结。
+     每期真的不变的项（房租这种）去设置里开「和上期一样」：面板顶上列出来
+     「会按上期记多少」，**人点一下**才记成黑字实数（出账对话框里也有一个勾）。
+     原来是打开账单页就自动记 —— 看一眼和记了几笔钱分不开。
+     没开的项空着就空着，按 0 结。
 
   2. **改金额绝不能顺手改掉别的字段。**
      这一屏没有付款人选择器。以前 PATCH 复用 EntryIn（payer_id 必填），
@@ -37,6 +39,22 @@
       <!-- 占位：已出账那页这里是个 chevron。留出同样宽度，两页的合计才对齐 -->
       <q-item-section side><q-icon name="chevron_right" size="18px" class="invisible" /></q-item-section>
     </q-item>
+
+    <!-- 「和上期一样」的那几项：写明点下去记哪几项、多少钱，人点了才记 -->
+    <div v-if="carryReady.length" class="carry-bar row items-center no-wrap">
+      <div class="col carry-text">{{ t('monthly.carryReady', { list: carryList(carryReady) }) }}</div>
+      <q-btn
+        dense unelevated no-caps color="primary"
+        class="q-ml-sm"
+        :loading="carrying"
+        :label="t('monthly.carryDo')"
+        @click="carry"
+      />
+    </div>
+    <!-- 开了开关却照抄不了的：原来是每次打开页面弹一次提示，现在一直写在这儿，填了就消失 -->
+    <div v-if="carryBlocked.length" class="carry-bar carry-blocked">
+      {{ t('monthly.carryBlocked', { list: carryBlocked.map((r) => r.name).join('、') }) }}
+    </div>
 
     <q-list separator>
       <q-expansion-item
@@ -358,25 +376,41 @@ onMounted(() => {
     build(cached)
     void hydratePayers()
   }
-  void load().then(carry)
+  void load()
 })
 
 /**
- * 把「和上期一样」的那几项按上期金额记进来。
+ * 「和上期一样」这一下能记哪几项。正在手填的行不算 —— 按钮上没写它，
+ * 点下去也就不记它（后端按传过去的 category_ids 只记这几项）
+ */
+const carryReady = computed(() =>
+  historic.value ? [] : rows.value.filter((r) => r.carry_amount && r.entry_id === null && !r.dirty && !r.text),
+)
+const carryBlocked = computed(() =>
+  historic.value ? [] : rows.value.filter((r) => r.carry_blocked && r.entry_id === null && !r.dirty && !r.text),
+)
+const carryList = (list: Row[]) => list.map((r) => `${r.name} ${formatYen(r.carry_amount ?? 0)}`).join('、')
+const carrying = ref(false)
+
+/**
+ * 把「和上期一样」的那几项按上期金额记进来。**人点了才记。**
  *
  * **记了就得说出来。**「上次的金额只作灰色占位」那条规矩的全部理由，就是
  * 「预填的数字长得跟亲手填的一模一样，某个月忘了改也没人看得出」。
- * 这个开关是那条规矩唯一的出口，所以自动记的每一笔都当场报出来。
- * 翻旧账单时不碰：那张单子早就出过了。
+ * 这个开关是那条规矩唯一的出口，所以记上的每一笔都当场报出来。
  */
 async function carry() {
-  if (historic.value) return
+  if (historic.value || carrying.value) return
+  carrying.value = true
   try {
     const { created, failed } = await api.post<{
       created: { name: string; amount: number }[]
       failed: { name: string }[]
-    }>('/api/monthly/carry')
-    if (!created.length && !failed.length) return
+    }>('/api/monthly/carry', { category_ids: carryReady.value.map((r) => r.category_id) })
+    if (!created.length && !failed.length) {
+      await load()
+      return
+    }
     await load()
     if (created.length) {
       emit('saved')
@@ -408,6 +442,8 @@ async function carry() {
       timeout: 6000,
       message: `${t('monthly.title')}: ${e instanceof ApiError ? e.text : String(e)}`,
     })
+  } finally {
+    carrying.value = false
   }
 }
 
@@ -748,6 +784,17 @@ defineExpose({ reload: load })
   transition: box-shadow 0.15s;
 }
 .amount-input:focus { box-shadow: inset 0 0 0 1.5px var(--nagaya-accent); }
+/* 「和上期一样」那条：压在标题下面、列表上面，淡主题色底 */
+.carry-bar {
+  margin: 0 12px 8px;
+  padding: 8px 10px 8px 12px;
+  border-radius: var(--nagaya-r-sm);
+  background: var(--nagaya-accent-bg);
+  font-size: var(--nagaya-fs-label);
+  line-height: 1.45;
+}
+.carry-text { color: var(--nagaya-ink); }
+.carry-blocked { background: var(--nagaya-warn-bg); color: var(--nagaya-warn); }
 /* 灰色占位＝还没填，不是值。改过的才变实色 */
 .amount-input::placeholder { color: var(--nagaya-ink-5); }
 /* **没存上的样子不能借主色。** 原来是蓝下划线 + 加粗，看着像「存好了」，

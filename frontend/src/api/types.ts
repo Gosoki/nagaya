@@ -156,6 +156,10 @@ export interface MonthlyRow {
   date: string | null
   /** 本期这个分类一共有几笔。>1 说明这一行没显示全 */
   entry_count: number
+  /** 点「按上期记上」会记多少。草稿里开了「和上期一样」、本期还没处理过的才有 */
+  carry_amount?: number | null
+  /** 开了「和上期一样」却不能照抄的原因（payer_left / rule_stale），得人自己填 */
+  carry_blocked?: string | null
 }
 
 export interface MonthlyData {

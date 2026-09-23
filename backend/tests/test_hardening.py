@@ -383,7 +383,8 @@ def test_the_opening_balance_is_read_in_one_statement(session: Session, members)
 def test_two_people_opening_the_bill_page_at_once_do_not_double_the_rent(tmp_path) -> None:
     """群里一句「出账了」，三个人同时点开账单页 —— 房租不能记两笔。
 
-    账单页一挂载就 POST /api/monthly/carry（MonthlyFixed.vue 的 onMounted）。
+    原来账单页一挂载就 POST /api/monthly/carry；现在改成人点按钮，两个人同时点、
+    或者一个人连点照样是这条路。
     「读一遍本期已经有哪几项 → 把缺的记上」中间隔着几十毫秒，两个请求都会在对方
     commit 之前读到「本期还没记房租」。面板一行只显示得下一笔，所以屏幕上金额是对的、
     合计是两倍 —— 用户得自己去账目列表里翻出那笔重复的删掉。

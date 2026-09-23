@@ -1019,7 +1019,7 @@ test('固定费项目在设置里管：加、删、和上期一样', async ({ pa
     { headers, data: { same_as_last: false } })
 })
 
-test('「和上期一样」：只搬开了开关的那几项，而且要说出来', async ({ page }) => {
+test('「和上期一样」：只列开了开关的那几项，人点了才记，而且要说出来', async ({ page }) => {
   await login(page)
   const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
   const cats = await (await page.request.get('/api/categories', { headers })).json()
@@ -1037,18 +1037,26 @@ test('「和上期一样」：只搬开了开关的那几项，而且要说出�
   expect(await draftOf(rent.id), '出完账草稿该是空的').toBeFalsy()
 
   await page.goto('/bill')
-  // 自动记的钱必须当场报出来 —— 悄悄填上正是那条规矩要防的事
+  // **看一眼不许记钱**：面板顶上列出「会按上期记多少」，人点了才记
+  const bar = page.locator('.carry-bar').first()
+  await expect(bar).toContainText('房租')
+  await expect(bar).not.toContainText('燃气')
+  expect(await draftOf(rent.id), '打开账单页就记钱的话，看一眼和记账分不开').toBeFalsy()
+
+  // 记了就当场报出来 —— 悄悄填上正是那条规矩要防的事
+  await bar.getByRole('button', { name: '按上期记上' }).click()
   await expect(page.locator('.q-notification')).toContainText('按上期金额记上了')
   await expect(page.locator('.q-notification')).toContainText('房租')
   await expect.poll(async () => (await draftOf(rent.id))?.amount_jpy).toBeTruthy()
   expect(await draftOf(gas.id), '没开开关的一分都不许自动记').toBeFalsy()
+  await expect(page.locator('.carry-bar')).toHaveCount(0)
 
-  // **删掉之后不许复活。** 这个月真的没有房租时，用户删掉它 ——
-  // 而面板每挂载一次就调一次 carry，不挡住的话他永远删不掉
+  // **删掉之后不许复活。** 这个月真的没有房租时，用户删掉它 —— 按钮上也不该再出现它
   const carried = await draftOf(rent.id)
   await page.request.delete(`/api/entries/${carried.id}`, { headers })
   await page.reload()
   await expect(page.locator('.wrap')).toBeVisible()
+  await expect(page.locator('.carry-bar')).toHaveCount(0)
   await expect.poll(async () => (await draftOf(rent.id))?.amount_jpy).toBeFalsy()
 
   await page.request.patch(`/api/categories/${rent.id}`, { headers, data: { same_as_last: false } })

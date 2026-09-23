@@ -518,3 +518,59 @@ def test_unrecorded_row_starts_from_last_periods_payer_and_split(session: Sessio
     assert row["amount"] is None
     assert row["last_payer_id"] == b.id
     assert row["rule"]["adjustments"] == {str(a.id): 5_000, str(c_.id): -5_000}
+
+
+def test_the_panel_sees_what_carry_would_record_without_recording_it(session: Session, members) -> None:
+    """「和上期一样」改成人点之后，面板得先看得到点下去会记什么 —— 而且光看不许记。"""
+    a, *_ = members
+    c = cats(session)
+    for name, amount in [("家賃", 120_000), ("電気", 8_000)]:
+        create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG,
+                     amount=amount, payer_id=a.id, category_id=c[name].id)
+    cut_statement(session, actor_id=a.id)
+    c["家賃"].same_as_last = True
+    session.add(c["家賃"])
+    session.commit()
+
+    rows = rows_by_name(session)
+    assert rows["家賃"]["carry_amount"] == 120_000
+    assert rows["家賃"]["carry_blocked"] is None
+    assert rows["電気"]["carry_amount"] is None, "没开开关的不许出现在按钮上"
+    assert rows["家賃"]["amount"] is None and unbilled(session) == [], "看一眼不许记钱"
+
+    made = carry_same_as_last(session, actor_id=a.id)["created"]
+    assert [m["amount"] for m in made] == [120_000]
+    assert rows_by_name(session)["家賃"]["carry_amount"] is None, "记过了，按钮上就不该再有它"
+
+
+def test_carry_only_records_what_the_button_listed(session: Session, members) -> None:
+    """点的那一刻有一行正在手填：它不在按钮上，就不许被记（手填的一存就是两笔）。"""
+    a, *_ = members
+    c = cats(session)
+    for name in ("家賃", "水道"):
+        create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG,
+                     amount=50_000, payer_id=a.id, category_id=c[name].id)
+        c[name].same_as_last = True
+        session.add(c[name])
+    session.commit()
+    cut_statement(session, actor_id=a.id)
+
+    made = carry_same_as_last(session, actor_id=a.id, only={c["家賃"].id})["created"]
+    assert [m["name"] for m in made] == ["家賃"]
+    assert rows_by_name(session)["水道"]["amount"] is None
+
+
+def test_carry_endpoint_takes_an_optional_list(client, auth, session, members) -> None:
+    c = cats(session)
+    a, *_ = members
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG,
+                 amount=50_000, payer_id=a.id, category_id=c["家賃"].id)
+    c["家賃"].same_as_last = True
+    session.add(c["家賃"])
+    session.commit()
+    cut_statement(session, actor_id=a.id)
+
+    r = client.post("/api/monthly/carry", headers=auth, json={"category_ids": []})
+    assert r.status_code == 200 and r.json()["created"] == [], "给了空列表就一项都不记"
+    r = client.post("/api/monthly/carry", headers=auth)
+    assert [m["name"] for m in r.json()["created"]] == ["家賃"], "不带 body 还是全部能记的"

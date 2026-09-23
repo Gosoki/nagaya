@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, status
 from sqlmodel import Session, select
 
@@ -8,7 +10,7 @@ from app.db import get_session
 from app.errors import not_found
 from app.models import Member, Statement, today_jst
 from app.routers.entries import to_entry_out
-from app.schemas import BalancesOut, ConfirmIn, EntryOut, StatementOut
+from app.schemas import BalancesOut, CarryIn, ConfirmIn, EntryOut, StatementOut
 from app.services import bill as bill_svc
 from app.services import ledger as ledger_svc
 
@@ -47,10 +49,15 @@ def monthly(
 
 @router.post("/monthly/carry")
 def carry_monthly(
+    body: Optional[CarryIn] = None,
     session: Session = Depends(get_session),
     member: Member = Depends(current_member),
 ) -> dict:
     """把「和上期一样」的固定费按上期金额记进当前草稿。
+
+    **由人点，不再挂在页面挂载上**：固定费面板上的「按上期记上」，或者出账对话框里
+    那个勾。打开账单页就记钱的话，「看一眼」和「记了几笔」分不开。
+    会记哪几项、多少钱，面板先从 /monthly 的 carry_amount 看到。
 
     只动明确开了那个开关的项；已经录过的、以及**本期手动删掉的**一律不碰。
 
@@ -58,7 +65,8 @@ def carry_monthly(
     自动记的钱必须让人看见（这是那个开关唯一的出口），而搬不过来的那几项
     同样必须让人看见 —— 否则「自动记账已经停了」这件事没有任何人会知道。
     """
-    return bill_svc.carry_same_as_last(session, actor_id=member.id)
+    only = set(body.category_ids) if body is not None and body.category_ids is not None else None
+    return bill_svc.carry_same_as_last(session, actor_id=member.id, only=only)
 
 
 @router.get("/statements", response_model=list[StatementOut])

@@ -645,8 +645,8 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
     """每月一次的固定项在某张账单里的状态。statement 传 None ＝ 当前草稿。
 
     **没录的就是没录，amount 给 None**，界面上是个空框，出账时按 0 算。
-    这里不给「上次记了多少」当参考：要每期自动填上的项，去分类上开
-    `same_as_last`，由 carry_same_as_last 记成**真值**（黑字，看得见）。
+    这里不给「上次记了多少」当参考：要每期照抄的项，去分类上开 `same_as_last`，
+    再由人在面板上点「按上期记上」（carry_same_as_last）记成**真值**（黑字，看得见）。
     """
     # 翻历史账单时**连归档的也要列**：那张单子上真有这笔钱，总额里也算着它。
     # 只按「现在还没归档」过滤的话，归档一个分类会让它名下的旧账凭空消失，
@@ -681,6 +681,14 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
     # 人变了（有人搬走/搬进来）就不抄：退回分类默认，由人自己重新定
     last = _last_billed(session, [c.id for c in categories]) if statement is None else {}
     active = {m.id for m in ledger.active_members(session, today_jst())} if statement is None else set()
+    # 「和上期一样」这一步现在要人点（面板上那个按钮、出账时那个勾），
+    # 所以得先告诉界面：点下去会记哪几项、多少钱，哪几项记不了
+    ready: dict[int, int] = {}
+    blocked: dict[int, str] = {}
+    if statement is None:
+        todo, failed = _carry_plan(session)
+        ready = {c.id: prev.amount_jpy for c, prev, _, _ in todo}
+        blocked = {f["category_id"]: f["reason"] for f in failed}
     rows = []
     for c in categories:
         entry = mine.get(c.id)
@@ -718,6 +726,10 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
                 "date": entry.date.isoformat() if entry else None,
                 #: 本期这个分类一共有几笔。>1 说明面板没显示全，界面上必须提示
                 "entry_count": dup.get(c.id, 0),
+                #: 按「和上期一样」点一下会记多少（只有草稿、开了开关、本期还没处理过的才有）
+                "carry_amount": ready.get(c.id),
+                #: 开了开关却记不了的原因（payer_left / rule_stale），要人自己填
+                "carry_blocked": blocked.get(c.id),
             }
         )
 
@@ -731,16 +743,19 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
 
 
 #: carry 这件事整个进程里一次只许跑一个。
-#: 「读一遍本期已经有哪几项 → 把缺的记上」中间隔着好几十毫秒，而触发它的是
-#: 账单页挂载（MonthlyFixed.vue 的 onMounted）—— 群里一句「出账了」，三个人同时点开，
-#: 两个请求都在对方 commit 之前读到「本期还没记房租」，于是各记一笔，当期房租翻倍。
+#: 「读一遍本期已经有哪几项 → 把缺的记上」中间隔着好几十毫秒。原来触发它的是
+#: 账单页挂载 —— 群里一句「出账了」，三个人同时点开，两个请求都在对方 commit
+#: 之前读到「本期还没记房租」，于是各记一笔，当期房租翻倍。现在改成人点按钮了，
+#: 可两个人同时点、或者一个人连点照样会撞，锁留着。
 #: 面板一行只显示得下一笔，屏幕上的金额还是对的、合计却是两倍。
 #: 服务是单端口单进程（见 main.py 的 _daily_backup），一把进程内的锁就够；
 #: 不加唯一索引 —— 同一分类手工记两笔是合法的（entry_count 就是为它准备的）
 _carry_lock = threading.Lock()
 
 
-def carry_same_as_last(session: Session, *, actor_id: int | None) -> dict[str, Any]:
+def carry_same_as_last(
+    session: Session, *, actor_id: int | None, only: set[int] | None = None
+) -> dict[str, Any]:
     """把「和上期一样」的固定费按上期金额记进当前草稿。
 
     **只动明确开了这个开关的项**。默认全是关的：「上次的金额只作灰色占位」
@@ -748,7 +763,8 @@ def carry_same_as_last(session: Session, *, actor_id: int | None) -> dict[str, A
     电费燃气水费恰恰每期都不一样，给它们开这个等于把那条规矩废掉。
 
     已经录过的一律不碰；从来没出过账的（没有上期金额可抄）跳过。
-    **本期手动删掉的也不碰** —— 否则每打开一次账单页就复活一次，用户删不掉。
+    **本期手动删掉的也不碰** —— 否则每点一次就复活一次，用户删不掉。
+    `only` 给了就只记这几个分类（面板上列出来的那几项）。
 
     返回 `{"created": [...], "failed": [...]}`：记了哪几笔要说出来（自动记的钱
     必须看得见），**搬不过来的也要说出来**（「自动记账已经停了」同样必须看得见）。
@@ -758,10 +774,17 @@ def carry_same_as_last(session: Session, *, actor_id: int | None) -> dict[str, A
     屏幕上那几行还是空框，用户照着空框再填一遍，同一分类当期就有了两笔。
     """
     with _carry_lock:
-        return _carry(session, actor_id=actor_id)
+        return _carry(session, actor_id=actor_id, only=only)
 
 
-def _carry(session: Session, *, actor_id: int | None) -> dict[str, Any]:
+def _carry_plan(
+    session: Session,
+) -> tuple[list[tuple[Category, Entry, int | None, dict[str, Any] | None]], list[dict[str, Any]]]:
+    """算一遍「和上期一样」**现在点下去**会记哪几项。不写库。
+
+    返回 (要记的, 记不了的)。要记的每项是 (分类, 上期那一笔, 垫付人, 分摊规则)。
+    面板预览和真正去记走的是同一个函数 —— 按钮上写的和点下去记的不会是两份口径。
+    """
     categories = list(
         session.exec(
             select(Category).where(
@@ -772,10 +795,10 @@ def _carry(session: Session, *, actor_id: int | None) -> dict[str, Any]:
         )
     )
     if not categories:
-        return {"created": [], "failed": []}
+        return [], []
 
     # 「本期已经处理过」＝ 录了 **或者** 手动删掉了。
-    # 只看 unbilled() 的话删掉的那笔不在里面，下次挂载面板又给它记回来。
+    # 只看 unbilled() 的话删掉的那笔不在里面，下次一点又给它记回来。
     #
     # 「本期」要按**上次出账那一刻**卡：草稿里删掉的账目 statement_id 恒为 NULL，
     # 光看这一条的话，半年前删过一次的分类会从此**永远**不再自动记 ——
@@ -783,7 +806,7 @@ def _carry(session: Session, *, actor_id: int | None) -> dict[str, Any]:
     handled = {e.category_id for e in unbilled(session) if e.category_id is not None}
     # 「上次出账」得是**结过固定费的那一次**。中途出一张「不含固定费」的小账
     # （include_monthly=false）不算一期的边界：拿它当下界的话，它之前那段时间里
-    # 手动删掉的房租就不算「本期删的」了，下次打开账单页被自动记账复活。
+    # 手动删掉的房租就不算「本期删的」了，下次一点就被记回来。
     # 判据见 _last_monthly_cut
     since = _last_monthly_cut(session)
     dropped = select(Entry).where(
@@ -800,7 +823,7 @@ def _carry(session: Session, *, actor_id: int | None) -> dict[str, Any]:
     last = _last_billed(session, [c.id for c in categories])
     active = {m.id for m in ledger.active_members(session, today_jst())}
 
-    made: list[dict[str, Any]] = []
+    todo: list[tuple[Category, Entry, int | None, dict[str, Any] | None]] = []
     failed: list[dict[str, Any]] = []
     for c in categories:
         prev = last.get(c.id)
@@ -812,8 +835,7 @@ def _carry(session: Session, *, actor_id: int | None) -> dict[str, Any]:
         #   * 分摊：界面上改房租怎么分只有一条路 —— 在固定费面板里展开那一行改，
         #     改的是那一笔、不是分类。于是「Go 多担 5,000」下一期被悄悄打回均分，
         #     以后每期都是；
-        #   * 垫付人：分类和全局都没设时，谁先打开账单页（carry 挂在页面挂载上），
-        #     房租就记成谁垫的。
+        #   * 垫付人：分类和全局都没设时，谁触发了 carry，房租就记成谁垫的。
         # 分类上明写了默认垫付人的仍然优先 —— 那是面板上「谁付的」显式定下的常驻值
         # （改它会同时写分类和那一笔）。SPEC F1：分摊规则默认＝该分类上次用的规则
         payer = c.default_payer_id or prev.payer_id
@@ -823,6 +845,19 @@ def _carry(session: Session, *, actor_id: int | None) -> dict[str, Any]:
             # 自动记的钱必须看得见 —— 这一条也包括「这次没敢替你记」
             failed.append({"category_id": c.id, "name": c.name, "reason": stale})
             continue
+        todo.append((c, prev, payer, _prune_rule(rule, active)))
+    return todo, failed
+
+
+def _carry(session: Session, *, actor_id: int | None, only: set[int] | None) -> dict[str, Any]:
+    todo, failed = _carry_plan(session)
+    if only is not None:
+        # 按钮上列了哪几项就只记哪几项：点的那一刻有一行正在手填，
+        # 它不在按钮上写着，就不该被记 —— 否则手填的那笔一存，同一项就是两笔
+        todo = [t for t in todo if t[0].id in only]
+        failed = [f for f in failed if f["category_id"] in only]
+    made: list[dict[str, Any]] = []
+    for c, prev, payer, rule in todo:
         try:
             entry = ledger.create_entry(
                 session,
@@ -832,7 +867,7 @@ def _carry(session: Session, *, actor_id: int | None) -> dict[str, Any]:
                 amount=prev.amount_jpy,
                 payer_id=payer,
                 category_id=c.id,
-                rule=_prune_rule(rule, active),
+                rule=rule,
             )
         except (ValueError, KeyError) as e:   # LedgerError / RuleError / SplitError 都是 ValueError
             session.rollback()

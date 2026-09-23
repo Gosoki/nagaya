@@ -220,5 +220,11 @@ class ConfirmIn(SQLModel):
     _amount_not_bool = field_validator("amount", "expect_left", mode="before")(_no_bool_amount)
 
 
+class CarryIn(SQLModel):
+    """点「按上期记上」。category_ids 是按钮上列出来的那几项；不给就是全部能记的"""
+
+    category_ids: Optional[list[int]] = None
+
+
 class SettingIn(SQLModel):
     value: Any
