@@ -117,7 +117,7 @@ class Member(SQLModel, table=True):
         sa_column=Column(LargeBinary),
         description=(
             "头像图片（WebP）。**存库里不存目录**：压完才几 KB，三个人加起来不到 50KB，"
-            "而备份是拷整个 data/ 目录 —— 换成目录就得再管一套备份和权限。"
+            "而备份是 VACUUM INTO 出一份库文件 —— 放目录里的话备份里就没有头像，得再管一套备份和权限。"
             "（**别只拷 nagaya.db**：开着 WAL，没 checkpoint 的数据全在 nagaya.db-wal 里，"
             "实测主文件只有 4096 字节、单拷出来是个零张表的空库。）"
         ),
@@ -173,8 +173,9 @@ class Category(SQLModel, table=True):
     same_as_last: bool = Field(
         default=False,
         description=(
-            "这一项每期金额都一样（房租、网费这种），出账前自动按上期的金额记上。"
-            "**默认关着**，而且必须一项一项地开 —— 「上次的金额只作灰色占位」这条规矩"
+            "这一项每期金额都一样（房租、网费这种）：固定费面板那一行上出现「照上期」，"
+            "点一下按上期的金额记上（出账对话框里也有一个勾）。"
+            "**默认关着**，而且必须一项一项地开 —— 「上期金额不许预填」这条规矩"
             "就是为了防「某个月忘了改，带着上月的电费把账单发出去」。"
             "电费燃气水费恰恰是每期都不一样的，给它们开这个等于把那条规矩废掉。"
         ),
@@ -196,8 +197,8 @@ class RequestKey(SQLModel, table=True):
     （电梯里、地铁换乘）—— 前端只看到「连不上」，把这笔存成草稿，补交时再记一遍，
     账本里就是两笔一模一样的钱。补交时带着同一个键，后端认出来直接还给它原来那笔。
 
-    **新表，不给已有的表加列**：create_all 建得出新表（D18 之前的约定只管加列），
-    老备份里没有这张表也照样恢复得回来（restore 对缺表只提示）。
+    **是张新表，不是 entry 上的一列**：写这张表的时候还没切 Alembic，不能给老表加列；
+    现在的迁移基线里有它，老备份恢复时会自动补上。
     """
 
     __tablename__ = "request_key"
@@ -210,8 +211,7 @@ class RequestKey(SQLModel, table=True):
 class MemberPref(SQLModel, table=True):
     """个人偏好（深浅色、主题色）。**跟着账号走**：换台手机登录，还是自己挑的那一套。
 
-    一人一项一行，不在 member 上加列 —— 和 request_key 同一个理由（D18 之前
-    不给已有的表加字段）。以后多一项偏好就是多一个键，表不用动。
+    一人一项一行，不在 member 上加列：以后多一项偏好就是多一个键，不用写迁移。
     前端本机那份只是缓存：首帧要靠它在 JS 起来之前就上色。
     """
 
@@ -338,7 +338,7 @@ class Entry(SQLModel, table=True):
         description="原始规则，为了编辑时能把界面还原回去。真正的钱以 entry_share 为准",
     )
     note: str = ""
-    #: 收据照片。**M4 的坑**（SPEC §9「M4（可选）：统计图表、收据拍照…」），
+    #: 收据照片。**M4 的坑**（SPEC §8「M4（可选）：统计图表、收据拍照…」），
     #: 现在全项目没有一处读写它，EntryOut 也没带 —— 不是忘了删
     receipt_path: Optional[str] = None
 

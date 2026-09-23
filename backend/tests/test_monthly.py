@@ -247,7 +247,7 @@ def test_carry_skips_items_that_never_had_an_amount(session: Session, members) -
 def test_carry_uses_the_global_default_payer_when_the_category_has_none(
     session: Session, members
 ) -> None:
-    """分类上没定垫付人时要回退到全局设置，不能算「谁先打开账单页」头上。
+    """分类上没定垫付人时要回退到全局设置，不能算到「谁触发了 carry」头上。
 
     少了中间这一级的话，房租那 12 万会算到本期第一个点开账单页的人名下 ——
     两个人各错一整笔房租的钱，而通知里只说「已按上期记入 家賃 ¥120,000」，
@@ -461,7 +461,7 @@ def test_carry_copies_last_periods_split_and_payer(session: Session, members) ->
 
     房租怎么分，界面上只能在固定费面板里逐笔改 —— 改的是那一笔、不是分类。
     原来 carry 用分类默认规则，「A 多担 5,000」下一期被悄悄打回均分；
-    垫付人回退到「谁先打开账单页」，房租就记成了看页面的那个人垫的。
+    垫付人回退到「谁触发了 carry」（那时候是打开账单页就触发），房租就记成了看页面的那个人垫的。
     """
     a, b, c_ = members
     cat = cats(session)["家賃"]

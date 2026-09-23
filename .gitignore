@@ -9,7 +9,15 @@ backend/backups/
 *.db
 *.db-wal
 *.db-shm
+*.sqlite
 .secret
+
+# 环境变量、日志（nohup ./run.sh > xxx.log 这种）
+.env
+.env.*
+*.log
+# 备份目录不管指到哪都别进仓库：里面是整本账的明文
+backups/
 
 # Node
 node_modules/

@@ -35,7 +35,7 @@ def monthly(
     session: Session = Depends(get_session),
     _: Member = Depends(current_member),
 ) -> dict:
-    """固定费。不传 statement_id ＝ 当前草稿，没录的给上次金额当灰色参考（不是预填值）。
+    """固定费。不传 statement_id ＝ 当前草稿，没录的就是空的（上期金额不预填，也不给参考值）。
 
     传了就是翻一张出过的账单：只列那张单子上真有的几项。
     """

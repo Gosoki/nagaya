@@ -317,7 +317,10 @@ const preview = computed<Record<string, number> | null>(() => {
   } catch (e) {
     // 权重全 0 时不另外红一行「没人参与分摊」：底下的合计已经把缺口报出来了，
     // 而且旁边就写着「权重 0 ＝ 不参与」，再说一遍是噪音
-    if (e instanceof SplitError && e.code !== 'weights_all_zero') error.value = e.message
+    // 按错误码查文案：e.message 是写给开发看的中文，原样摆出来的话日文界面上冒一句中文
+    if (e instanceof SplitError && e.code !== 'weights_all_zero') {
+      error.value = t(`errors.${e.code}`, e.detail)
+    }
     return null
   }
 })

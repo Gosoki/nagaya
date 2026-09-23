@@ -173,7 +173,7 @@ def manifest(session: Session = Depends(get_session)) -> Response:
             {
                 "name": name,
                 "short_name": name[:12],
-                "description": "合租记账",
+                "description": "合租记账 · シェアハウスの家計簿",
                 # theme_color 是浏览器拿去涂「页面之外」那块的色，跟着页面走 ——
                 # 藏青会在 iOS 上变成底栏下面的一大片深蓝（见 index.html 那段注释）。
                 # background_color 是启动闪屏的底，那儿要的正是藏青 + 白「長」字

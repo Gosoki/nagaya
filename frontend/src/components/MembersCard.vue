@@ -258,6 +258,8 @@ async function create() {
 /* 两个日期按钮贴着名字左缘：flat 按钮自带的左内边距让它们看起来缩进了一格 */
 .dates { margin-left: -2px; gap: 4px; }
 .date-btn :deep(.q-btn__content) { font-size: var(--nagaya-fs-label); font-weight: 400; }
+/* dense 的小按钮只有 26px 高：点击区上下各伸 8px，排版不变 */
+.date-btn::after { content: ''; position: absolute; inset: -8px 0; }
 .date-pop { overflow: hidden; background: var(--nagaya-surface-2); }
 .date-pop :deep(.q-date) { box-shadow: none; border-radius: 0; }
 .pop-foot { border-top: 1px solid var(--nagaya-line); text-align: center; }

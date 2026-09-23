@@ -1,7 +1,6 @@
 """生成 PWA 图标 —— 一次性脚本，产物已落盘，平时不用跑。
 
-需要 Pillow（不在 requirements 里，用时临时装）：
-    .venv/bin/pip install pillow
+用到的 Pillow 已经在 requirements 里（头像、自定义图标也靠它）：
     .venv/bin/python -m tools.gen_icons
 
 图案：深蓝底 + 白色「長」字。加到手机主屏后就靠它认人。

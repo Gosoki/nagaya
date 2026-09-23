@@ -1,6 +1,8 @@
 <!-- 没提交的草稿横幅。压在页面顶部，点一下补交。 -->
 <template>
-  <q-banner v-if="drafts.count" dense class="bg-warning text-white draft-banner">
+  <!-- 颜色和离线那条细带同一套（--nagaya-warn*）：原来是琥珀底白字，对比度 2.6:1，
+       太阳底下看不清；深色模式下也不跟着变 -->
+  <q-banner v-if="drafts.count" dense class="draft-banner">
     <template #avatar>
       <q-icon name="cloud_off" />
     </template>
@@ -68,4 +70,12 @@ function discard() {
 
 <style scoped>
 /* 安全区由顶栏统一让（MainLayout），这里再让一次就是让两遍 */
+</style>
+
+<style scoped>
+.draft-banner {
+  background: var(--nagaya-warn-bg);
+  color: var(--nagaya-warn);
+}
+.draft-banner :deep(.q-btn) { color: var(--nagaya-warn); font-weight: 600; }
 </style>

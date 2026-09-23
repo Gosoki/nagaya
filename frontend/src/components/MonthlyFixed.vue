@@ -404,7 +404,7 @@ const carrying = ref(false)
 /**
  * 把「和上期一样」的那几项按上期金额记进来。**人点了才记。**
  *
- * **记了就得说出来。**「上次的金额只作灰色占位」那条规矩的全部理由，就是
+ * **记了就得说出来。**「上期的金额不许预填、连灰色参考都不给」那条规矩的全部理由，就是
  * 「预填的数字长得跟亲手填的一模一样，某个月忘了改也没人看得出」。
  * 这个开关是那条规矩唯一的出口，所以记上的每一笔都当场报出来。
  */
@@ -823,7 +823,9 @@ defineExpose({ reload: load, flush, dirtyCount })
   .save-state.idle { display: none; }
 }
 /* 块尾那一行。已出账那页是同高的空占位，高度写在同一个变量里 */
-.name-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 上下各让出 8px 的内边距再用负外边距收回来：排版一点不变，但裁剪框变高了 ——
+   里面「照上期」那颗小按钮的点击区才伸得出去（overflow: hidden 会连点击一起裁掉） */
+.name-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 8px 0; margin: -8px 0; }
 /* line-height 压到 1：12px 的状态字不许顶大行盒，行高交给 14px 名字的 strut 定 */
 .state { font-size: 12px; line-height: 1; margin-left: 6px; }
 /* 「本期有 N 笔」是个入口，长得要像能点 */
@@ -849,4 +851,7 @@ defineExpose({ reload: load, flush, dirtyCount })
   cursor: pointer;
 }
 .carry-chip:disabled { opacity: 0.5; }
+/* 看着只有 24px 高，点击区上下各多 8px —— 这颗按钮点下去是记钱 */
+.carry-chip { position: relative; }
+.carry-chip::after { content: ''; position: absolute; inset: -8px -4px; }
 </style>
