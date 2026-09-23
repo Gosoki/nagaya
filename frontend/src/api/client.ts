@@ -56,13 +56,26 @@ export class ApiError extends Error {
   }
 }
 
+// 路由守卫每次切页都要读它。存储被禁用时读写都会抛 —— 别让它把整个 app 带崩，
+// 当成「没登录」就行（登录页照样能用，只是记不住）
+let memoryToken: string | null = null
+
 export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY)
+  try {
+    return localStorage.getItem(TOKEN_KEY)
+  } catch {
+    return memoryToken
+  }
 }
 
 export function setToken(token: string | null) {
-  if (token) localStorage.setItem(TOKEN_KEY, token)
-  else localStorage.removeItem(TOKEN_KEY)
+  memoryToken = token
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token)
+    else localStorage.removeItem(TOKEN_KEY)
+  } catch {
+    /* 存不了：这一次打开用内存里那份 */
+  }
 }
 
 let onUnauthorized: (() => void) | null = null
@@ -84,6 +97,15 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   }
 }
 
+/**
+ * 读请求等多久算「连不上」。网络是通的、服务器却够不着时（手机流量下连家里的局域网地址），
+ * fetch 要等系统放弃连接才报错，界面一直转圈。**写请求不设**：超时了它可能已经落库，
+ * 那时候报「没记上」会让人再记一遍
+ */
+const GET_TIMEOUT_MS = 10_000
+const readSignal = (): AbortSignal | undefined =>
+  typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal ? AbortSignal.timeout(GET_TIMEOUT_MS) : undefined
+
 async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {}
   const token = getToken()
@@ -99,6 +121,7 @@ async function send<T>(method: string, path: string, body?: unknown): Promise<T>
       method,
       headers,
       body: body === undefined ? undefined : form ? (body as FormData) : JSON.stringify(body),
+      signal: method === 'GET' ? readSignal() : undefined,
     })
   } catch {
     throw new ApiError('network', 'fetch failed')
@@ -136,7 +159,7 @@ async function blob(path: string): Promise<Blob> {
   const token = getToken()
   let res: Response
   try {
-    res = await fetch(path, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+    res = await fetch(path, { headers: token ? { Authorization: `Bearer ${token}` } : {}, signal: readSignal() })
   } catch {
     throw new ApiError('network', 'fetch failed')
   }

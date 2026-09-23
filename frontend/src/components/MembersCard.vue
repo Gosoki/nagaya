@@ -40,7 +40,7 @@
                 >
                   <q-date
                     :model-value="m.joined_on"
-                    mask="YYYY-MM-DD" minimal today-btn
+                    mask="YYYY-MM-DD" minimal today-btn no-unset
                     :options="(d: string) => !m.left_on || d <= slash(m.left_on)"
                     @update:model-value="(d: string | null) => d && pickJoined(m, d)"
                   />
@@ -59,9 +59,11 @@
                   @update:model-value="(v: boolean) => (pop = v ? `l${m.id}` : null)"
                 >
                   <div class="date-pop">
+                    <!-- 还没填搬走日时**什么都不预选**：预选今天的话，点今天是「取消选择」，
+                         「今天搬走」这个最常见的情况反而标不上 -->
                     <q-date
-                      :model-value="m.left_on ?? todayJst()"
-                      mask="YYYY-MM-DD" minimal today-btn
+                      :model-value="m.left_on"
+                      mask="YYYY-MM-DD" minimal today-btn no-unset
                       :options="(d: string) => d >= slash(m.joined_on)"
                       @update:model-value="(d: string | null) => d && pickLeft(m, d)"
                     />
@@ -105,7 +107,7 @@
             >
               <q-date
                 :model-value="form.joined_on"
-                mask="YYYY-MM-DD" minimal today-btn
+                mask="YYYY-MM-DD" minimal today-btn no-unset
                 @update:model-value="(d: string | null) => { if (d) form.joined_on = d; pop = null }"
               />
             </q-popup-proxy>

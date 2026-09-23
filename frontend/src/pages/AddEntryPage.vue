@@ -51,7 +51,9 @@
         <q-btn dense flat no-caps icon="event" :label="dateLabel" class="text-grey-7 date-btn">
           <q-popup-proxy cover transition-show="scale">
             <div class="date-pop">
-              <q-date v-model="date" mask="YYYY-MM-DD" today-btn minimal :options="dateAllowed" />
+              <!-- no-unset：点一下已经选中的那天，q-date 默认是「取消选择」→ 发 null，
+                   日期标签当场 null.slice 抛错，整页渲染成空白 -->
+              <q-date v-model="date" mask="YYYY-MM-DD" today-btn minimal no-unset :options="dateAllowed" />
               <!-- 已出过账的日期选不了：那张单子锁着，记进去也不会出现在上面，
                    只会让人以为补上了。要补记就写在备注里 -->
               <div v-if="minDate && editingId === null" class="text-caption text-grey-7 q-pa-sm date-hint">
@@ -816,7 +818,7 @@ async function save() {
   busy.value = true
   try {
     if (!(await ensureCategory())) return
-    const payload = {
+    const body = {
       kind: kind.value,
       date: date.value,
       amount_jpy: signedAmount.value,
@@ -825,8 +827,13 @@ async function save() {
       category_id: kind.value === 'expense' ? categoryId.value : null,
       title: title.value,
       rule: kind.value === 'settlement' ? null : rule.value,
-      // 响应丢在路上时这笔会转成离线草稿，补交带着同一个键 —— 后端认得出，不记第二遍
-      client_key: newClientKey(),
+    }
+    const payload = {
+      ...body,
+      // 响应丢在路上时这笔会转成离线草稿，补交带着同一个键 —— 后端认得出，不记第二遍。
+      // 反代回个 502（其实已经记上了）、人再点一次，也得是同一个键；
+      // 但内容改过就换一个 —— 否则改过的这笔会被当成上一笔的重试，拿回来的是旧的那笔
+      client_key: keyFor(body),
     }
     try {
       const saved = await ledger.create(payload)
@@ -883,11 +890,24 @@ function notifySaved(saved: Entry) {
   })
 }
 
+/** 这一笔的幂等键：内容没变就沿用（重试），变了就换新的（见 save 里那段） */
+let formKey = newClientKey()
+let lastBody = ''
+function keyFor(body: object): string {
+  const sig = JSON.stringify(body)
+  if (sig !== lastBody) {
+    formKey = newClientKey()
+    lastBody = sig
+  }
+  return formKey
+}
+
 /**
  * 记完留在原页：清掉金额、备注、分摊，**分类留着**，光标回金额框。
  * 超市小票一串日用品可以连着录；要换分类点一下就行，不必先清空。
  */
 function reset() {
+  lastBody = ''                  // 下一笔是新的一笔，换键
   amount.value = 0
   title.value = ''
   rule.value = null

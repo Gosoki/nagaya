@@ -229,12 +229,25 @@ export const useBills = defineStore('bills', () => {
   /** 改完数据强制重取，要等它。force：绝不复用改动之前发出的那一发 */
   const reload = (key: BillKey) => run(key, true)
 
+  /**
+   * 固定费面板每存成一笔（或者「照上期」记了几笔）就加一。
+   * 在这之前发出去的 /monthly，回来的是**存之前**的样子：照写的话刚存好的那一行
+   * 变回空框、「照上期」又冒出来，人再填一遍就是同一项两笔
+   */
+  let monthlyStamp = 0
+  function monthlyWritten(): void {
+    monthlyStamp += 1
+  }
+
   /** 固定费面板。ck 是缓存 key（'draft' 或 'st:4'），面板自己算得出来 */
   async function loadMonthly(ck: string): Promise<MonthlyData> {
     const gen = generation
+    const stamp = monthlyStamp
     const d = await api.get<MonthlyData>(
       ck === 'draft' ? '/api/monthly' : `/api/monthly?statement_id=${ck.slice(3)}`,
     )
+    // 我出发之后面板存过：这份是旧的。缓存里那份（面板存的时候已经跟着改了）才是对的
+    if (stamp !== monthlyStamp) return monthly.value[ck] ?? d
     // 和账单那边同一条规矩：出账之前发出去的这一发，回来的是已经归进新单子的
     // 那批固定费。写进去的话，「未出账」那页会把它们当本期草稿画出来，还可点可改
     if (gen === generation) monthly.value = { ...monthly.value, [ck]: d }
@@ -310,6 +323,6 @@ export const useBills = defineStore('bills', () => {
 
   return {
     tab, detail, statements, views, monthly, pending, lastError,
-    cacheKey, loadStatements, loadMonthly, ensure, reload, refreshCached, refreshViews, invalidate, warm,
+    cacheKey, loadStatements, loadMonthly, monthlyWritten, ensure, reload, refreshCached, refreshViews, invalidate, warm,
   }
 })

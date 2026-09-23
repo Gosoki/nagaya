@@ -33,6 +33,9 @@ export const useLedger = defineStore('ledger', () => {
    */
   let seq = 0
   let writes = 0
+  /** 上一次写进来的那份长什么样。改一笔 version 就变，出账 statement_id 就变，删掉就少一条 */
+  let lastSig = ''
+  const signature = (list: Entry[]) => list.map((x) => `${x.id}.${x.version}.${x.statement_id ?? ''}`).join()
 
   async function refresh() {
     const my = ++seq
@@ -51,7 +54,13 @@ export const useLedger = defineStore('ledger', () => {
       // **别整份丢掉就算了** —— 冷启动慢网时刚记的那一笔会成了流水里唯一的一笔，
       // 日期锁也跟着失效。再取一次，那一笔已经落库，新的列表里就有它
       if (w !== writes) return refresh()
-      entries.value = e
+      // 十有八九什么都没变（切回前台就刷一次）：没变就不换数组，
+      // 换了的话账目页几百行、账单页每一块都跟着整个重画
+      const sig = signature(e)
+      if (sig !== lastSig) {
+        lastSig = sig
+        entries.value = e
+      }
       truncated.value = e.length >= LIMIT
       prevCutAt.value = bill.prev_cut_at
       prevLabel.value = bill.prev_label
@@ -64,6 +73,7 @@ export const useLedger = defineStore('ledger', () => {
   async function create(payload: EntryPayload): Promise<Entry> {
     const saved = await api.post<Entry>('/api/entries', payload)
     writes += 1
+    lastSig = ''                 // 本地这份已经和上次拉的不一样了，下次刷新照写
     // 按 id 去重：补交离线草稿时，后端认出幂等键会把**已经在列表里的那一笔**还回来
     entries.value = [saved, ...entries.value.filter((e) => e.id !== saved.id)]
     // 账单那几页缓存着，记完这笔它们就旧了。后台刷，不清空 ——
@@ -76,6 +86,7 @@ export const useLedger = defineStore('ledger', () => {
   async function update(id: number, version: number, payload: Partial<EntryPayload>): Promise<Entry> {
     const saved = await api.patch<Entry>(`/api/entries/${id}?version=${version}`, payload)
     writes += 1
+    lastSig = ''                 // 本地这份已经和上次拉的不一样了，下次刷新照写
     entries.value = entries.value.map((e) => (e.id === id ? saved : e))
     useBills().refreshCached(saved)
     return saved
@@ -84,6 +95,7 @@ export const useLedger = defineStore('ledger', () => {
   async function remove(entry: Entry) {
     await api.del(`/api/entries/${entry.id}?version=${entry.version}`)
     writes += 1
+    lastSig = ''                 // 本地这份已经和上次拉的不一样了，下次刷新照写
     entries.value = entries.value.filter((e) => e.id !== entry.id)
     useBills().refreshCached(entry)
   }
@@ -103,6 +115,7 @@ export const useLedger = defineStore('ledger', () => {
   }): Promise<Entry> {
     const saved = await api.post<Entry>('/api/bill/confirm', body)
     writes += 1
+    lastSig = ''                 // 本地这份已经和上次拉的不一样了，下次刷新照写
     entries.value = [saved, ...entries.value.filter((e) => e.id !== saved.id)]
     useBills().refreshCached(saved)
     return saved
@@ -112,6 +125,7 @@ export const useLedger = defineStore('ledger', () => {
   async function restore(id: number): Promise<Entry> {
     const back = await api.post<Entry>(`/api/entries/${id}/restore`)
     writes += 1
+    lastSig = ''                 // 本地这份已经和上次拉的不一样了，下次刷新照写
     entries.value = [back, ...entries.value.filter((e) => e.id !== id)]
     useBills().refreshCached(back)
     return back

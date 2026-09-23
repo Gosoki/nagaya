@@ -158,6 +158,13 @@ const bootFailed = ref(false)
 
 async function boot() {
   bootFailed.value = false
+  // 本机记着上次的身份和成员/分类/设置：**先照着它把界面画出来**，网络请求在后台一起发。
+  // 原来要等 /auth/me 回来、再等成员三件回来才画 —— 两个来回的白转圈；服务器够不着
+  // （手机流量下连家里的局域网地址）时一直转到系统放弃连接
+  if (auth.useCached() && meta.useCached()) {
+    void Promise.allSettled([auth.restore(), meta.load(), ledger.refresh(), syncPrefs(true)])
+    return
+  }
   try {
     if (!auth.me) await auth.restore()
     await meta.load()          // 失败时它自己会回退到本地缓存

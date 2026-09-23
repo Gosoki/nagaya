@@ -176,7 +176,7 @@
       </q-dialog>
 
       <!-- 本期固定费：出账单时顺手把家賃/水电煤网填了，账单跟着重算 -->
-      <MonthlyFixed v-if="bill.is_draft" @saved="load" />
+      <MonthlyFixed v-if="bill.is_draft" ref="fixedPanel" @saved="load" />
 
       <!-- 已出的账单没有那个面板（它只管当前草稿），可固定费往往是这张单子上最大的
            一笔钱。不摆出来的话，点进一张旧账单只看得见日用品，家賃 12 万凭空消失。
@@ -983,8 +983,20 @@ function confirmReceived(tr: BillTransfer, index: number) {
   })
 }
 
+/** 固定费面板。出账之前要先让它把没存完的存掉 */
+const fixedPanel = ref<InstanceType<typeof MonthlyFixed> | null>(null)
+
 /** 出账单：把这一刻之前记的账归到一张单子上。**不锁定任何东西** */
-function doCut() {
+async function doCut() {
+  // 固定费面板上刚填的那一格可能还没存完（点「出账单」那一下才失焦）。先等它存完 ——
+  // 存不上的就别出账：那个数字会在出账之后被当成新的一笔记进**下一张**，
+  // 而「先按上期记上」还可能替同一项再记一笔
+  await fixedPanel.value?.flush()
+  const unsaved = fixedPanel.value?.dirtyCount ?? 0
+  if (unsaved) {
+    $q.notify({ type: 'warning', timeout: 5000, message: t('bill.cutUnsaved', { n: unsaved }) })
+    return
+  }
   // 默认勾上＝这张单子把固定费也结了。不勾＝把固定费留在草稿里，只结日常那部分。
   // 刚出过账又出一张（后端按设置里的天数判定），固定费那轮还没到，默认就别带上 ——
   // 但得把理由写出来，不然框子自己跳成没勾会让人以为坏了。
@@ -1040,6 +1052,7 @@ function doCut() {
         const { failed } = await api.post<{ failed: { name: string }[] }>('/api/monthly/carry', {
           category_ids: carryable.map((r) => r.category_id),
         })
+        bills.monthlyWritten()
         if (failed.length) {
           $q.notify({
             type: 'warning',
@@ -1066,6 +1079,11 @@ function doCut() {
       await ledger.refresh()
     } catch (e) {
       $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e) })
+      // 半路失败时服务器那边可能已经动过了（「先按上期记上」记进去了、出账出了、
+      // 只是后面那个取数断了）。不重取的话面板上房租还是空框，人再填一遍就是两笔
+      void load().catch(() => {})
+      void bills.loadMonthly('draft').catch(() => {})
+      void ledger.refresh().catch(() => {})
     }
   })
 }

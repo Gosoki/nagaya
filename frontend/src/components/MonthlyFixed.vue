@@ -164,6 +164,7 @@ import { ApiError, api } from 'src/api/client'
 import type { Category, Member, MonthlyData, MonthlyRow } from 'src/api/types'
 import MemberPicker from 'src/components/MemberPicker.vue'
 import SplitEditor from 'src/components/SplitEditor.vue'
+import { newClientKey } from 'src/clientKey'
 import { seedToRatio } from 'src/core/seed'
 import { todayJst } from 'src/date'
 import { digitsOf } from 'src/digits'
@@ -190,6 +191,12 @@ interface Row extends MonthlyRow {
    */
   deleted_rule: Record<string, unknown> | null
   deleted_date: string | null
+  /**
+   * 新记这一笔的幂等键，和发出去的内容绑在一起。响应丢在路上、这一行留着 dirty，
+   * 下一次失焦再 POST 同样的内容时带同一个键 —— 后端认得出，不记第二笔
+   */
+  post_key: string | null
+  post_sig: string
 }
 
 /** 传了就是在翻一张出过的账单：只读那张单子上真有的几项，不能加也不能删 —— */
@@ -300,6 +307,10 @@ function build(d: MonthlyData) {
   data.value = d
   rows.value = d.rows.map((r) => {
     let held = keep.get(r.category_id)
+    // 这一行正在存（请求还在路上）：**原样留着这个对象**。换成新对象的话，
+    // 存完的结果写回的是旧对象，新的这一行还是 dirty、没有 entry_id ——
+    // 下一次失焦或离屏就把同一笔钱再 POST 一遍
+    if (held && saving.has(r.category_id)) return held
     // **手里那一笔被出账带走了**（有人在另一台上出了账）：这一行现在是新一期的
     // 空行。没存上的输入不能留 —— 留着的话，下一次失焦/离开这一屏就把它当成
     // 新的一笔记进下一期，而人以为自己改的是刚才那笔
@@ -320,6 +331,8 @@ function build(d: MonthlyData) {
       payer_id: null,
       deleted_rule: held?.deleted_rule ?? null,
       deleted_date: held?.deleted_date ?? null,
+      post_key: held?.dirty ? held.post_key : null,
+      post_sig: held?.dirty ? held.post_sig : '',
     })
   })
   if (taken.length) {
@@ -403,6 +416,7 @@ async function carry(list: Row[]) {
       created: { name: string; amount: number }[]
       failed: { name: string }[]
     }>('/api/monthly/carry', { category_ids: list.map((r) => r.category_id) })
+    bills.monthlyWritten()
     if (!created.length && !failed.length) {
       await load()
       return
@@ -537,6 +551,8 @@ const total = computed(() => {
  * 而那时组件已经在卸载，输入的金额就真没了。
  */
 let queue: Promise<void> = Promise.resolve()
+/** 正在存的那几行（分类 id）。build() 重建时不许换掉它们 */
+const saving = new Set<number>()
 
 function saveQueued(row: Row): Promise<void> {
   queue = queue.then(() => saveRow(row)).catch(() => {})
@@ -568,6 +584,7 @@ async function saveRow(row: Row) {
   // 在这儿把底数跟着改：新增 before=0、改金额取差、删除 row.amount=null 就是减掉
   const before = row.amount ?? 0
   busy.value = true
+  saving.add(row.category_id)
   try {
     if (willDelete(row)) {
       // 带上 version：这一笔要是刚被出账带走了（或者被人改过），不能把刚发进群里的
@@ -600,23 +617,30 @@ async function saveRow(row: Row) {
       row.version = saved.version
       row.amount = saved.amount_jpy
     } else if (value > 0) {
+      const body = {
+        kind: 'expense',
+        date: row.deleted_date ?? data.value!.default_date,
+        amount_jpy: value,
+        payer_id: payerOf(row),
+        category_id: row.category_id,
+        title: row.name,
+        // **没动过分摊也要把预览那条发上去**：没录的行是从上期那一笔（或者刚删掉的
+        // 那一笔）的分摊起步的，发 null 的话后端落成分类默认 —— 屏幕上是
+        // 45,000/40,000/35,000，库里是均分
+        rule: row.rule_override ?? untouchedRule(row.rule),
+        // 和分摊预览用的是同一批人，避免预览与落库分摊到不同的人头上
+        member_ids: meta.activeMembers.map((m) => m.id),
+      }
+      const sig = JSON.stringify(body)
+      if (!row.post_key || row.post_sig !== sig) {
+        row.post_key = newClientKey()
+        row.post_sig = sig
+      }
       const saved = await api.post<{ id: number; version: number; amount_jpy: number }>(
         '/api/entries',
-        {
-          kind: 'expense',
-          date: row.deleted_date ?? data.value!.default_date,
-          amount_jpy: value,
-          payer_id: payerOf(row),
-          category_id: row.category_id,
-          title: row.name,
-          // **没动过分摊也要把预览那条发上去**：没录的行是从上期那一笔（或者刚删掉的
-          // 那一笔）的分摊起步的，发 null 的话后端落成分类默认 —— 屏幕上是
-          // 45,000/40,000/35,000，库里是均分
-          rule: row.rule_override ?? untouchedRule(row.rule),
-          // 和分摊预览用的是同一批人，避免预览与落库分摊到不同的人头上
-          member_ids: meta.activeMembers.map((m) => m.id),
-        },
+        { ...body, client_key: row.post_key },
       )
+      row.post_key = null
       row.entry_id = saved.id
       row.version = saved.version
       row.amount = saved.amount_jpy
@@ -640,6 +664,7 @@ async function saveRow(row: Row) {
     }
     row.dirty = false
     row.rule_override = null
+    bills.monthlyWritten()       // 在这之前发出去的 /monthly 回来就是旧的了
     emit('saved')                // 账单总额/转账方案跟着刷新
     // 账目页那份列表是另一个 store 管的。这一屏从头到尾直接打 /api/entries，
     // 不通知它的话，刚录的固定费在账目页整个 session 都看不见
@@ -657,6 +682,7 @@ async function saveRow(row: Row) {
       await load().catch(() => {})
     }
   } finally {
+    saving.delete(row.category_id)
     busy.value = false
   }
 }
@@ -748,7 +774,8 @@ async function setPayer(row: Row, payerId: number) {
 }
 
 
-defineExpose({ reload: load })
+// flush / dirtyCount：出账之前账单页要先把这里没存完的存掉、再看还有没有存不上的（BillView.doCut）
+defineExpose({ reload: load, flush, dirtyCount })
 </script>
 
 <style scoped>

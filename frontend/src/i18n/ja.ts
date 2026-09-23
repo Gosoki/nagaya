@@ -114,6 +114,7 @@ export default {
     monthlyOffHintToday: '本日すでに請求書を作成しているため、固定費は既定で含めません。含める場合はチェックしてください。',
     cutBlankFixed: '{names} が未入力です —— このまま作成すると 0 円として締められます',
     cutCarry: '先に前期の金額で記帳：{list}',
+    cutUnsaved: '保存できていない固定費が {n} 件あります —— 先に上で直してから締めてください',
     draft: '現在の請求書',
     cutLabel: '{m}/{d} 締め',
     cut: '請求書を作成',

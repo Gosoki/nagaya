@@ -114,6 +114,7 @@ export default {
     monthlyOffHintToday: '今天已经出过一张了，固定费默认不含 —— 要一起结就自己勾上。',
     cutBlankFixed: '{names} 还空着 —— 出账后这几项按 0 结算',
     cutCarry: '先按上期记上：{list}',
+    cutUnsaved: '有 {n} 项固定费没存上 —— 先在上面改好再出账',
     draft: '当前账单',
     cutLabel: '{m}/{d} 出账',
     cut: '出账单',

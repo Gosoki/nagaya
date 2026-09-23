@@ -57,11 +57,12 @@ router.onError((err) => {
     String(err),
   )
   if (!stale) return
-  if (sessionStorage.getItem(RELOADED)) return      // 已经刷过一次还不行，别再刷
   try {
+    if (sessionStorage.getItem(RELOADED)) return    // 已经刷过一次还不行，别再刷
     sessionStorage.setItem(RELOADED, '1')
   } catch {
-    /* 隐私模式下存不了就算了，大不了不防重 */
+    // 存不了就没法防「刷了还是失败」的死循环 —— 那就干脆不自动刷
+    return
   }
   location.reload()
 })

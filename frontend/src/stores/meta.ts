@@ -76,6 +76,7 @@ export const useMeta = defineStore('meta', () => {
     members.value = []
     categories.value = []
     settings.value = []
+    last = ''
     forgetAvatars()
     try {
       localStorage.removeItem(CACHE_KEY)
@@ -84,15 +85,26 @@ export const useMeta = defineStore('meta', () => {
     }
   }
 
+  /**
+   * 上一次拿到的那份（原样的 JSON 串）。切回前台、改完设置都会重拉一遍，
+   * 而十有八九什么都没变 —— 没变就**不换数组**：换了的话 byId、在籍名单这些
+   * computed 全部作废，账目页几百行跟着整个重画一遍
+   */
+  let last = ''
+
+  /** 先用本机那份把界面撑起来（冷启动不等网络）。有就返回 true */
   function useCached(): boolean {
     try {
       const raw = localStorage.getItem(CACHE_KEY)
       if (!raw) return false
       const cached = JSON.parse(raw) as { m: Member[]; c: Category[]; s: Setting[] }
       if (!cached.m?.length) return false
-      members.value = cached.m
-      categories.value = cached.c ?? []
-      settings.value = cached.s ?? []
+      if (raw !== last) {
+        members.value = cached.m
+        categories.value = cached.c ?? []
+        settings.value = cached.s ?? []
+        last = raw
+      }
       return true
     } catch {
       return false
@@ -108,11 +120,14 @@ export const useMeta = defineStore('meta', () => {
         api.get<Category[]>('/api/categories?include_archived=true'),
         api.get<Setting[]>('/api/settings'),
       ])
+      const json = JSON.stringify({ m, c, s })
+      if (json === last) return
+      last = json
       members.value = m
       categories.value = c
       settings.value = s
       try {
-        localStorage.setItem(CACHE_KEY, JSON.stringify({ m, c, s }))
+        localStorage.setItem(CACHE_KEY, json)
       } catch {
         /* 隐私模式下存不了就算了，只是下次离线启动没得回退 */
       }
@@ -137,6 +152,6 @@ export const useMeta = defineStore('meta', () => {
     members, categories, settings,
     activeMembers, activeMembersSelfFirst, membersOn, byId, defaultPayerOn,
     dailyCategories, monthlyCategories, categoryById,
-    setting, load, forget,
+    setting, load, useCached, forget,
   }
 })

@@ -4,7 +4,7 @@ import { ref } from 'vue'
 import { ApiError, api, setToken } from 'src/api/client'
 import type { Member } from 'src/api/types'
 import { setLang } from 'src/i18n'
-import { syncPrefs } from 'src/prefs'
+import { resetPrefs, syncPrefs } from 'src/prefs'
 
 // 自己是谁，也在本地留一份 —— 和 meta 那份缓存同一个道理。
 //  它只用来做**界面门卫**（谁能点「确认已完成」、显不显示个人设置、默认付款人），
@@ -39,8 +39,9 @@ export const useAuth = defineStore('auth', () => {
     me.value = r.member
     cacheMe(r.member)
     setLang(r.member.lang)          // 语言跟人走
-    // 深浅色、主题色也跟人走。等它换好再进门，免得先闪一下上一位的颜色
-    await syncPrefs(false).catch(() => {})
+    // 深浅色、主题色也跟人走。等它换好再进门，免得先闪一下上一位的颜色。
+    // 取不到就退回默认：留着上一位的话，开机那次对表会把它当成「这个人本机挑的」传进他的账号
+    await syncPrefs(false).catch(resetPrefs)
   }
 
   /**
@@ -52,11 +53,17 @@ export const useAuth = defineStore('auth', () => {
    * 而 boot() 只在 onMounted 跑一次、MainLayout 切 Tab 又不卸载，
    * 这个半残状态一直维持到整页刷新。
    */
+  /** 本机改过几次自己的资料。restore 的 GET 在路上时改了语言，回来的是改之前的 */
+  let edits = 0
+
   async function restore() {
+    const mine = edits
     try {
-      me.value = await api.get<Member>('/api/auth/me')
-      cacheMe(me.value)
-      setLang(me.value.lang)
+      const fresh = await api.get<Member>('/api/auth/me')
+      if (mine !== edits) return
+      me.value = fresh
+      cacheMe(fresh)
+      setLang(fresh.lang)
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
         // 401：client.ts 已经清了 token 并把人踢回登录页，这里跟着清干净
@@ -74,8 +81,18 @@ export const useAuth = defineStore('auth', () => {
     }
   }
 
+  /** 冷启动先认本机记着的那个人（不等网络），认得出就返回 true。真正的核对交给 restore() */
+  function useCached(): boolean {
+    if (!me.value) {
+      me.value = cachedMe()
+      if (me.value) setLang(me.value.lang)
+    }
+    return me.value !== null
+  }
+
   /** 改自己的资料。密码要连旧的一起发，后端会验 */
   async function updateMe(patch: Record<string, unknown>): Promise<Member> {
+    edits += 1
     const saved = await api.patch<Member>(`/api/members/${me.value!.id}`, patch)
     me.value = saved
     cacheMe(saved)
@@ -84,6 +101,7 @@ export const useAuth = defineStore('auth', () => {
   }
 
   async function uploadAvatar(file: File): Promise<Member> {
+    edits += 1
     const saved = await api.upload<Member>(`/api/members/${me.value!.id}/avatar`, file)
     me.value = saved
     cacheMe(saved)
@@ -91,6 +109,7 @@ export const useAuth = defineStore('auth', () => {
   }
 
   async function removeAvatar(): Promise<Member> {
+    edits += 1
     const saved = await api.del<Member>(`/api/members/${me.value!.id}/avatar`)
     me.value = saved
     cacheMe(saved)
@@ -103,5 +122,5 @@ export const useAuth = defineStore('auth', () => {
     cacheMe(null)          // 和 token 同步清掉，别留下「人还在、token 没了」
   }
 
-  return { me, ready, login, restore, updateMe, uploadAvatar, removeAvatar, logout }
+  return { me, ready, login, restore, useCached, updateMe, uploadAvatar, removeAvatar, logout }
 })

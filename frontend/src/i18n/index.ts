@@ -17,7 +17,14 @@ import zh from './zh'
 export type Lang = 'zh' | 'ja'
 
 export function detectLang(): Lang {
-  const saved = localStorage.getItem('nagaya.lang')
+  // 这一句在模块加载时就跑：读不了存储（iOS「阻止所有 Cookie」、受限的内嵌浏览器）
+  // 会直接抛，整个 app 在 import 那一步白屏 —— 连一个字都显示不出来
+  let saved: string | null = null
+  try {
+    saved = localStorage.getItem('nagaya.lang')
+  } catch {
+    /* 读不了就按系统语言 */
+  }
   if (saved === 'zh' || saved === 'ja') return saved
   return navigator.language.startsWith('ja') ? 'ja' : 'zh'
 }
@@ -45,7 +52,11 @@ export const quasarLang = (lang: Lang) => (lang === 'ja' ? quasarJa : quasarZh)
 
 export function setLang(lang: Lang) {
   i18n.global.locale.value = lang
-  localStorage.setItem('nagaya.lang', lang)
+  try {
+    localStorage.setItem('nagaya.lang', lang)
+  } catch {
+    /* 存不了只是下次打开登录页按系统语言 */
+  }
   document.documentElement.lang = lang
   QuasarLang.set(quasarLang(lang) as Parameters<typeof QuasarLang.set>[0])
 }
