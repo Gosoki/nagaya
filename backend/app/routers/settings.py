@@ -33,12 +33,15 @@ def _bad(key: str, want: str) -> AppError:
 @router.get("", response_model=list[SettingOut])
 def list_settings(session: Session = Depends(get_session), _: Member = Depends(current_member)):
     """连同 type / 取值范围 / 中日文说明一起给出去，面板照着渲染就行。"""
+    # 一次取全：原来每一项各 get 一次，十几条设置就是十几个来回（每次开 App 都调）。
+    # 没存过的那项用默认值 —— 和 settings_svc.get 同一个口径
+    stored = {row.key: row.value_json for row in settings_svc.all_settings(session)}
     out = []
     for key, spec in SETTINGS_SPEC.items():
         out.append(
             SettingOut(
                 key=key,
-                value=settings_svc.get(session, key),
+                value=stored[key] if key in stored else spec["default"],
                 type=spec["type"],
                 hidden=bool(spec.get("hidden")),
                 note_zh=spec["note_zh"],

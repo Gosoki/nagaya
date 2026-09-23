@@ -22,7 +22,7 @@ import datetime as dt
 import threading
 from typing import Any
 
-from sqlalchemy import func, or_, union_all
+from sqlalchemy import case, func, or_, union_all
 from sqlalchemy import update as sa_update
 from sqlmodel import Session, select
 
@@ -70,10 +70,15 @@ def entries_of(session: Session, statement_id: int) -> list[Entry]:
 def _shares_of(session: Session, entry_ids: list[int]) -> dict[int, dict[int, int]]:
     if not entry_ids:
         return {}
-    rows = session.exec(select(EntryShare).where(EntryShare.entry_id.in_(entry_ids))).all()
+    # 只取三列，不把每一行分摊都造成 ORM 对象：一张账单几百笔 × 三个人，
+    # 光是造对象就占了取数的一大半
     out: dict[int, dict[int, int]] = {}
-    for r in rows:
-        out.setdefault(r.entry_id, {})[r.member_id] = r.amount_jpy
+    for eid, mid, amount in session.exec(
+        select(EntryShare.entry_id, EntryShare.member_id, EntryShare.amount_jpy).where(
+            EntryShare.entry_id.in_(entry_ids)
+        )
+    ):
+        out.setdefault(eid, {})[mid] = amount
     return out
 
 
@@ -81,9 +86,8 @@ def _earlier_ids(session: Session, statement: Statement | None) -> list[int] | N
     """这张账单**之前**出过的那些单子。None ＝ 不限（草稿：全部出过账的都算）。"""
     if statement is None:
         return None
-    return [
-        s.id for s in session.exec(select(Statement).where(Statement.cut_at < statement.cut_at))
-    ]
+    # 只要 id。整行取的话每张单子的快照 JSON 都要解析一遍，而这里一个字都用不上
+    return list(session.exec(select(Statement.id).where(Statement.cut_at < statement.cut_at)))
 
 
 def _scope_billed(stmt, ids: list[int] | None):
@@ -130,6 +134,47 @@ def _opening(session: Session, statement: Statement | None) -> dict[int, int]:
     }
 
 
+def _opening_and_live(
+    session: Session, statement: Statement, member_ids: list[int]
+) -> tuple[dict[int, int], dict[int, int]]:
+    """一张出过的账单要的两份余额，**一条 SQL 数完**：
+    上期结转（这张之前出过账的那些）和此刻的实时余额（全部没删的账）。
+
+    原来是 _opening 一遍、ledger.balances 又一遍，两次都把整本账扫一遍；
+    而且两条 SELECT 不在同一个快照上（理由见 _opening 里那段）。
+    """
+    ids = _earlier_ids(session, statement)
+    if not ids:
+        # 头一张：没有上期结转。这时合并反而更慢（多一个用不上的条件列）
+        live = ledger.balances(session)
+        return {}, {m: live.get(m, 0) for m in member_ids}
+    deltas = union_all(
+        select(Entry.statement_id.label("st"), Entry.payer_id.label("mid"), Entry.amount_jpy.label("delta"))
+        .where(Entry.deleted_at.is_(None)),
+        select(
+            Entry.statement_id.label("st"),
+            EntryShare.member_id.label("mid"),
+            (-EntryShare.amount_jpy).label("delta"),
+        )
+        .join(Entry, Entry.id == EntryShare.entry_id)
+        .where(Entry.deleted_at.is_(None)),
+    ).subquery()
+    opening: dict[int, int] = {}
+    live: dict[int, int] = {}
+    for mid, before, now in session.exec(
+        select(
+            deltas.c.mid,
+            # 草稿里的账 statement_id 是 NULL，NULL IN (...) 不成立 —— 正好不算进结转
+            func.sum(case((deltas.c.st.in_(ids), deltas.c.delta), else_=0)),
+            func.sum(deltas.c.delta),
+        ).group_by(deltas.c.mid)
+    ):
+        if before:
+            opening[mid] = int(before)
+        live[mid] = int(now or 0)
+    return opening, {m: live.get(m, 0) for m in member_ids}
+
+
 def _covers_from(prev: Statement | None, dates: list[dt.date]) -> str | None:
     """这张单子的覆盖期从哪天算起。
 
@@ -156,7 +201,11 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
     entries = unbilled(session) if statement is None else entries_of(session, statement.id)
     shares = _shares_of(session, [e.id for e in entries])
     members = list(session.exec(select(Member).order_by(Member.display_order, Member.id)))
-    opening = _opening(session, statement)
+    if statement is None:
+        opening = _opening(session, None)
+        live_balances: dict[int, int] | None = None
+    else:
+        opening, live_balances = _opening_and_live(session, statement, [m.id for m in members])
 
     owed: dict[int, int] = {}
     paid: dict[int, int] = {}
@@ -233,7 +282,7 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
     if statement is None:
         live_closing, live_transfers = closing, transfers
     else:
-        live_closing = ledger.balances(session)
+        live_closing = live_balances or {}
         live_transfers = (
             plan_simplified(live_closing)
             if simplify
@@ -241,17 +290,20 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
         )
 
     dates = [e.date for e in entries]
+    ref = statement.cut_at if statement else now_utc()
+    # LIMIT 1：原来不带，把之前的每一张单子连快照 JSON 一起全取出来，只用第一张
     prev = session.exec(
-        select(Statement)
-        .where(Statement.cut_at < (statement.cut_at if statement else now_utc()))
-        .order_by(Statement.cut_at.desc())
+        select(Statement).where(Statement.cut_at < ref).order_by(Statement.cut_at.desc()).limit(1)
     ).first()
     # 刚出过账又出一张，多半是临时结的小账，固定费还没到下一轮 —— 默认别带上。
     # 阈值在设置里，代码只认这个数怎么用。
-    ref = statement.cut_at if statement else now_utc()
     # 「上一轮」按**结过固定费的那一张**算：月中结过一次日常小账（不含固定费）的话，
-    # 拿它来量，月底那次正经出账就会因为「才过了几天」默认不含固定费
-    prev_monthly = _last_monthly_cut(session, before=ref)
+    # 拿它来量，月底那次正经出账就会因为「才过了几天」默认不含固定费。
+    # 上一张本身就结了固定费（绝大多数时候）就是它，不用再查一遍
+    if prev is None or (prev.snapshot_json or {}).get("include_monthly", True) is not False:
+        prev_monthly = prev
+    else:
+        prev_monthly = _last_monthly_cut(session, before=ref)
     # 按 JST 的**自然日**数，不是 24 小时整段。昨晚 23 点出的账、今天上午再出一张，
     # 整段算只有 0.5 天 → 0 天，会让「包括固定费」在该勾的时候默认不勾
     gap_days = (jst_date(ref) - jst_date(prev_monthly.cut_at)).days if prev_monthly else None
@@ -282,7 +334,7 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
         "live_transfers": [t._asdict() for t in live_transfers],
         "simplified": simplify,
         # 出账之后又被改过的话要说出来，否则下一张的「上期结转」没人解释得清
-        "edited_after_cut": _edited_after_cut(session, statement, rows),
+        "edited_after_cut": _edited_after_cut(session, statement, rows, total_expense),
         # 已出的账单上「本期固定费」列哪几项（没记钱的按 ¥0 列）。草稿那页有自己的面板
         "monthly_ids": billed_monthly_ids(session, statement) if statement is not None else None,
         # 这张单子上的转账记完了没有 —— 「转账按钮都点过了就显示结清」
@@ -319,13 +371,13 @@ def _last_monthly_cut(session: Session, before: dt.datetime | None = None) -> St
     判据是出账时记进快照的 include_monthly；这个标记之前出的老账单一律当完整出账。
     账单一年十来张，逐张看快照比写 JSON 查询省事也好读。
     """
-    stmt = select(Statement)
+    # 在 SQL 里挑，LIMIT 1。原来是把每一张连快照整个取出来在 Python 里一张张看
+    stmt = select(Statement).where(
+        func.coalesce(func.json_extract(Statement.snapshot_json, "$.include_monthly"), 1) != 0
+    )
     if before is not None:
         stmt = stmt.where(Statement.cut_at < before)
-    for st in session.exec(stmt.order_by(Statement.cut_at.desc())):
-        if (st.snapshot_json or {}).get("include_monthly", True) is not False:
-            return st
-    return None
+    return session.exec(stmt.order_by(Statement.cut_at.desc()).limit(1)).first()
 
 
 def _pair_debts(session: Session, statement: Statement | None) -> dict[tuple[int, int], int]:
@@ -377,7 +429,7 @@ def _pair_debts(session: Session, statement: Statement | None) -> dict[tuple[int
 
 
 def _edited_after_cut(
-    session: Session, statement: Statement | None, rows: list[dict[str, Any]]
+    session: Session, statement: Statement | None, rows: list[dict[str, Any]], live_total: int
 ) -> dict[str, Any] | None:
     """这张账单出完之后，数字还是不是当初那份。
 
@@ -418,7 +470,8 @@ def _edited_after_cut(
     return {
         "count": n_touched,
         "frozen_total": snapshot.get("total_expense"),
-        "live_total": build_total_expense(session, statement),
+        # build_bill 手里就有这张的实时合计，不用再把它的账目查一遍
+        "live_total": live_total,
         # 这张单子自己一笔没动，是更早那张被改了才漂的
         "from_earlier": not n_touched and drifted,
     }
@@ -452,9 +505,10 @@ def list_settled(session: Session, statements: list[Statement]) -> dict[int, boo
     """
     if not statements:
         return {}
+    # 四列就够，不造 ORM 对象：这个循环是「账单数 × 转账数」，两样都只会越来越多
     rows = list(
         session.exec(
-            select(Entry).where(
+            select(Entry.created_at, Entry.payer_id, Entry.to_member_id, Entry.amount_jpy).where(
                 Entry.kind == EntryKind.settlement,
                 Entry.deleted_at.is_(None),
                 Entry.to_member_id.is_not(None),
@@ -469,17 +523,18 @@ def list_settled(session: Session, statements: list[Statement]) -> dict[int, boo
             continue
         pairs = {(t["from_id"], t["to_id"]) for t in plan}
         paid: dict[tuple[int, int], int] = {}
-        for e in rows:
-            if e.created_at <= st.cut_at:
+        for created, frm, to, amount in rows:
+            if created <= st.cut_at:
                 continue
-            key = (e.payer_id, e.to_member_id)
+            key = (frm, to)
             if key in pairs:
-                paid[key] = paid.get(key, 0) + e.amount_jpy
+                paid[key] = paid.get(key, 0) + amount
         out[st.id] = all(paid.get((t["from_id"], t["to_id"]), 0) >= t["amount"] for t in plan)
     return out
 
 
 def build_total_expense(session: Session, statement: Statement) -> int:
+    """一张账单的支出合计，逐笔加。列表页走的是 list_totals 那条聚合，这个留给测试对账"""
     return sum(
         e.amount_jpy for e in entries_of(session, statement.id) if e.kind == EntryKind.expense
     )
@@ -679,20 +734,20 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
 
     **没录的就是没录，amount 给 None**，界面上是个空框，出账时按 0 算。
     这里不给「上次记了多少」当参考：要每期照抄的项，去分类上开 `same_as_last`，
-    再由人在面板上点「按上期记上」（carry_same_as_last）记成**真值**（黑字，看得见）。
+    再由人在那一行上点「照上期」（carry_same_as_last）记成**真值**（黑字，看得见）。
     """
     # 翻历史账单时**连归档的也要列**：那张单子上真有这笔钱，总额里也算着它。
     # 只按「现在还没归档」过滤的话，归档一个分类会让它名下的旧账凭空消失，
     # 而账单合计不变 —— 一眼看去就是「这几项加不出总数」
     stmt = select(Category).where(Category.monthly == True)  # noqa: E712
     categories = list(session.exec(stmt.order_by(Category.display_order, Category.id)))
-    if statement is None:
+    # 草稿里的账这一趟要用三次（占位、合计、「和上期一样」），只查一次
+    draft = unbilled(session) if statement is None else None
+    if draft is not None:
         # 草稿里归档的项默认不占位（归档＝以后不用填了），但**它名下本期已经录了钱的
         # 除外**：那笔钱还在账单的合计和每人应担里，面板上却一行都看不见，
         # 于是同一张草稿出现两个对不上的合计，而且那笔钱既改不了也删不掉
-        with_money = {
-            e.category_id for e in unbilled(session) if e.category_id is not None
-        }
+        with_money = {e.category_id for e in draft if e.category_id is not None}
         categories = [c for c in categories if not c.archived or c.id in with_money]
     # 同一个分类在这张草稿里可能有不止一笔（两个人同时填、或者填完重试了一次）。
     # 面板一行只显示得下一笔，**但账单是全都算的** —— 不把重复说出来的话，
@@ -701,7 +756,7 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
     dup: dict[int, int] = {}
     monthly_ids = {c.id for c in categories}
     total = 0
-    for e in (unbilled(session) if statement is None else entries_of(session, statement.id)):
+    for e in (draft if draft is not None else entries_of(session, statement.id)):  # type: ignore[union-attr]
         if e.kind == EntryKind.settlement or e.category_id is None:
             continue
         mine[e.category_id] = e
@@ -718,8 +773,8 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
     # 所以得先告诉界面：点下去会记哪几项、多少钱，哪几项记不了
     ready: dict[int, int] = {}
     blocked: dict[int, str] = {}
-    if statement is None:
-        todo, failed = _carry_plan(session)
+    if draft is not None:
+        todo, failed = _carry_plan(session, draft)
         ready = {c.id: prev.amount_jpy for c, prev, _, _ in todo}
         blocked = {f["category_id"]: f["reason"] for f in failed}
     rows = []
@@ -811,7 +866,7 @@ def carry_same_as_last(
 
 
 def _carry_plan(
-    session: Session,
+    session: Session, draft: list[Entry] | None = None
 ) -> tuple[list[tuple[Category, Entry, int | None, dict[str, Any] | None]], list[dict[str, Any]]]:
     """算一遍「和上期一样」**现在点下去**会记哪几项。不写库。
 
@@ -836,7 +891,8 @@ def _carry_plan(
     # 「本期」要按**上次出账那一刻**卡：草稿里删掉的账目 statement_id 恒为 NULL，
     # 光看这一条的话，半年前删过一次的分类会从此**永远**不再自动记 ——
     # 那是另一个方向的静默失效。两条一起才圈得出「这一期手动删掉的」。
-    handled = {e.category_id for e in unbilled(session) if e.category_id is not None}
+    # draft：调用方手里已经有草稿就递进来（monthly_rows），别再查一遍
+    handled = {e.category_id for e in (unbilled(session) if draft is None else draft) if e.category_id is not None}
     # 「上次出账」得是**结过固定费的那一次**。中途出一张「不含固定费」的小账
     # （include_monthly=false）不算一期的边界：拿它当下界的话，它之前那段时间里
     # 手动删掉的房租就不算「本期删的」了，下次一点就被记回来。
@@ -978,8 +1034,15 @@ def _last_billed(session: Session, category_ids: list[int]) -> dict[int, Entry]:
     """
     if not category_ids:
         return {}
-    rows = session.exec(
-        select(Entry)
+    # 每个分类只要最新那一笔：窗口函数在 SQL 里挑，一个分类回来一行。
+    # 原来是把这几个分类出过账的每一笔全取出来（一年多六十笔、永远只增）再挑第一笔
+    rank = (
+        func.row_number()
+        .over(partition_by=Entry.category_id, order_by=(Entry.date.desc(), Entry.id.desc()))
+        .label("rank")
+    )
+    latest = (
+        select(Entry.id, rank)
         .where(
             Entry.category_id.in_(category_ids),
             Entry.deleted_at.is_(None),
@@ -989,13 +1052,10 @@ def _last_billed(session: Session, category_ids: list[int]) -> dict[int, Entry]:
             # 从此每次都失败，用户只看到它一直空着
             Entry.kind == EntryKind.expense,
         )
-        .order_by(Entry.date.desc(), Entry.id.desc())
-    ).all()
-    last: dict[int, Entry] = {}
-    for e in rows:
-        if e.category_id not in last:
-            last[e.category_id] = e
-    return last
+        .subquery()
+    )
+    rows = session.exec(select(Entry).join(latest, latest.c.id == Entry.id).where(latest.c.rank == 1))
+    return {e.category_id: e for e in rows}
 
 
 def settlement_progress(session: Session, statement: Statement | None) -> dict[str, Any]:

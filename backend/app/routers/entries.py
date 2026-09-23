@@ -30,9 +30,14 @@ def _shares_by_entry(session: Session, entry_ids: Sequence[int]) -> dict[int, di
     out: dict[int, dict[str, int]] = {}
     if not entry_ids:
         return out
-    rows = session.exec(select(EntryShare).where(EntryShare.entry_id.in_(entry_ids)))  # type: ignore[attr-defined]
-    for row in rows:
-        out.setdefault(row.entry_id, {})[str(row.member_id)] = row.amount_jpy
+    # 只取三列：500 笔 × 三个人，逐行造 ORM 对象比查询本身还贵
+    rows = session.exec(
+        select(EntryShare.entry_id, EntryShare.member_id, EntryShare.amount_jpy).where(
+            EntryShare.entry_id.in_(entry_ids)  # type: ignore[attr-defined]
+        )
+    )
+    for eid, mid, amount in rows:
+        out.setdefault(eid, {})[str(mid)] = amount
     return out
 
 

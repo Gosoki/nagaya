@@ -48,7 +48,7 @@ def _legacy(tmp_path: Path) -> Path:
     con = sqlite3.connect(db)
     con.executescript("""
         drop table member_pref;
-        drop index ix_entry_deleted_at;
+        drop index ix_entry_date;
         insert into member (name, display_name, color, display_order, joined_on, password_hash,
                             lang, avatar_version, created_at)
         values ('go', 'Go', '#3d4785', 0, '2026-01-01', '', 'zh', 0, '2026-01-01 00:00:00');
@@ -67,7 +67,8 @@ def test_a_create_all_ledger_is_adopted_in_place(tmp_path: Path) -> None:
     con = sqlite3.connect(db)
     names = {r[0] for r in con.execute("select name from sqlite_master")}
     assert "member_pref" in names, "缺的表要补上"
-    assert "ix_entry_deleted_at" in names, "缺的索引要补上"
+    assert "ix_entry_date" in names, "缺的索引要补上"
+    assert "ix_entry_deleted_at" not in names, "0002 去掉的索引不许留着"
     assert con.execute("select display_name from member").fetchall() == [("Go",)]
     con.close()
 

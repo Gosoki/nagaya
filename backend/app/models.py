@@ -346,7 +346,10 @@ class Entry(SQLModel, table=True):
     created_at: dt.datetime = Field(default_factory=now_utc)
     updated_at: dt.datetime = Field(default_factory=now_utc)
     version: int = Field(default=1, description="乐观锁：两个人同时改一笔账时挡住覆盖")
-    deleted_at: Optional[dt.datetime] = Field(default=None, index=True, description="软删，进回收站")
+    # **不建索引。** 几乎每一行都是 NULL，而 SQLite 把 `IS NULL` 当等值条件，
+    # 有这个索引就拿它开路 —— 于是「最近 500 笔」要先把整本账按它扫一遍再排序
+    # （5 年规模 9.6ms → 去掉之后走日期索引 0.7ms）。ANALYZE 也救不回来（实测）
+    deleted_at: Optional[dt.datetime] = Field(default=None, description="软删，进回收站")
 
 
 class EntryShare(SQLModel, table=True):
@@ -359,7 +362,8 @@ class EntryShare(SQLModel, table=True):
     __table_args__ = (UniqueConstraint("entry_id", "member_id", name="uq_share_entry_member"),)
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    entry_id: int = Field(foreign_key="entry.id", index=True)
+    # entry_id 不单独建索引：上面那个 (entry_id, member_id) 唯一约束自带的索引就能按它查
+    entry_id: int = Field(foreign_key="entry.id")
     member_id: int = Field(foreign_key="member.id", index=True)
     amount_jpy: int = Field(description="这个人在这笔账里应担多少。可负")
 

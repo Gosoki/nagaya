@@ -18,6 +18,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from sqlmodel import Session
 
@@ -204,6 +205,10 @@ def _id_too_big(request, exc):  # noqa: ANN001, ARG001
 
 for module in (auth, members, prefs, categories, entries, ledger, memos, settings, backup, appearance):
     app.include_router(module.router)
+
+# 压缩。前面没有 nginx，没人替它压：流水 500 笔的 JSON 是 230KB（压完 18KB），
+# 第一次装 PWA 要下 800KB 的脚本和样式（压完 270KB）。在外面用手机流量时差的就是这些
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
 # 最后挂 ＝ 最外层：CORS 和路由都还没碰到请求体之前就先卡住
 app.add_middleware(BodyLimit)
