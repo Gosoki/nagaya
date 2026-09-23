@@ -1,5 +1,5 @@
 /**
- * 三种账目各自的颜色：支出蓝、收入绿、转账黄。
+ * 三种账目各自的颜色：支出藏青、收入绿、转账黄。**不跟主题色走**（见 src/themeColor.ts）。
  *
  * **这里是唯一的出处。** 页面要 hex 就拿 KIND_COLOR（画头像、描边这类），
  * Quasar 组件要 palette 名就拿 KIND_PALETTE（color / toggle-color 属性只认名字）。
@@ -14,7 +14,8 @@ export const KIND_COLOR: Record<EntryKind, string> = {
 }
 
 export const KIND_PALETTE: Record<EntryKind, string> = {
-  expense: 'primary',
+  // 不是 'primary'：主色现在是每个人自己挑的主题色，支出得是固定的一种（tokens.css 的 --q-expense）
+  expense: 'expense',
   income: 'positive',
   settlement: 'warning',
 }

@@ -70,7 +70,8 @@ describe('i18n 词条完整性', () => {
     //   errors.*          client.ts 用 t(`errors.${code}`)
     //   settings.label.*  SettingsPanel 用 t(`settings.label.${key}`)
     //   settings.option.* 同上
-    const DYNAMIC = ['errors.', 'settings.label.', 'settings.option.']
+    // profile.themeColors.* 按色板的 id 拼出来；每一档都有名字由 theme-colors.spec.ts 钉着
+    const DYNAMIC = ['errors.', 'settings.label.', 'settings.option.', 'profile.themeColors.']
     const used = new Set(usedKeys().map((u) => u.key))
     const dead = [...zhKeys].filter(
       (k) => !used.has(k) && !DYNAMIC.some((p) => k.startsWith(p)),

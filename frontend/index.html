@@ -22,6 +22,11 @@
          都先白一下再黑。规则和 src/colorScheme.ts 是同一条（同一个键）：
          钉了就照钉的，没钉就跟系统 -->
     <script>
+      // 主题色也在首帧之前挂上（src/themeColor.ts 存的那几个变量），不然先闪一下藏青
+      try {
+        var tv = JSON.parse(localStorage.getItem('nagaya.themeVars') || 'null')
+        if (tv) for (var k in tv) document.documentElement.style.setProperty(k, tv[k])
+      } catch (e) {}
       try {
         var p = localStorage.getItem('nagaya.scheme')
         if (p === 'dark' || (p !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)) {

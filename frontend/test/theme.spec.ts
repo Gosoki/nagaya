@@ -12,12 +12,16 @@ import { expect, it } from 'vitest'
 import { KIND_COLOR, KIND_PALETTE } from '../src/theme'
 
 const sass = readFileSync(new URL('../src/quasar-variables.sass', import.meta.url), 'utf8')
+const tokens = readFileSync(new URL('../src/css/tokens.css', import.meta.url), 'utf8')
 
 it('每种账目的 hex 和 Quasar palette 是同一个颜色', () => {
   for (const kind of Object.keys(KIND_COLOR) as (keyof typeof KIND_COLOR)[]) {
     const name = KIND_PALETTE[kind]
-    const m = sass.match(new RegExp(`^\\$${name}\\s*:\\s*(#[0-9a-fA-F]{6})`, 'm'))
-    expect(m, `quasar-variables.sass 里没有 $${name}`).not.toBeNull()
+    // Quasar 自带的颜色在 sass 里；支出那一种（expense）是自己在 tokens.css 里补的
+    const m =
+      sass.match(new RegExp(`^\\$${name}\\s*:\\s*(#[0-9a-fA-F]{6})`, 'm')) ??
+      tokens.match(new RegExp(`--q-${name}:\\s*(#[0-9a-fA-F]{6})`))
+    expect(m, `quasar-variables.sass 和 tokens.css 里都没有 ${name}`).not.toBeNull()
     expect(m![1]!.toLowerCase(), `${kind}：theme.ts 和 sass 不一致`).toBe(KIND_COLOR[kind].toLowerCase())
   }
 })

@@ -45,8 +45,19 @@
   /* ---------------------------------------------------------- 语义色
      这几个都是**在卡片底上**算过的；别直接拿 Quasar 的 negative/positive，
      那两个是给色块当底色用的，当文字色时偏亮（下面有接管 text-positive 那几条） */
-  --nagaya-accent: #3d4785;   /* 品牌 ＝ 链接 ＝ 选中           8.6:1 */
-  --nagaya-accent-bg: rgba(61, 71, 133, 0.1);
+  /* 主题色：每个人自己挑（设置 → 个人），src/themeColor.ts 把挑中的那一档
+     写到 html 的行内样式上。这里是默认那一档（藏青，和 App 图标同色）。
+     对比度按色板逐档算过，见 test/theme-colors.spec.ts */
+  --nagaya-theme: #3d4785;
+  --nagaya-theme-dark-fill: #5664c8;
+  --nagaya-theme-dark-ink: #a3acf6;
+  --nagaya-accent: var(--nagaya-theme);   /* 主题色 ＝ 链接 ＝ 选中 */
+  --nagaya-accent-bg: color-mix(in srgb, var(--nagaya-theme) 10%, transparent);
+  /* Quasar 的「主色」就是主题色：按钮、页签、开关、勾选框都跟着它 */
+  --q-primary: var(--nagaya-theme);
+  /* **支出不跟主题色走**：它是「这一笔是什么」的信号，挑了绿色主题的人
+     支出和收入就撞色了。单独一种颜色，固定藏青（theme.ts 的 KIND_PALETTE） */
+  --q-expense: #3d4785;
   /* 品牌藏青（和 App 图标同色）。登录页那一整面用它，深浅色都不变 */
   --nagaya-brand: #3d4785;
   --nagaya-brand-deep: #252b57;
@@ -110,8 +121,8 @@ html.dark {
   --nagaya-shadow: none;
   --nagaya-shadow-up: 0 4px 16px rgba(0, 0, 0, 0.5);
 
-  --nagaya-accent: #a3acf6;   /*                                 8.0:1 */
-  --nagaya-accent-bg: rgba(163, 172, 246, 0.14);
+  --nagaya-accent: var(--nagaya-theme-dark-ink);
+  --nagaya-accent-bg: color-mix(in srgb, var(--nagaya-theme-dark-ink) 14%, transparent);
   --nagaya-pos: #5fd097;      /*                                 9.0:1 */
   --nagaya-neg: #ff8076;      /*                                 7.1:1 */
   --nagaya-warn: #f2b84b;     /*                                 9.6:1 */
@@ -124,7 +135,8 @@ html.dark {
 
   /* Quasar 这边：主色铺底的按钮在深色底上要亮一档才站得住（白字 5.4:1），
      弹窗/菜单/卡片用 --q-dark，页面用 --q-dark-page */
-  --q-primary: #5664c8;
+  --q-primary: var(--nagaya-theme-dark-fill);
+  --q-expense: #5664c8;
   --q-dark: var(--nagaya-surface-2);
   --q-dark-page: var(--nagaya-bg);
 }
@@ -161,6 +173,12 @@ html.dark {
 .text-negative { color: var(--nagaya-neg) !important; }
 .text-warning { color: var(--nagaya-warn) !important; }
 html.dark .text-primary { color: var(--nagaya-accent) !important; }
+
+/* 支出那一种颜色（Quasar 组件上写 color="expense" / toggle-color="expense"）。
+   Quasar 只给自带的几种颜色生成类，这一种自己补上 */
+.bg-expense { background: var(--q-expense) !important; }
+.text-expense { color: var(--q-expense) !important; }
+html.dark .text-expense { color: var(--nagaya-kind-expense) !important; }
 
 /*
   **输入框一律 ≥16px。** iOS 的规矩：聚焦一个字号小于 16px 的输入框，

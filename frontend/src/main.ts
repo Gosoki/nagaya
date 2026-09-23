@@ -11,6 +11,7 @@ import './css/skin.css'
 
 import App from './App.vue'
 import { installColorScheme } from './colorScheme'
+import { installThemeColor } from './themeColor'
 import { watchForUpdate } from './update'
 import { detectLang, i18n, quasarLang } from './i18n'
 import { router } from './router'
@@ -41,3 +42,4 @@ $q.dialog = (opts) => plainDialog({ color: 'primary', ...opts })
 app.use(createPinia()).use(i18n).use(router).mount('#app')
 
 installColorScheme()
+installThemeColor()

@@ -125,6 +125,27 @@
         </q-item-section>
       </q-item>
 
+      <!-- 主题色：导航、按钮、链接、选中的颜色。三种账目的颜色不跟它走（src/themeColor.ts） -->
+      <q-item class="profile-row">
+        <q-item-section>
+          <q-item-label>{{ t('profile.themeColor') }}</q-item-label>
+          <div class="swatches q-mt-sm">
+            <button
+              v-for="c in THEME_COLORS"
+              :key="c.id"
+              class="swatch theme-swatch"
+              :class="{ on: themeColor === c.id }"
+              :style="{ background: c.light }"
+              :aria-label="t(`profile.themeColors.${c.id}`)"
+              :aria-pressed="themeColor === c.id"
+              :title="t(`profile.themeColors.${c.id}`)"
+              @click="themeColor = c.id"
+            />
+          </div>
+          <q-item-label caption class="q-mt-xs">{{ t('profile.themeColorHint') }}</q-item-label>
+        </q-item-section>
+      </q-item>
+
       <q-item class="profile-row">
         <q-item-section>
           <q-item-label class="row items-center no-wrap">
@@ -185,6 +206,7 @@ import { useRouter } from 'vue-router'
 
 import { ApiError } from 'src/api/client'
 import { schemePref as scheme } from 'src/colorScheme'
+import { THEME_COLORS, themeColor } from 'src/themeColor'
 import { MEMBER_COLORS } from 'src/palette'
 import MemberAvatar from 'src/components/MemberAvatar.vue'
 import { useAuth } from 'src/stores/auth'
