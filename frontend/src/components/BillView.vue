@@ -457,7 +457,7 @@ import { useRouter } from 'vue-router'
 import { ApiError, api, errorText } from 'src/api/client'
 import type { Bill, BillTransfer, Entry, Statement } from 'src/api/types'
 import { leftOf as leftOfPlan } from 'src/core/transfers'
-import { toHalfWidth } from 'src/digits'
+import { parseTypedYen } from 'src/digits'
 import { escapeHtml } from 'src/html'
 import { isLoopback } from 'src/installGuide'
 import { FALLBACK } from 'src/palette'
@@ -884,13 +884,8 @@ function confirmReceived(tr: BillTransfer, index: number) {
   }).onOk(async (value: string) => {
     if (fired) return
     fired = true
-    // 先把逗号和空格擦掉：整屏的金额都写成 ¥10,000，照着屏幕打回去是最自然的动作
-    // 千分位的逗号（和点）擦掉；**别的小数点不当千分位** —— 日元没有小数，
-    // 「5000.00」原来会被擦成 500,000。整串是「1,234,567 / 1.234.567」这种分组才擦点
-    const raw = toHalfWidth(String(value)).replace(/[\s．]/g, (c) => (c === '．' ? '.' : ''))
-    const grouped = /^\d{1,3}([.,]\d{3})+$/.test(raw)
-    const plain = /^\d+$/.test(raw.replace(/,/g, ''))
-    const amount = grouped || plain ? Number(raw.replace(/[.,]/g, '')) : NaN
+    // 千分位、全角、空格怎么认，见 parseTypedYen（「5000.00」那个坑也在那儿）
+    const amount = parseTypedYen(String(value))
     if (!Number.isFinite(amount) || amount <= 0) {
       // **不许静默 return。** 对话框已经关了、页面一个字不变，和「刚才没点上」
       // 长得一模一样 —— 而这个函数上面那段注释说的正是那个状态会让人再按一次、

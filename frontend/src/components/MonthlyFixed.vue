@@ -167,7 +167,7 @@ import SplitEditor from 'src/components/SplitEditor.vue'
 import { newClientKey } from 'src/clientKey'
 import { seedToRatio } from 'src/core/seed'
 import { todayJst } from 'src/date'
-import { digitsOf } from 'src/digits'
+import { digitsOf, yenOf } from 'src/digits'
 import { formatYen } from 'src/i18n'
 import { useBills } from 'src/stores/bills'
 import { useLedger } from 'src/stores/ledger'
@@ -461,7 +461,7 @@ function openCategoryEntries(row: Row) {
 function onInput(row: Row, e: Event) {
   if ((e as InputEvent).isComposing) return      // 输入法拼字中，等 compositionend
   const digits = digitsOf((e.target as HTMLInputElement).value)
-  const n = Math.min(Number(digits || 0), 99_999_999)
+  const n = yenOf(digits)
   row.text = digits ? formatPlain(n) : ''
   row.dirty = true
   ;(e.target as HTMLInputElement).value = row.text

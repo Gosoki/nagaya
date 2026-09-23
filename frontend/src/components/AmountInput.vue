@@ -32,7 +32,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { digitsOf } from 'src/digits'
+import { yenOf } from 'src/digits'
 
 const props = defineProps<{ modelValue: number; color?: string }>()
 const emit = defineEmits<{ 'update:modelValue': [number] }>()
@@ -73,9 +73,7 @@ function onInput(e: Event) {
   // 输入法还在拼字（日文键盘）时别去改框里的值 —— 改了会把拼到一半的字打断，
   // 等 compositionend 再算一次
   if ((e as InputEvent).isComposing) return
-  const digits = digitsOf((e.target as HTMLInputElement).value)
-  // 上限挡一下手滑：一千万円以上基本是多打了 0
-  const n = Math.min(Number(digits || 0), 99_999_999)
+  const n = yenOf((e.target as HTMLInputElement).value)   // 上限挡一下手滑，见 MAX_YEN
   emit('update:modelValue', n)
   void nextTick(() => {
     if (el.value) el.value.value = n ? n.toLocaleString('en-US') : ''
