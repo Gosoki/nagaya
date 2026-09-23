@@ -159,6 +159,9 @@
     <!-- 备份放最后：它是「设一次就不再动」的东西，天天要来的是上面几块 -->
     <BackupCard />
 
+    <!-- 添加到主屏幕的指引。放最底下：一台手机一辈子看一次 -->
+    <InstallCard />
+
     <!-- 装的是哪一版。手机上的 PWA 换包要等 service worker 轮换，
          「改了怎么没生效」十次有九次是这儿对不上 —— 印出来就不用猜了 -->
     <div class="text-center text-caption text-grey-5 q-py-md build" @click="tapBuild">{{ build }}</div>
@@ -174,6 +177,7 @@ import { ApiError, api } from 'src/api/client'
 import { toHalfWidth } from 'src/digits'
 import BackupCard from 'src/components/BackupCard.vue'
 import FixedCostSettings from 'src/components/FixedCostSettings.vue'
+import InstallCard from 'src/components/InstallCard.vue'
 import MembersCard from 'src/components/MembersCard.vue'
 import AppearanceCard from 'src/components/AppearanceCard.vue'
 import ProfileCard from 'src/components/ProfileCard.vue'
