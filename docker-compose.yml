@@ -1,0 +1,28 @@
+# 長屋 nagaya 的 Docker 部署。镜像怎么打的见 Dockerfile。
+#
+#   bash deploy.sh --docker          一键：问端口、起容器、建第一个账号
+#   docker compose up -d --build     或者直接这一句（升级：git pull 之后再来一遍）
+#   docker compose exec nagaya .venv/bin/python -m tools.add_member <登录名> <显示名>
+#   docker compose logs -f
+#
+# 端口和「以谁的身份写文件」写在同目录的 .env 里（deploy.sh --docker 会替你写）：
+#   NAGAYA_PORT=8000
+#   NAGAYA_UID=1000
+#   NAGAYA_GID=1000
+# UID/GID 不写就是 root。写成你自己的账号，账本和备份在宿主机上就归你，不用 sudo 才打得开
+# （前提是 backend/data、backend/backups 这两个目录也归这个账号）。
+services:
+  nagaya:
+    build: .
+    image: nagaya:latest
+    container_name: nagaya
+    restart: unless-stopped
+    user: "${NAGAYA_UID:-0}:${NAGAYA_GID:-0}"
+    ports:
+      - "${NAGAYA_PORT:-8000}:8000"
+    volumes:
+      # 账本、签名密钥（.secret）、表结构升级前的快照 —— 和裸机部署是同一个目录
+      - ./backend/data:/app/backend/data
+      # 每天的备份。设置里的备份目录默认就是容器里的这个位置；
+      # 改到别处（NAS 的另一个共享目录）的话，在这儿再挂一行，容器里的路径和设置里填的一样
+      - ./backend/backups:/app/backend/backups

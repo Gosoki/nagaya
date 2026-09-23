@@ -1,3 +1,6 @@
+# 要哪些包、最低什么版本。**部署和新装开发环境都用 requirements.lock**（钉死的那一组）：
+# 这份只写下限，新机器上会装到最新版，而 sqlmodel 0.0.46 起就不兼容了（见 requirements.lock 顶上）。
+
 # Web 框架：只做 REST，不返文案（界面文字全在前端 vue-i18n，见 SPEC §7.5）
 fastapi>=0.115
 uvicorn[standard]>=0.30

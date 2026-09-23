@@ -1,0 +1,28 @@
+# 进镜像的只有代码。账本、备份、装好的依赖一律不进 ——
+# 尤其是账本：打进镜像的话，谁拿到镜像谁就拿到整本账
+.git
+.tools
+.env
+.env.*
+**/__pycache__
+**/*.pyc
+**/.DS_Store
+
+backend/.venv
+backend/data
+backend/backups
+backend/.pytest_cache
+*.db
+*.db-wal
+*.db-shm
+.secret
+
+frontend/node_modules
+frontend/dist
+frontend/dev-dist
+frontend/test-results
+frontend/playwright-report
+frontend/e2e
+
+docs
+tests

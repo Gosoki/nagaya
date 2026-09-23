@@ -71,83 +71,84 @@
 
 ## 部署
 
-### 要什么
-
-- **Python 3.10+**（开发用的 3.12）
-- **Node 22.12+ 或 24**（只在打包前端时要；跑起来之后只有 Python 一个进程）
-- 一台常开的机器：家里的 Mac、NAS、树莓派都行。没有 nginx，没有 docker
-
-### 第一次装
+### 一键部署
 
 ```bash
 git clone <这个仓库> nagaya && cd nagaya
 
-# 后端
-cd backend
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-
-# 前端：打成静态文件，后端直接挂在同一个端口上
-cd ../frontend
-npm ci
-npm run build              # 类型检查 + 打包 → frontend/dist/pwa
+sudo bash deploy.sh             # 直接装在 Linux 上：Debian / Ubuntu 的 LXC、虚拟机、裸机（systemd）
+bash deploy.sh --docker         # 用 Docker：NAS、或者任何装了 Docker 的机器（Mac 也行）
 ```
 
-### 建第一个账号
+第一次跑会中途问几句，回车就是默认：
 
-全新的库里一个人都没有，而建成员的接口要先登录 —— 这行命令就是那扇门的钥匙：
+| 问什么 | 什么时候问 |
+|---|---|
+| 端口（默认 8000） | 第一次。之后沿用，不再问 —— 换端口的话手机主屏上那个图标就作废了 |
+| 要不要把旧机器的账本搬过来 | 还没有账本（或者账本里一个人都没有）时。给一份**备份文件**的路径，它会先验、升到现在的表结构再装上 |
+| 备份放哪 | 直接装时第一次问（建议外接盘、NAS 共享目录）；搬过来的账本里记着的目录在这台机器上用不了时也问 |
+| 第一个账号 | 账本里一个人都没有时。密码在它自己那儿输两遍 |
+
+`NAGAYA_YES=1 bash deploy.sh` 什么都不问、全用默认；`PORT=9001 bash deploy.sh` 预设端口。
+
+**直接装**做的事：装 [uv](https://github.com/astral-sh/uv)（自带独立的 Python 3.12，不碰系统的）→ 装后端依赖 →
+系统里没有够新的 Node 才装一份（放在项目的 `.tools/` 里，校验过哈希）→ 打包前端 →
+写 `/etc/systemd/system/nagaya.service` 并启动 → 真去打一次接口确认是它在应答。
+日志 `journalctl -u nagaya -f`，重启 `systemctl restart nagaya`。
+
+**Docker** 做的事：打镜像（Node 只在打包那一段用，最终镜像里只有 Python）→ `docker compose up -d`。
+账本和备份挂在宿主机的 `backend/data`、`backend/backups`（和直接装是同一个位置），
+删容器、重建镜像都不碰它们；容器以这两个目录主人的身份写文件，在宿主机上不用 sudo 就打得开。
+端口和身份记在项目根目录的 `.env` 里。不想用脚本的话，`docker compose up -d --build` 一句也行。
+日志 `docker compose logs -f`。
+
+### 更新到新版本
+
+```bash
+git pull && sudo bash deploy.sh          # Docker：git pull && bash deploy.sh --docker
+```
+
+不问问题、不碰账本。表结构变了的话**开机自动升级**，升之前在 `backend/data/` 里留一份
+`before-migrate-<版本>-<时间>.db` 快照。升完核对库和代码，对不上就拒绝启动并说清缺了什么 ——
+不会带着问题跑起来。
+
+### 手动装（不想用脚本、或者在 Mac 上直接跑）
+
+要 **Python 3.10+**（开发用的 3.12）和 **Node 22.12+ 或 24**（只在打包前端时要）。
 
 ```bash
 cd backend
-.venv/bin/python -m tools.add_member go Go       # 登录名 go，显示名 Go；密码交互输入两遍（≥6 位）
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.lock     # 装钉死的那一组，别装 requirements.txt（见下）
+
+cd ../frontend
+npm ci && npm run build                         # 类型检查 + 打包 → frontend/dist/pwa
+
+cd ../backend
+.venv/bin/python -m tools.add_member go Go      # 第一个账号：登录名 go，显示名 Go，密码输两遍（≥6 位）
+./run.sh                                        # 前台跑，监听 0.0.0.0:8000；PORT=9001 ./run.sh 换端口
 ```
 
-第一次跑会顺手把库建出来。之后的人可以在界面上加（更多 → 设置 → 成员），也可以接着用这条命令。
-`--list` 看有谁；`--reset go` 重置某人的密码（顺带把他所有设备踢下线）——
-**忘了密码只能走这条**，界面上密码只许本人改。
+**装 `requirements.lock`，不装 `requirements.txt`**：后者只写下限，新机器上会装到最新版 ——
+实测 sqlmodel 0.0.46 起拒收不带时区的时间，全新部署直接起不来。lock 是全部测试在上面过了的那一组。
+
+**先打包前端再起服务**：后端开机时认一次 `frontend/dist/pwa` 在不在。
+`run.sh` 带着 `umask 077`：库、日志、签名密钥新建出来都只有自己能读。
+
+`tools.add_member` 之后也能接着用：`--list` 看有谁；`--reset go` 重置某人的密码（顺带把他所有设备
+踢下线）—— **忘了密码只能走这条**，界面上密码只许本人改。其他人也可以在界面上加（更多 → 设置 → 成员）。
 
 > 别拿 `tools.seed_dev` 开张：它建的是三个假室友（go / kan / zen，密码 dev12345）和几个月的假账，
 > 还顺手关掉了自动备份。那是开发和截图用的。
-
-### 起服务
-
-```bash
-cd backend
-./run.sh                                    # 前台跑，监听 0.0.0.0:8000
-PORT=9001 ./run.sh                          # 换端口；多出来的参数原样交给 uvicorn
-nohup ./run.sh > nagaya.log 2>&1 &          # 放后台
-```
-
-**先打包前端再起服务**：后端开机时认一次 `frontend/dist/pwa` 在不在，第一次打包之后要重启一下。
-`run.sh` 带着 `umask 077`：库、日志、签名密钥新建出来都只有自己能读。
-
-想开机自启，Linux / NAS 上一个 systemd 服务就够：
-
-```ini
-# /etc/systemd/system/nagaya.service
-[Unit]
-Description=nagaya
-After=network.target
-
-[Service]
-User=<你的用户>
-WorkingDirectory=/path/to/nagaya/backend
-ExecStart=/path/to/nagaya/backend/run.sh
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-```
-
-macOS 上用 launchd（`~/Library/LaunchAgents/*.plist`）同理，或者就留一个 `nohup`。
 
 ### 手机上用
 
 1. 查这台机器的局域网 IP：macOS `ipconfig getifaddr en0`，Linux `hostname -I`
 2. 手机连同一个 WiFi，Safari 打开 `http://<IP>:8000`，登录
-3. **先在「更多 → 设置 → 应用设置」里定好名字和图标**，再「共享 → 添加到主屏幕」——
-   iOS 只在添加的那一刻读名字和图标，之后改了主屏上也不变
-4. 从主屏打开就是一个全屏 App。要看新版本：从多任务里划掉再开，开两次
+3. **先在「更多 → 设置 → 应用设置」里定好名字和图标**，再添加到主屏幕 ——
+   iOS 只在添加的那一刻读名字和图标，之后改了主屏上也不变。
+   怎么添加，设置页最底下「添加到主屏幕」里按这台手机、这个浏览器写好了步骤
+4. 从主屏打开就是一个全屏 App。要看新版本：从多任务里划掉再开（局域网 http 下开一次就是新的）
 
 ### HTTPS
 
@@ -160,19 +161,6 @@ macOS 上用 launchd（`~/Library/LaunchAgents/*.plist`）同理，或者就留�
 
 要出门在外也能用，或者想要上面这些，前面套一层 TLS：**Tailscale**（`tailscale serve`）、
 **Cloudflare Tunnel** 或 **Caddy** 反代都行。仓库里不带这些配置。
-
-### 更新到新版本
-
-```bash
-git pull
-cd backend  && .venv/bin/pip install -r requirements.txt
-cd ../frontend && npm ci && npm run build
-# 重启 run.sh
-```
-
-表结构变了的话**开机自动升级**，升之前在 `backend/data/` 里留一份
-`before-migrate-<版本>-<时间>.db` 快照。升完核对库和代码，对不上就拒绝启动并说清缺了什么 ——
-不会带着问题跑起来。
 
 ---
 
@@ -255,6 +243,8 @@ App 名字和图标在「应用设置」那张卡片里改。`settlement_methods
 | `NAGAYA_SECRET` | 自动生成 | token 签名密钥。不给就生成一个写进库旁边的 `.secret`（权限 600） |
 | `PORT` | `8000` | `run.sh` 监听的端口 |
 | `NAGAYA_CORS` | `localhost:9000,5173` | 前端开发服务器的源，只在开发时用得上 |
+| `NAGAYA_YES` | 空 | `deploy.sh` 设了就什么都不问、全用默认 |
+| `NAGAYA_PORT` / `NAGAYA_UID` / `NAGAYA_GID` | 8000 / 0 / 0 | Docker 部署时写在项目根目录的 `.env` 里：对外端口、容器以谁的身份写文件（`deploy.sh --docker` 会替你写） |
 | `NAGAYA_URL` | `http://127.0.0.1:8000` | E2E 打哪个服务（`run-e2e.sh` 会自己设） |
 | `E2E_PORT` | `8765` | `run-e2e.sh` 起测试服务用的端口 |
 
