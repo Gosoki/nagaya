@@ -989,7 +989,9 @@ function doCut() {
     cancel: true,
     options: {
       type: 'checkbox',
-      model: [...(withMonthlyByDefault ? ['monthly'] : []), ...(carryable.length ? ['carry'] : [])],
+      // 「先按上期记上」跟着「包括固定费」的默认走：这张默认不结固定费（刚出过一张）时，
+      // 替人记上的房租只会留在草稿里等下一张 —— 那就别默认勾
+      model: withMonthlyByDefault ? ['monthly', ...(carryable.length ? ['carry'] : [])] : [],
       items: [
         { label: t('bill.includeMonthly'), value: 'monthly' },
         ...(carryable.length
