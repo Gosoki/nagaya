@@ -20,21 +20,16 @@ import sys
 
 from sqlmodel import Session, select
 
-from app.auth import hash_password
+from app.auth import MIN_PASSWORD_LEN, hash_password
 from app.db import engine
 from app.init_db import init_db
 from app.models import Member, free_color
 
-#: 和改密码那一屏（ProfileCard 的 `newPw.length < 6`）同一条线。
-#: 后端本身不设下限 —— 这里只是别让人在服务器上给自己敲一个 1 位的密码
-MIN_PASSWORD = 6
-
-
 def _ask(prompt: str) -> str:
     """密码问两遍。敲错一个字就等于把自己锁在门外，而这扇门没有第二把钥匙。"""
     first = getpass.getpass(prompt)
-    if len(first) < MIN_PASSWORD:
-        sys.exit(f"密码至少 {MIN_PASSWORD} 位")
+    if len(first) < MIN_PASSWORD_LEN:   # 和接口、改密码那一屏同一条线
+        sys.exit(f"密码至少 {MIN_PASSWORD_LEN} 位")
     if first != getpass.getpass("再输一遍："):
         sys.exit("两次不一样")
     return first
@@ -75,7 +70,9 @@ def main(argv: list[str]) -> None:
         member = Member(
             name=name,
             display_name=display,
-            display_order=len(rows),
+            # 和 routers/members.py 建人同一个口径：有空洞时 len(rows) 会和别人撞号，
+            # 而排序号决定平局时那 1 円归谁
+            display_order=max((m.display_order for m in rows), default=-1) + 1,
             color=free_color(m.color for m in rows),
             password_hash=hash_password(_ask(f"{display} 的密码：")),
         )
