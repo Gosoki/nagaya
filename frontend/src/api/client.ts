@@ -56,6 +56,12 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * 报错时给人看的那句话。非 ApiError 的异常（代码里抛出来的 TypeError 之类）显示成什么，
+ * 只在这里定 —— 原来这个三元表达式在十几个组件里各抄一份
+ */
+export const errorText = (e: unknown): string => (e instanceof ApiError ? e.text : String(e))
+
 // 路由守卫每次切页都要读它。存储被禁用时读写都会抛 —— 别让它把整个 app 带崩，
 // 当成「没登录」就行（登录页照样能用，只是记不住）
 let memoryToken: string | null = null

@@ -70,7 +70,7 @@ import { useQuasar } from 'quasar'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { ApiError, api } from 'src/api/client'
+import { api, errorText } from 'src/api/client'
 import { applyAppearance, iconSrc } from 'src/appearance'
 import { shrinkSquare } from 'src/shrinkImage'
 import { useMeta } from 'src/stores/meta'
@@ -109,7 +109,7 @@ async function onFile(e: Event) {
     await api.upload<{ version: number }>('/api/appearance/icon', small)
     await after()
   } catch (err) {
-    $q.notify({ type: 'negative', message: err instanceof ApiError ? err.text : String(err), timeout: 5000 })
+    $q.notify({ type: 'negative', message: errorText(err), timeout: 5000 })
   } finally {
     busy.value = false
   }
@@ -121,7 +121,7 @@ async function removeIcon() {
     await api.del('/api/appearance/icon')
     await after()
   } catch (err) {
-    $q.notify({ type: 'negative', message: err instanceof ApiError ? err.text : String(err), timeout: 5000 })
+    $q.notify({ type: 'negative', message: errorText(err), timeout: 5000 })
   } finally {
     busy.value = false
   }
@@ -137,7 +137,7 @@ async function saveName(el: HTMLInputElement) {
     // 存不上就把框里的字改回服务器那一份 —— 非受控输入，不写回的话
     // 屏幕上留着一个服务器从没接受过的名字
     el.value = name.value
-    $q.notify({ type: 'negative', message: err instanceof ApiError ? err.text : String(err), timeout: 5000 })
+    $q.notify({ type: 'negative', message: errorText(err), timeout: 5000 })
   }
 }
 

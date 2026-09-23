@@ -173,7 +173,7 @@ import { useQuasar } from 'quasar'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { ApiError, api } from 'src/api/client'
+import { api, errorText } from 'src/api/client'
 import { toHalfWidth } from 'src/digits'
 import BackupCard from 'src/components/BackupCard.vue'
 import FixedCostSettings from 'src/components/FixedCostSettings.vue'
@@ -278,7 +278,7 @@ async function save(s: Setting, value: unknown) {
     failed.value = 0
   } catch (e) {
     failed.value += 1
-    $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e), timeout: 5000 })
+    $q.notify({ type: 'negative', message: errorText(e), timeout: 5000 })
   } finally {
     busy.value = false
   }

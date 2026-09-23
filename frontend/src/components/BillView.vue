@@ -454,7 +454,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 
-import { ApiError, api } from 'src/api/client'
+import { ApiError, api, errorText } from 'src/api/client'
 import type { Bill, BillTransfer, Entry, Statement } from 'src/api/types'
 import { leftOf as leftOfPlan } from 'src/core/transfers'
 import { toHalfWidth } from 'src/digits'
@@ -923,7 +923,7 @@ function confirmReceived(tr: BillTransfer, index: number) {
           message: now > 0 ? t('bill.transferChanged', { left: formatYen(now) }) : t('bill.transferDoneElsewhere'),
         })
       } else {
-        $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e) })
+        $q.notify({ type: 'negative', message: errorText(e) })
       }
       busy.value = null
       return
@@ -1039,7 +1039,7 @@ async function doCut() {
       // 出完账不刷新的话它还是出账前的旧值，锁就形同虚设
       await ledger.refresh()
     } catch (e) {
-      $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e) })
+      $q.notify({ type: 'negative', message: errorText(e) })
       // 半路失败时服务器那边可能已经动过了（「先按上期记上」记进去了、出账出了、
       // 只是后面那个取数断了）。不重取的话面板上房租还是空框，人再填一遍就是两笔
       void load().catch(() => {})

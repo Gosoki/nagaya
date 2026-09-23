@@ -18,7 +18,7 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 
-import { ApiError, api } from 'src/api/client'
+import { api, errorText } from 'src/api/client'
 import type { Bill, Entry, MonthlyData, Statement } from 'src/api/types'
 
 interface BillView {
@@ -205,7 +205,7 @@ export const useBills = defineStore('bills', () => {
         lastError.value = null
       })
       .catch((e: unknown) => {
-        lastError.value = e instanceof ApiError ? e.text : String(e)
+        lastError.value = errorText(e)
         throw e
       })
       .finally(() => {

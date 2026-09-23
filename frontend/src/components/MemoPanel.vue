@@ -111,7 +111,7 @@ import { useQuasar } from 'quasar'
 import { nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { ApiError, api } from 'src/api/client'
+import { api, errorText } from 'src/api/client'
 import type { Category, Memo } from 'src/api/types'
 import { isSubmitEnter } from 'src/html'
 import { useMemos } from 'src/stores/memos'
@@ -164,7 +164,7 @@ async function save(run: () => Promise<unknown>): Promise<boolean> {
     return true
   } catch (e) {
     failed.value += 1
-    $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e), timeout: 5000 })
+    $q.notify({ type: 'negative', message: errorText(e), timeout: 5000 })
     return false
   } finally {
     busy.value = false
@@ -203,7 +203,7 @@ async function addMemo() {
     await memos.create(title)
     newTitle.value = ''
   } catch (e) {
-    $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e) })
+    $q.notify({ type: 'negative', message: errorText(e) })
   } finally {
     adding.value = false
   }

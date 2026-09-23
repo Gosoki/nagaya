@@ -107,7 +107,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 
-import { ApiError } from 'src/api/client'
+import { errorText } from 'src/api/client'
 import type { Entry, EntryKind, Statement } from 'src/api/types'
 import { jstDateOf } from 'src/date'
 import { formatYen } from 'src/i18n'
@@ -312,7 +312,7 @@ async function onRefresh(done: () => void) {
   try {
     await ledger.refresh()
   } catch (e) {
-    $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e) })
+    $q.notify({ type: 'negative', message: errorText(e) })
   } finally {
     done()
   }

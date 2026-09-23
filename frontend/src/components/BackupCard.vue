@@ -27,7 +27,7 @@
              原来这一行 v-if 一成立，「上次 X · 共 N 份」整条就不渲染了 ——
              而「最新那份打不开」的时候，人比平时更需要知道上次是哪天、还剩几份 -->
         <q-item-label v-if="st.error" class="text-negative">
-          {{ errorText(st.error) }}
+          {{ statusText(st.error) }}
         </q-item-label>
         <!-- 「这儿还没有」不是警报是指令：刚把目录指到别处的人做的是对的事，
              不该被一盏红灯迎接 —— 而按钮就在这一行的右边 -->
@@ -65,7 +65,7 @@ import { useQuasar } from 'quasar'
 import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { ApiError, api } from 'src/api/client'
+import { api, errorText } from 'src/api/client'
 import type { BackupMade, BackupStatus } from 'src/api/types'
 
 const { t, te } = useI18n()
@@ -90,7 +90,7 @@ async function runNow() {
     const made = await api.post<BackupMade>('/api/backup')
     $q.notify({ type: 'positive', timeout: 3000, message: t('backup.made', { name: made.name }) })
   } catch (e) {
-    $q.notify({ type: 'negative', timeout: 6000, message: e instanceof ApiError ? e.text : String(e) })
+    $q.notify({ type: 'negative', timeout: 6000, message: errorText(e) })
   } finally {
     busy.value = false
     await load()          // 成没成都重探一遍：失败的原因也要在那一行上说出来
@@ -98,7 +98,7 @@ async function runNow() {
 }
 
 /** 后端给的是错误码，文案在这边查。查不到就把码本身显出来，总比空白强 */
-function errorText(code: string): string {
+function statusText(code: string): string {
   const key = `errors.${code}`
   return te(key) ? t(key) : code
 }

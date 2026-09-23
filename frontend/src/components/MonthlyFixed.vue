@@ -160,7 +160,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 
-import { ApiError, api } from 'src/api/client'
+import { ApiError, api, errorText } from 'src/api/client'
 import type { Category, Member, MonthlyData, MonthlyRow } from 'src/api/types'
 import MemberPicker from 'src/components/MemberPicker.vue'
 import SplitEditor from 'src/components/SplitEditor.vue'
@@ -446,7 +446,7 @@ async function carry(list: Row[]) {
     $q.notify({
       type: 'negative',
       timeout: 6000,
-      message: `${t('monthly.title')}: ${e instanceof ApiError ? e.text : String(e)}`,
+      message: `${t('monthly.title')}: ${errorText(e)}`,
     })
   } finally {
     carrying.value = false
@@ -665,7 +665,7 @@ async function saveRow(row: Row) {
     // 失败就留在 dirty，输入原样保着，人能看见也能改了重来
     $q.notify({
       type: 'negative',
-      message: `${row.name}: ${e instanceof ApiError ? e.text : String(e)}`,
+      message: `${row.name}: ${errorText(e)}`,
       timeout: 5000,
     })
     // 版本冲突：手里这份 version 已经过期，不重新取的话再点多少次都是同一个 409。
@@ -720,7 +720,7 @@ function removeItem(row: Row) {
         ],
       })
     } catch (e) {
-      $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e) })
+      $q.notify({ type: 'negative', message: errorText(e) })
     }
   })
 }
@@ -758,7 +758,7 @@ async function setPayer(row: Row, payerId: number) {
       emit('saved')             // 谁垫的变了，账单上的应收应付跟着变
     }
   } catch (e) {
-    $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e), timeout: 5000 })
+    $q.notify({ type: 'negative', message: errorText(e), timeout: 5000 })
     await load().catch(() => {})
   } finally {
     busy.value = false

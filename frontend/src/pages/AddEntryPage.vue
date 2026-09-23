@@ -244,7 +244,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
-import { ApiError, api } from 'src/api/client'
+import { ApiError, api, errorText } from 'src/api/client'
 import { jstDateOf, todayJst } from 'src/date'
 import { newClientKey } from 'src/clientKey'
 import { digitsOf } from 'src/digits'
@@ -571,7 +571,7 @@ async function loadForEdit(id: number) {
     hydrating = false
   } catch (err) {
     hydrating = false
-    $q.notify({ type: 'negative', message: err instanceof ApiError ? err.text : String(err) })
+    $q.notify({ type: 'negative', message: errorText(err) })
     goBack()
   }
 }
@@ -613,7 +613,7 @@ async function saveEdit() {
     }
     $q.notify({
       type: 'negative',
-      message: e instanceof ApiError ? e.text : String(e),
+      message: errorText(e),
       timeout: 4000,
     })
   } finally {
@@ -635,7 +635,7 @@ async function resolveConflict() {
   try {
     latest = await api.get<Entry>(`/api/entries/${id}`)
   } catch (err) {
-    $q.notify({ type: 'negative', message: err instanceof ApiError ? err.text : String(err) })
+    $q.notify({ type: 'negative', message: errorText(err) })
     return
   }
   const before = loaded.value
@@ -731,7 +731,7 @@ function removeEntry() {
           $q.notify({ type: 'warning', message: t('entry.deleteConflict'), timeout: 5000 })
           return
         }
-        $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e) })
+        $q.notify({ type: 'negative', message: errorText(e) })
         return
       }
       await ledger.refresh().catch(() => {})
@@ -751,7 +751,7 @@ function removeEntry() {
                 await ledger.refresh().catch(() => {})
                 $q.notify({ type: 'positive', message: t('entry.restored'), timeout: 1500 })
               } catch (e) {
-                $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e) })
+                $q.notify({ type: 'negative', message: errorText(e) })
               }
             },
           },
@@ -849,7 +849,7 @@ async function save() {
       } else {
         $q.notify({
           type: 'negative',
-          message: e instanceof ApiError ? e.text : String(e),
+          message: errorText(e),
           timeout: 4000,
         })
       }
@@ -882,7 +882,7 @@ function notifySaved(saved: Entry) {
             await ledger.remove(saved)
             $q.notify({ type: 'info', message: t('entry.undone'), timeout: 1500 })
           } catch (e) {
-            $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e) })
+            $q.notify({ type: 'negative', message: errorText(e) })
           }
         },
       },

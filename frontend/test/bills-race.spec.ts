@@ -22,6 +22,7 @@ const calls: string[] = []
 
 vi.mock('src/api/client', () => ({
   ApiError: class extends Error {},
+  errorText: (e: unknown) => String(e),
   api: {
     get: (path: string) => {
       calls.push(path)

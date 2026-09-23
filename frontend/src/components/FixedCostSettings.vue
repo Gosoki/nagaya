@@ -133,7 +133,7 @@ import { useQuasar } from 'quasar'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { ApiError, api } from 'src/api/client'
+import { api, errorText } from 'src/api/client'
 import type { Category } from 'src/api/types'
 import { isSubmitEnter } from 'src/html'
 import { useMeta } from 'src/stores/meta'
@@ -170,7 +170,7 @@ async function save(c: Category, patch: Record<string, unknown>): Promise<boolea
     meta.categories = meta.categories.map((x) => (x.id === saved.id ? saved : x))
     return true
   } catch (e) {
-    $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e), timeout: 5000 })
+    $q.notify({ type: 'negative', message: errorText(e), timeout: 5000 })
     return false
   }
 }
@@ -200,7 +200,7 @@ async function add() {
     await meta.load()
     $q.notify({ type: 'positive', message: t('monthly.added'), timeout: 2000 })
   } catch (e) {
-    $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e) })
+    $q.notify({ type: 'negative', message: errorText(e) })
   } finally {
     adding.value = false
   }

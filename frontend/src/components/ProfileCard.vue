@@ -205,7 +205,7 @@ import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 
-import { ApiError } from 'src/api/client'
+import { errorText } from 'src/api/client'
 import { schemePref as scheme } from 'src/colorScheme'
 import { THEME_COLORS, themeColor } from 'src/themeColor'
 import { MEMBER_COLORS } from 'src/palette'
@@ -252,7 +252,7 @@ async function onFile(e: Event) {
     const saved = await auth.uploadAvatar(small)
     meta.members = meta.members.map((m) => (m.id === saved.id ? saved : m))
   } catch (err) {
-    $q.notify({ type: 'negative', message: err instanceof ApiError ? err.text : String(err), timeout: 5000 })
+    $q.notify({ type: 'negative', message: errorText(err), timeout: 5000 })
   } finally {
     uploading.value = false
   }
@@ -263,14 +263,14 @@ async function removePhoto() {
     const saved = await auth.removeAvatar()
     meta.members = meta.members.map((m) => (m.id === saved.id ? saved : m))
   } catch (err) {
-    $q.notify({ type: 'negative', message: err instanceof ApiError ? err.text : String(err), timeout: 5000 })
+    $q.notify({ type: 'negative', message: errorText(err), timeout: 5000 })
   }
 }
 
 /** 深浅色、主题色。点下去当场换上，再存进账号；存不上就换回去 */
 function savePref(key: 'scheme' | 'theme_color', value: string) {
   setPref(key, value).catch((e) => {
-    $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e), timeout: 5000 })
+    $q.notify({ type: 'negative', message: errorText(e), timeout: 5000 })
   })
 }
 
@@ -287,7 +287,7 @@ async function save(patch: Record<string, unknown>): Promise<boolean> {
     meta.members = meta.members.map((m) => (m.id === saved.id ? saved : m))
     return true
   } catch (e) {
-    $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e), timeout: 5000 })
+    $q.notify({ type: 'negative', message: errorText(e), timeout: 5000 })
     return false
   }
 }
@@ -343,7 +343,7 @@ async function savePassword() {
   try {
     await auth.updateMe({ password: fresh, old_password: oldPw.value })
   } catch (e) {
-    $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e), timeout: 5000 })
+    $q.notify({ type: 'negative', message: errorText(e), timeout: 5000 })
     busy.value = false
     return
   }

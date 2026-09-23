@@ -133,7 +133,7 @@ import { useQuasar } from 'quasar'
 import { computed, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { ApiError, api } from 'src/api/client'
+import { api, errorText } from 'src/api/client'
 import type { Member } from 'src/api/types'
 import MemberAvatar from 'src/components/MemberAvatar.vue'
 import { todayJst } from 'src/date'
@@ -169,7 +169,7 @@ async function save(m: Member, patch: Record<string, unknown>): Promise<boolean>
     await meta.load().catch(() => {})
     return true
   } catch (e) {
-    $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e), timeout: 5000 })
+    $q.notify({ type: 'negative', message: errorText(e), timeout: 5000 })
     return false
   }
 }
@@ -237,7 +237,7 @@ async function create() {
       actions: [{ label: t('common.confirm'), color: 'white' }],
     })
   } catch (e) {
-    $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e), timeout: 5000 })
+    $q.notify({ type: 'negative', message: errorText(e), timeout: 5000 })
   } finally {
     busy.value = false
   }
