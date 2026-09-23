@@ -809,9 +809,9 @@ function textOf(b: Bill): string {
   lines.push(`【${head}】 ${t('bill.total')} ${formatYen(b.total_expense)}`)
   if (b.covers_from) lines.push(t('bill.coversRange', { from: b.covers_from, to: b.covers_to }))
   if (!b.is_draft) lines.push(b.settled ? t('bill.settledBadge') : t('bill.unsettled'))
-  // 每人明细是**实时**重算的，转账方案却是出账当时冻结的那份 —— 这张单子
-  // 被改过之后两者必然对不上。屏幕上那条橙色横幅是这条规矩唯一的凭证，
-  // 而复制文本才是「用户手里那份」，不能只有屏幕上有
+  // 每人明细是**实时**重算的，而发进群里的是出账那一刻的数 —— 这张单子
+  // 被改过之后两者必然对不上。屏幕上有那颗「出账后改过」的签，
+  // 而复制文本才是「大家手里那份」，不能只有屏幕上有
   if (b.edited_after_cut) {
     lines.push(
       b.edited_after_cut.from_earlier
@@ -836,22 +836,22 @@ function textOf(b: Bill): string {
         : `${r.closing > 0 ? t('bill.toReceive') : t('bill.toPay')} ${formatYen(Math.abs(r.closing))}`
     lines.push(`${nameOf(r.member_id)}  ${bits.join(' / ')} → ${tail}`)
   }
+  // **不带转账方案**（你定的）：复制出去的是「大家都要看的那份」—— 这一期花了多少、
+  // 每人应担/垫付/该收该付多少。谁给谁转、转了没有，点链接进来看（方案会随后来的
+  // 转账和新账变，贴出去的文字不会跟着变，贴旧了反而误导人）
   lines.push('')
-  if (b.transfers.length) {
-    lines.push(t('bill.plan', { n: b.transfers.length }))
-    for (const [i, tr] of b.transfers.entries()) {
-      // **进度得跟着一起贴出去。** 这份文本才是「群里那份」，而屏幕上有绿勾、
-      // 它没有 —— 于是已经还清的人在群里看到自己名下白纸黑字还欠着，再转一次
-      const done = b.settled_transfers[i]
-      const n = noteFor(b, tr, i)
-      const note = done ? `  ${t('bill.planDone')}` : n ? `  ${n}` : ''
-      lines.push(`  ${nameOf(tr.from_id)} → ${nameOf(tr.to_id)}  ${formatYen(tr.amount)}${note}`)
-    }
-  } else {
-    lines.push(t('bill.planEmpty'))
-  }
-  if (supersededIn(b)) lines.push(t('bill.planSuperseded'))
+  lines.push(t('bill.linkLine', { url: linkOf(b) }))
   return lines.join('\n')
+}
+
+/**
+ * 这张账单的地址。出过的单子是 /bill/编号（进来会落在「已出账」那一张上）；
+ * 草稿是 /bill?tab=draft（落在「未出账」）。用这台设备现在打开的地址拼 ——
+ * 局域网里就是 http://10.0.0.x:8000，和大家装在主屏上的是同一个
+ */
+function linkOf(b: Bill): string {
+  const base = window.location.origin
+  return b.is_draft || b.statement_id === null ? `${base}/bill?tab=draft` : `${base}/bill/${b.statement_id}`
 }
 const billText = computed(() => (bill.value ? textOf(bill.value) : ''))
 

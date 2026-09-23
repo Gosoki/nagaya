@@ -59,7 +59,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import { ApiError } from 'src/api/client'
 import { setLang } from 'src/i18n'
@@ -67,6 +67,7 @@ import { useAuth } from 'src/stores/auth'
 
 const { t, locale } = useI18n()
 const router = useRouter()
+const route = useRoute()
 const auth = useAuth()
 
 /**
@@ -101,7 +102,11 @@ async function submit() {
   error.value = ''
   try {
     await auth.login(name.value, password.value)
-    await router.push({ name: 'add' })
+    // 从群里的账单链接点进来的：登录完回到那张账单。只认站内路径（以单个 / 开头），
+    // 别让一个 //别的网站 的 next 把人带走
+    const next = route.query.next
+    const inside = typeof next === 'string' && next.startsWith('/') && !next.startsWith('//')
+    await router.replace(inside ? next : { name: 'add' })
   } catch (e) {
     // 只有后端真的说「不认识你」才是密码不对。断网、服务器没起来、500 都不是 ——
     // 原来一律显示「用户名或密码不对」，于是没网的时候人会一遍遍去改密码

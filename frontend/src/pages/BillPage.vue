@@ -37,6 +37,12 @@ const shown = computed<BillKey>(() => {
 
 /** 从别处带着 :statementId 进来：收下它，然后把地址收回 /bill */
 function adoptRouteParam() {
+  // 复制出去的草稿链接是 /bill?tab=draft：落在「未出账」那一页
+  if (route.query.tab === 'draft') {
+    bills.tab = 'draft'
+    void router.replace({ name: 'bill' })
+    return
+  }
   const id = Number(route.params.statementId) || null
   if (id === null) return
   bills.detail = id
@@ -45,5 +51,5 @@ function adoptRouteParam() {
 }
 
 onMounted(adoptRouteParam)
-watch(() => route.params.statementId, adoptRouteParam)
+watch(() => [route.params.statementId, route.query.tab], adoptRouteParam)
 </script>

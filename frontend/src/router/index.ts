@@ -31,7 +31,11 @@ export const router = createRouter({
 })
 
 router.beforeEach((to) => {
-  if (to.name !== 'login' && !getToken()) return { name: 'login' }
+  // 没登录就去登录页，**记着本来要去哪**：群里贴的账单链接点开是登录页，
+  // 登录完应该回到那张账单，而不是落在记一笔
+  if (to.name !== 'login' && !getToken()) {
+    return to.fullPath === '/' ? { name: 'login' } : { name: 'login', query: { next: to.fullPath } }
+  }
   if (to.name === 'login' && getToken()) return { name: 'add' }
   return true
 })
