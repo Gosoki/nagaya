@@ -456,7 +456,7 @@ import { useRouter } from 'vue-router'
 
 import { ApiError, api, errorText } from 'src/api/client'
 import type { Bill, BillTransfer, Entry, Statement } from 'src/api/types'
-import { leftOf as leftOfPlan } from 'src/core/transfers'
+import { leftOf as leftOfPlan, mineOf, supersededIn } from 'src/core/transfers'
 import { parseTypedYen } from 'src/digits'
 import { escapeHtml } from 'src/html'
 import { isLoopback } from 'src/installGuide'
@@ -553,13 +553,7 @@ function noteFor(b: Bill, tr: BillTransfer, i: number): string {
 const noteClassOf = (tr: BillTransfer, i: number) =>
   leftOf(tr, i) === 0 ? 'text-grey-6' : 'text-primary'
 
-/**
- * 这张单子的方案里有行**永远点不亮了** —— 钱已经绕别的路结清，
- * 或者后来的账把债权重新净额化了。这时候得说一句，否则那张永远挂着「未结清」
- * 而没人知道为什么。
- */
-const supersededIn = (b: Bill) =>
-  !b.is_draft && b.transfers.some((tr, i) => !b.settled_transfers[i] && leftOfPlan(b, tr, i) === 0)
+/** 这张单子的方案里有行永远点不亮了（判据见 core/transfers 的 supersededIn） */
 const superseded = computed(() => (bill.value ? supersededIn(bill.value) : false))
 
 /**
@@ -585,21 +579,9 @@ const myLeft = computed(() => {
 })
 
 /**
- * 方案里没有我这条边时，我在这张单子上**此刻**还差多少。和 leftOf 同一个「两头取小」：
- *   * 不超过这张单子自己的数 —— 翻七月那张，不该跳出今天的欠款；
- *   * 此刻已经两清（或者方向反过来了）就是 0 —— 原来直接印这张单子的 closing，
- *     钱早就转过了，大字还写着「你应付 ¥X」
- */
-function effClosing(b: Bill, row: { member_id: number; closing: number }): number {
-  const live = Number(b.live_closing?.[String(row.member_id)] ?? row.closing)
-  if (Math.sign(live) !== Math.sign(row.closing)) return 0
-  return Math.sign(row.closing) * Math.min(Math.abs(row.closing), Math.abs(live))
-}
-
-/**
  * 屏幕上最重要的那两行：一行标签，一行结论。
  *
- * **它是行动指示，所以按「此刻」说话，不按出账那一刻说话**（见 leftOf / effClosing）：
+ * **它是行动指示，所以按「此刻」说话，不按出账那一刻说话**（见 core/transfers 的 mineOf）：
  * 原来直接印冻结方案里的原额，已经还清的人照样被命令「你要给 Zen ¥9,999」，
  * 他真会再转一次。口径仍然限定在这张单子的方案里：翻七月那张时不该跳出今天的欠款。
  *
@@ -615,72 +597,34 @@ type MinePart = {
   /** 要转给好几个人时一笔一行 */
   lines?: string[]
 }
-const minePart = computed<MinePart>(() => {
-  const row = mine.value
-  const b = bill.value
-  const settled = {
-    label: t('bill.youSettledLabel'),
-    figure: t('bill.youSettled'),
-    tone: 'settled' as const,
-  }
-  // 我不在这张单子上（后来才搬进来的人翻旧账单）：这一块照样占着位置，
-  // 否则这一页比别的页矮一截，两页来回切时底下整块上下跳
-  if (!row || !b) return { label: t('bill.youSettledLabel'), figure: t('bill.youNotIn'), tone: 'settled', multi: true }
-  const me = row.member_id
-  const rows = b.transfers
-    .map((tr, i) => ({ tr, left: leftOf(tr, i) }))
-    .filter((x) => (x.tr.from_id === me || x.tr.to_id === me) && x.left > 0)
-  const out = rows.filter((x) => x.tr.from_id === me)
-  const inc = rows.filter((x) => x.tr.to_id === me)
-  if (out.length === 1 && !inc.length) {
-    const only = out[0]!
-    return {
-      label: t('bill.youPayLabel', { to: nameOf(only.tr.to_id) }),
-      figure: formatYen(only.left),
-      tone: 'owe',
-    }
-  }
-  if (inc.length && !out.length) {
-    return {
-      label: t('bill.youReceiveLabel'),
-      figure: formatYen(inc.reduce((n, x) => n + x.left, 0)),
-      tone: 'owed',
-    }
-  }
-  if (!out.length && !inc.length && b.transfers.some((tr) => tr.from_id === me || tr.to_id === me)) {
-    return settled
-  }
-  if (!b.transfers.some((tr) => tr.from_id === me || tr.to_id === me)) {
-    const eff = effClosing(b, row)
-    if (eff === 0) return settled
-    return {
-      label: eff > 0 ? t('bill.youReceiveLabel') : t('bill.youOweLabel'),
-      figure: formatYen(Math.abs(eff)),
-      tone: eff > 0 ? 'owed' : 'owe',
-    }
-  }
-  // 要转给好几个人：**得全列出来**（原来只取第一条、却把欠款总额安在那个人头上）。
-  // 收成一行、字小一号 —— 整句 28px 会折成两行，把这一块撑高
-  const pay = rows.filter((x) => x.tr.from_id === me)
-  if (pay.length === 1) {
-    // 只转给一个人（同时还有人要转给我）：照单笔那一档印，字不缩
-    return {
-      label: t('bill.youPayLabel', { to: nameOf(pay[0]!.tr.to_id) }),
-      figure: formatYen(pay[0]!.left),
-      tone: 'owe',
-    }
-  }
-  if (pay.length) {
-    return {
-      label: t('bill.youPayListLabel'),
-      figure: pay.map((x) => `${nameOf(x.tr.to_id)} ${formatYen(x.left)}`).join('  ·  '),
+const minePart = computed<MinePart>((): MinePart => {
+  // 判定（此刻欠谁、欠多少）在 core/transfers 的 mineOf，有单测；这里只把它说成人话
+  const m = mineOf(bill.value, mine.value)
+  const who = (to: number, amount: number) => `${nameOf(to)} ${formatYen(amount)}`
+  switch (m.kind) {
+    case 'notIn':
+      // 我不在这张单子上（后来才搬进来的人翻旧账单）：这一块照样占着位置，
+      // 否则这一页比别的页矮一截，两页来回切时底下整块上下跳
+      return { label: t('bill.youSettledLabel'), figure: t('bill.youNotIn'), tone: 'settled', multi: true }
+    case 'settled':
+      return { label: t('bill.youSettledLabel'), figure: t('bill.youSettled'), tone: 'settled' }
+    case 'pay':
+      return { label: t('bill.youPayLabel', { to: nameOf(m.to) }), figure: formatYen(m.amount), tone: 'owe' }
+    case 'receive':
+      return { label: t('bill.youReceiveLabel'), figure: formatYen(m.amount), tone: 'owed' }
+    case 'owe':
+      return { label: t('bill.youOweLabel'), figure: formatYen(m.amount), tone: 'owe' }
+    case 'payMany':
+      // 要转给好几个人：收成一行、字小一号 —— 整句 28px 会折成两行，把这一块撑高。
       // 三个人合租最多欠两个人；万一更多，头两行照印，剩下的看下面的转账方案
-      lines: pay.slice(0, 2).map((x) => `${nameOf(x.tr.to_id)} ${formatYen(x.left)}`),
-      tone: 'owe',
-      multi: true,
-    }
+      return {
+        label: t('bill.youPayListLabel'),
+        figure: m.items.map((x) => who(x.to, x.amount)).join('  ·  '),
+        lines: m.items.slice(0, 2).map((x) => who(x.to, x.amount)),
+        tone: 'owe',
+        multi: true,
+      }
   }
-  return settled   // 走不到：上面几档已经把所有情况分完了，这一行只是给类型检查一个出口
 })
 
 /** 「出账后改过」那颗签点开之后的全文。和复制出去的文本是同一句 */
