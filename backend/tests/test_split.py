@@ -37,7 +37,7 @@ def _run(case: dict) -> dict[str, int]:
     return split(
         _rule(case),
         case["amount"],
-        order=case["order"],
+        order=case.get("order"),
         payer=case.get("payer"),
         rotate_seed=case.get("rotate_seed", 0),
     )
@@ -188,24 +188,3 @@ def test_random_fixture_is_up_to_date() -> None:
         "随机用例文件过期了，请重跑 `.venv/bin/python -m tools.gen_random_cases`：\n"
         + "\n".join(stale[:5])
     )
-
-
-#: 不带 order 的用例。**前端 test/split-no-order.spec.ts 里是同一份，期望值也一样** ——
-#: 523 条夹具全都带 order，这条路一条都没测到，而两边默认顺序本来是不同的：
-#: Python 的 dict 保持插入序，JS 的 Object.keys 会把数字键升序重排。
-NO_ORDER_CASES = [
-    ({"mode": "ratio", "weights": {"3": 1, "1": 1, "2": 1}}, 1001, "1",
-     {"1": 334, "2": 334, "3": 333}),
-    ({"mode": "ratio", "weights": {"10": 1, "2": 1, "1": 1}}, 1000, None,
-     {"1": 334, "2": 333, "10": 333}),
-    ({"mode": "ratio", "weights": {"2": 2, "1": 1, "3": 1}, "remainder_to": "order"}, 997, "2",
-     {"1": 249, "2": 499, "3": 249}),
-    ({"mode": "exact", "exact": {"3": 500, "1": 300, "2": 200}}, 1000, "1",
-     {"1": 300, "2": 200, "3": 500}),
-]
-
-
-@pytest.mark.parametrize("rule, amount, payer, expected", NO_ORDER_CASES)
-def test_without_order_both_implementations_pick_the_same_sequence(rule, amount, payer, expected):
-    """不给顺序时也必须两边一致 —— 顺序决定平局时那 1 円归谁。"""
-    assert split(rule, amount, payer=payer) == expected

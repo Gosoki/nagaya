@@ -83,7 +83,7 @@ function byMemberId(x: string, y: string): number {
 
 function resolveMembers(source: Record<string, number>, order?: string[]): string[] {
   // 没给顺序时两边必须挑同一个：Object.keys 会把数字键升序重排，而 Python 的
-  // dict 保持插入序。夹具全都带 order，这条分歧一条都测不到 —— 明确排一次
+  // dict 保持插入序。原来夹具全都带 order，测不到这条分歧（现在共享夹具末尾 4 条专门不带）—— 明确排一次
   if (!order) return Object.keys(source).sort(byMemberId)
   const a = [...order].sort()
   const b = Object.keys(source).sort()

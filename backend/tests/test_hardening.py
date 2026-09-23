@@ -89,7 +89,7 @@ def test_fractional_weight_is_refused_not_truncated(session: Session, members) -
 
     两边的分摊引擎**本来是挡了的**（split.py 的 _require_int / split.ts 的 requireInt），
     是 expand() 抢在它们前面把证据抹掉。而 TS 那边没有 expand()，于是同一条规则
-    前端预览抛错、后端静默存下 —— 正好是那 523 条 fixture 想钉死的事。
+    前端预览抛错、后端静默存下 —— 正好是共享 fixture 想钉死的事。
     """
     a, b, c_ = members
     cat = _cat(session)

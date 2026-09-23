@@ -2,7 +2,7 @@
  * 前端分摊引擎回归 —— SPEC §7.3 的另一半。
  *
  * 两份 fixture：
- *   split_cases.json         手写 23 条，和后端 pytest 跑的是同一个文件
+ *   split_cases.json         手写 27 条，和后端 pytest 跑的是同一个文件
  *   split_cases_random.json  Python 生成的 500 条，锁住 TS 不跟后端漂
  *
  * 任何一条红了，就说明前后端算出来的钱不一样 —— 这正是「预览 3,167、
@@ -23,7 +23,7 @@ interface Case {
   name?: string
   mode: 'ratio' | 'exact'
   amount: number
-  order: string[]
+  order?: string[]
   weights?: Record<string, number>
   adjustments?: Record<string, number>
   exact?: Record<string, number>

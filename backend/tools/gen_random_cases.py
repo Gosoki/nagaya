@@ -1,7 +1,7 @@
 """生成随机分摊用例，落盘给前后端一起验 —— SPEC §7.3。
 
 分工：
-    split_cases.json         手写的 23 条，**保证 Python 实现本身是对的**
+    split_cases.json         手写的 27 条，**保证 Python 实现本身是对的**
     split_cases_random.json  这里生成的 500 条，**保证 TS 不跟 Python 漂**
 
 固定随机种子，所以重跑的结果一模一样；改了算法才会 diff，一眼能看出来。

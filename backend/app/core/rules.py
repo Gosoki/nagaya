@@ -51,7 +51,7 @@ def _as_int(value: Any, field: str, key: str) -> int:
         前两个人一分不出、第三个人全担，屏幕上一个字都不提。
         而分摊引擎两边（split.py 的 _require_int、split.ts 的 requireInt）**本来是挡了的**，
         是这一行抢在它们前面把证据抹掉了 —— 于是前端预览抛错、后端静默存下，
-        正好是那 523 条 fixture 想钉死的「预览和落库不一样」。
+        正好是共享 fixture 想钉死的「预览和落库不一样」。
     """
     if isinstance(value, bool) or not isinstance(value, int):
         raise RuleError(

@@ -185,7 +185,7 @@ def _members(source: Mapping[str, int], order: Sequence[str] | None) -> list[str
     if order is None:
         # 没给顺序时，两份实现必须挑**同一个**。Python 的 dict 保持插入序，
         # 而 JS 的 Object.keys 会把数字键升序重排 —— 同一条规则两边算出两个结果，
-        # 偏偏 523 条夹具全都带 order，这条分歧一条都测不到。统一成按成员 id 排
+        # 原来夹具全都带 order，这条分歧一条都测不到（现在共享夹具末尾 4 条专门不带）。统一成按成员 id 排
         return sorted(source, key=_member_sort_key)
     members = list(order)
     if set(members) != set(source):

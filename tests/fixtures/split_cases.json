@@ -4,7 +4,8 @@
     "新增分摊规则时：先加用例，再改两边实现。两边结果必须逐円一致。",
     "字段：mode=ratio 用 weights/adjustments；mode=exact 用 exact。",
     "remainder_to 决定最大余数法平局时 1 円给谁（payer/order/rotate），见 SPEC §4.3。",
-    "expect_error 表示这个输入应当被拒绝，值是错误码。"
+    "expect_error 表示这个输入应当被拒绝，值是错误码。",
+    "order 可省：省了两边都按成员 id 升序排。末尾 4 条专门钉这个，它们的键故意是乱序的 —— 重排版时别 sort_keys。"
   ],
   "cases": [
     {
@@ -169,6 +170,33 @@
       "adjustments": {"z": 100},
       "remainder_to": "payer", "payer": "a",
       "expect_error": "unknown_member"
+    },
+    {
+      "name": "不给 order：数字键乱序也按成员 id 排，平局 1 円给付款人",
+      "mode": "ratio", "amount": 1001,
+      "weights": {"3": 1, "1": 1, "2": 1},
+      "payer": "1",
+      "expected": {"1": 334, "2": 334, "3": 333}
+    },
+    {
+      "name": "不给 order、也没有付款人：10 排在 2 后面（按数值，不按字符串）",
+      "mode": "ratio", "amount": 1000,
+      "weights": {"10": 1, "2": 1, "1": 1},
+      "expected": {"1": 334, "2": 333, "10": 333}
+    },
+    {
+      "name": "不给 order、余数按顺序给：顺序是成员 id 升序",
+      "mode": "ratio", "amount": 997,
+      "weights": {"2": 2, "1": 1, "3": 1},
+      "remainder_to": "order", "payer": "2",
+      "expected": {"1": 249, "2": 499, "3": 249}
+    },
+    {
+      "name": "不给 order 的 exact：照填的数，键的顺序不影响",
+      "mode": "exact", "amount": 1000,
+      "exact": {"3": 500, "1": 300, "2": 200},
+      "payer": "1",
+      "expected": {"1": 300, "2": 200, "3": 500}
     }
   ]
 }
