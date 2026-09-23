@@ -68,13 +68,20 @@ async def _daily_backup() -> None:
             made = await asyncio.to_thread(_backup_once)
             if made is not None:
                 log.info("备份完成：%s（%d 字节）", made["name"], made["bytes"])
-            # 备份不走 HTTP，IdleRelease 看不见它：半夜那次 VACUUM INTO 把整本库读进了
-            # 连接的页缓存，不在这儿还的话要一直攥到第二天有人来
-            await asyncio.to_thread(release_memory)
         except asyncio.CancelledError:
             raise
+        except BackupError as e:
+            # 预料之中的「这回不备」：账本还是空的（新装好、还没建账号）、目录写不进去、盘满……
+            # 原因一句话就说清了，不值得每小时甩一整段 traceback；设置页上那一行也会照实说
+            if e.code == "backup_empty_source":
+                log.info("账本里还没有人，这回不备份")
+            else:
+                log.warning("自动备份没做成：%s（%s）", e, e.code)
         except Exception:
             log.exception("自动备份失败")
+        # 备份不走 HTTP，IdleRelease 看不见它：那次 VACUUM INTO 把整本库读进了连接的页缓存，
+        # 不在这儿还的话要一直攥到第二天有人来。没做成的那次也读过库，一样要还
+        await asyncio.to_thread(release_memory)
         await asyncio.sleep(_BACKUP_TICK)
 
 
