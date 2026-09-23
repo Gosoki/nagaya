@@ -12,7 +12,7 @@
  * 「同分母下的分子」直接比整数，所以不存在浮点误差。
  */
 
-export type RemainderTo = 'payer' | 'order' | 'rotate'
+type RemainderTo = 'payer' | 'order' | 'rotate'
 
 export class SplitError extends Error {
   constructor(
@@ -25,21 +25,21 @@ export class SplitError extends Error {
   }
 }
 
-export interface RatioRule {
+interface RatioRule {
   mode?: 'ratio'
   weights: Record<string, number>
   adjustments?: Record<string, number>
   remainder_to?: RemainderTo
 }
 
-export interface ExactRule {
+interface ExactRule {
   mode: 'exact'
   exact: Record<string, number>
 }
 
-export type SplitRule = RatioRule | ExactRule
+type SplitRule = RatioRule | ExactRule
 
-export interface SplitOptions {
+interface SplitOptions {
   order?: string[]
   payer?: string | null
   rotateSeed?: number
@@ -94,7 +94,7 @@ function resolveMembers(source: Record<string, number>, order?: string[]): strin
 }
 
 /** 固定金额模式：合计必须等于总额，对不上就拒绝并给出差额。 */
-export function splitExact(
+function splitExact(
   amount: number,
   exact: Record<string, number>,
   order?: string[],
@@ -116,7 +116,7 @@ export function splitExact(
 }
 
 /** 比例 ＋ 调整额模式（自动配平，SPEC §4.2）。 */
-export function splitRatio(
+function splitRatio(
   amount: number,
   weights: Record<string, number>,
   opts: SplitOptions & {

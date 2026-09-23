@@ -31,7 +31,6 @@ function cacheMe(m: Member | null) {
 
 export const useAuth = defineStore('auth', () => {
   const me = ref<Member | null>(null)
-  const ready = ref(false)
 
   async function login(name: string, password: string) {
     const r = await api.post<{ token: string; member: Member }>('/api/auth/login', { name, password })
@@ -77,8 +76,6 @@ export const useAuth = defineStore('auth', () => {
         me.value = cachedMe() ?? me.value
         if (me.value) setLang(me.value.lang)
       }
-    } finally {
-      ready.value = true
     }
   }
 
@@ -123,5 +120,5 @@ export const useAuth = defineStore('auth', () => {
     cacheMe(null)          // 和 token 同步清掉，别留下「人还在、token 没了」
   }
 
-  return { me, ready, login, restore, useCached, updateMe, uploadAvatar, removeAvatar, logout }
+  return { me, login, restore, useCached, updateMe, uploadAvatar, removeAvatar, logout }
 })

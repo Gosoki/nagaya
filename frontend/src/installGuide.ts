@@ -14,7 +14,7 @@ export function isStandalone(): boolean {
   )
 }
 
-export type InstallPlatform = 'ios-safari' | 'ios-other' | 'in-app' | 'android' | 'other'
+type InstallPlatform = 'ios-safari' | 'ios-other' | 'in-app' | 'android' | 'other'
 
 /**
  * 按 UA 认。`touchPoints` 单独传进来是为了能测：iPad 默认用「桌面版网站」，

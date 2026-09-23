@@ -516,7 +516,6 @@ function shortRange(from: string, to: string | null): string {
   return t('bill.coversRange', { from: head, to: tail })
 }
 
-/** 自己在这张账单上的那一行 */
 const showCutResult = computed({
   get: () => cutResult.value !== null,
   set: (v) => {
@@ -524,6 +523,7 @@ const showCutResult = computed({
   },
 })
 
+/** 自己在这张账单上的那一行 */
 const mine = computed(
   () => bill.value?.members.find((r) => r.member_id === auth.me?.id) ?? null,
 )
@@ -585,49 +585,6 @@ const myLeft = computed(() => {
 })
 
 /**
- * 最显眼那行字。**它是行动指示，所以按「此刻」说话，不按出账那一刻说话。**
- *
- * 原来直接印冻结方案里我那几笔的原额：已经还清的人照样被命令「你要给 Zen ¥9,999」，
- * 他真会再转一次（实测多付 ¥9,999）；还了一半的人被告知一个偏大的数。
- * 后端其实一直算着「已经转过多少」，只是那个数以前只送进了对话框的预填值。
- *
- * 口径仍然限定在**这张单子的方案**里：翻七月那张时不该跳出今天的欠款。
- */
-const mineText = computed(() => {
-  const row = mine.value
-  const b = bill.value
-  if (!row || !b) return ''
-  const me = row.member_id
-  const mineRows = b.transfers
-    .map((tr, i) => ({ tr, left: leftOf(tr, i) }))
-    .filter((x) => x.tr.from_id === me || x.tr.to_id === me)
-
-  if (mineRows.length) {
-    const out = mineRows.filter((x) => x.tr.from_id === me && x.left > 0)
-    const inc = mineRows.filter((x) => x.tr.to_id === me && x.left > 0)
-    if (!out.length && !inc.length) return t('bill.youSettled')
-    if (inc.length && !out.length) {
-      return t('bill.youReceive', { amount: formatYen(inc.reduce((n, x) => n + x.left, 0)) })
-    }
-    if (out.length === 1) {
-      const only = out[0]!
-      return t('bill.youPay', { to: nameOf(only.tr.to_id), amount: formatYen(only.left) })
-    }
-    // **得全列出来**：原来只取第一条、却把欠款总额安在那个人头上 ——
-    // 要分给两个人时，屏幕上最显眼的那行字会让人把全部的钱转给其中一个
-    return t('bill.youPayList', {
-      list: out.map((x) => `${nameOf(x.tr.to_id)} ${formatYen(x.left)}`).join('、'),
-    })
-  }
-
-  // 方案里没有我这条边：只说这张单子上我是什么状态（按此刻，见 effClosing）
-  const eff = effClosing(b, row)
-  if (eff === 0) return t('bill.youSettled')
-  if (eff > 0) return t('bill.youReceive', { amount: formatYen(eff) })
-  return t('bill.youOwe', { amount: formatYen(Math.abs(eff)) })
-})
-
-/**
  * 方案里没有我这条边时，我在这张单子上**此刻**还差多少。和 leftOf 同一个「两头取小」：
  *   * 不超过这张单子自己的数 —— 翻七月那张，不该跳出今天的欠款；
  *   * 此刻已经两清（或者方向反过来了）就是 0 —— 原来直接印这张单子的 closing，
@@ -640,11 +597,11 @@ function effClosing(b: Bill, row: { member_id: number; closing: number }): numbe
 }
 
 /**
- * 最显眼那行字，拆成「标签 + 数字」两段。
- * 多笔要转时没法拆（是一串「给谁多少、给谁多少」），那就整句照旧，只是小一号。
- */
-/**
  * 屏幕上最重要的那两行：一行标签，一行结论。
+ *
+ * **它是行动指示，所以按「此刻」说话，不按出账那一刻说话**（见 leftOf / effClosing）：
+ * 原来直接印冻结方案里的原额，已经还清的人照样被命令「你要给 Zen ¥9,999」，
+ * 他真会再转一次。口径仍然限定在这张单子的方案里：翻七月那张时不该跳出今天的欠款。
  *
  * **三档都必须有标签行。** 「已结清」那一档原来只有结论没有标签，于是这一块
  * 比别的档矮 20px —— 在未出账和已出账之间来回切，下面整块跟着上下跳。
@@ -723,7 +680,7 @@ const minePart = computed<MinePart>(() => {
       multi: true,
     }
   }
-  return { label: t('bill.youSettledLabel'), figure: mineText.value, tone: row.closing < 0 ? 'owe' : 'owed', multi: true }
+  return settled   // 走不到：上面几档已经把所有情况分完了，这一行只是给类型检查一个出口
 })
 
 /** 「出账后改过」那颗签点开之后的全文。和复制出去的文本是同一句 */

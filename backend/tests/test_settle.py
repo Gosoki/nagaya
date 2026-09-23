@@ -9,10 +9,18 @@ import pytest
 from app.core.settle import (
     SettleError,
     Transfer,
-    apply_transfers,
     plan_pairwise,
     plan_simplified,
 )
+
+
+def apply_transfers(balances: dict[int, int], transfers: list[Transfer]) -> dict[int, int]:
+    """把方案套到余额上，用来验「执行完是不是真归零」。"""
+    out = dict(balances)
+    for t in transfers:
+        out[t.from_id] = out.get(t.from_id, 0) + t.amount
+        out[t.to_id] = out.get(t.to_id, 0) - t.amount
+    return out
 
 
 def test_three_people_two_transfers() -> None:

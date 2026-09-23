@@ -329,8 +329,6 @@ def test_concurrent_backups_do_not_destroy_each_other(tmp_path: Path) -> None:
 
     from sqlmodel import SQLModel, create_engine
 
-    from app.models import Category, EntryKind, Member
-    from app.services import ledger
     from app.services.settings import seed_settings
 
     engine = create_engine(f"sqlite:///{tmp_path}/x.db", connect_args={"check_same_thread": False})

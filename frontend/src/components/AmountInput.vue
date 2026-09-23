@@ -129,7 +129,6 @@ defineExpose({ focus })
      那个上限正好把它裁掉一条边 */
   max-width: 100%;
   font-variant-numeric: tabular-nums;
-  color: inherit;
 }
 .amount::placeholder { color: var(--nagaya-ink-5); }
 /* 替身和输入框共用 .amount 的字形，只是看不见也不占地方 */

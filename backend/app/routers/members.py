@@ -58,8 +58,7 @@ def create_member(
         data["display_order"] = max(orders, default=-1) + 1
     member = Member(**data)
     _check_dates(member.joined_on, member.left_on)
-    if body.password:
-        member.password_hash = hash_password(body.password)
+    member.password_hash = hash_password(body.password)   # 空密码上面已经挡掉了
     session.add(member)
     session.flush()
     ledger.audit_config(session, actor.id, "create", "member", member.id, None, member, drop=_NOT_AUDITED)

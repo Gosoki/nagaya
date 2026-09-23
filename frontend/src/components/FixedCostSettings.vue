@@ -146,8 +146,6 @@ const ICONS = [
   'tv', 'subscriptions', 'phone_iphone', 'local_laundry_service', 'cleaning_services',
   'key', 'shopping_basket', 'receipt_long',
 ]
-// 分类挑的是亮那一档；头像走深的那一档，同一批色相（见 src/palette.ts）
-
 const { t } = useI18n()
 const $q = useQuasar()
 const meta = useMeta()

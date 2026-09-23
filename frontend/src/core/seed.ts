@@ -9,7 +9,7 @@
  * 加回去一分不差。总额取规则自己的和，不依赖当前金额；所以金额变了也照样能分，
  * 而原样发 exact 的话，金额一变后端就按「合计对不上」拒收。
  */
-export interface RatioSeed {
+interface RatioSeed {
   weights: Record<string, number>
   adjustments: Record<string, number>
 }

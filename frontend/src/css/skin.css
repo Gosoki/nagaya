@@ -185,9 +185,7 @@ html.dark .bill-tabs .q-tab.q-tab--active { background: var(--nagaya-surface-2);
 /* 被点中（router-link-active / active）的行不借主色当字色 */
 .q-item--active { color: inherit; }
 .q-list--separator > .q-item-type + .q-item-type,
-.q-list--separator > .q-virtual-scroll__content > .q-item-type + .q-item-type,
-.q-list--dark.q-list--separator > .q-item-type + .q-item-type,
-.q-list--dark.q-list--separator > .q-virtual-scroll__content > .q-item-type + .q-item-type {
+.q-list--dark.q-list--separator > .q-item-type + .q-item-type {
   border-top-color: var(--nagaya-line);
 }
 .q-list--dark,

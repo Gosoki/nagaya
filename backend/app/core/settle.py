@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable, Mapping, NamedTuple
+from typing import Mapping, NamedTuple
 
 
 class Transfer(NamedTuple):
@@ -97,11 +97,3 @@ def plan_pairwise(pair_debts: Mapping[tuple[int, int], int]) -> list[Transfer]:
             transfers.append(Transfer(from_id=b, to_id=a, amount=-net))
     return sorted(transfers, key=lambda t: (-t.amount, t.from_id, t.to_id))
 
-
-def apply_transfers(balances: Mapping[int, int], transfers: Iterable[Transfer]) -> dict[int, int]:
-    """把方案套到余额上，用来验「执行完是不是真归零」。"""
-    out = dict(balances)
-    for t in transfers:
-        out[t.from_id] = out.get(t.from_id, 0) + t.amount
-        out[t.to_id] = out.get(t.to_id, 0) - t.amount
-    return out

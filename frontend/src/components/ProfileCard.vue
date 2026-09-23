@@ -215,9 +215,6 @@ import MemberAvatar from 'src/components/MemberAvatar.vue'
 import { useAuth } from 'src/stores/auth'
 import { useMeta } from 'src/stores/meta'
 
-/** 头像色候选。够分得开就行 —— 三个人要一眼认出谁是谁 */
-// 头像挑的是深那一档；分类走亮的那一档，同一批色相（见 src/palette.ts）
-
 const { t } = useI18n()
 const $q = useQuasar()
 const router = useRouter()

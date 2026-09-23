@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import datetime as dt
 import threading
 from typing import Sequence
 
@@ -70,26 +69,19 @@ def _category_rule(session: Session, category_id: int | None) -> dict | None:
 def list_entries(
     statement_id: int | None = None,
     unbilled_only: bool = False,
-    since: dt.date | None = None,
-    until: dt.date | None = None,
-    include_deleted: bool = False,
     # ge=1 不是洁癖：limit=-1 会变成 SQL 的 LIMIT -1 ＝ 不限，
     # 一次把整个账本吐出来，还让「只算了最近 500 笔」那句截断提示失真
     limit: int = Query(200, ge=1, le=1000),
     session: Session = Depends(get_session),
     _: Member = Depends(current_member),
 ):
-    stmt = select(Entry).order_by(Entry.date.desc(), Entry.id.desc()).limit(limit)
-    if not include_deleted:
-        stmt = stmt.where(Entry.deleted_at.is_(None))
+    stmt = (
+        select(Entry).where(Entry.deleted_at.is_(None)).order_by(Entry.date.desc(), Entry.id.desc()).limit(limit)
+    )
     if statement_id is not None:
         stmt = stmt.where(Entry.statement_id == statement_id)
     if unbilled_only:
         stmt = stmt.where(Entry.statement_id.is_(None))
-    if since is not None:
-        stmt = stmt.where(Entry.date >= since)
-    if until is not None:
-        stmt = stmt.where(Entry.date <= until)
     rows = list(session.exec(stmt))
     shares = _shares_by_entry(session, [e.id for e in rows])
     labels = _labels(session, [e.statement_id for e in rows])

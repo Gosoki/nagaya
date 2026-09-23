@@ -130,6 +130,3 @@ SETTINGS_SPEC: dict[str, dict[str, Any]] = {
     },
 }
 
-
-def defaults() -> dict[str, Any]:
-    return {k: v["default"] for k, v in SETTINGS_SPEC.items()}

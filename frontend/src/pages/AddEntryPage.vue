@@ -124,7 +124,6 @@
           :amount="signedAmount"
           :members="splitMembers"
           :payer-id="payerId"
-          :color="kindPalette"
           :seed-rule="ownRule ?? selectedCategoryRule"
           :entry-id="editingId"
           @change="onSplitChange"
@@ -379,8 +378,6 @@ const gridCategories = computed(() => {
   return own && !daily.some((c) => c.id === own.id) ? [...daily, own] : daily
 })
 
-/** 支出蓝 / 收入绿 / 转账黄 —— 金额、主按钮、段选中态都跟着它走，
-    一眼就知道自己在记哪种账，不用回头看顶上选中的是哪个 */
 /**
  * 从「转账」切成支出/收入时，把这笔账原来的规则丢掉。
  *
@@ -401,12 +398,13 @@ watch(kind, (now, before) => {
   }
 })
 
+/** 支出蓝 / 收入绿 / 转账黄 —— 金额、主按钮、段选中态都跟着它走，
+    一眼就知道自己在记哪种账，不用回头看顶上选中的是哪个 */
 const kindPalette = computed(() => KIND_PALETTE[kind.value])
 
 /** 收入在库里存负数（SPEC §5）；界面上只让人填正数，符号这里加 */
 const signedAmount = computed(() => (kind.value === 'income' ? -amount.value : amount.value))
 
-/** 上次出账那天（含）之前的日期不给选 */
 /**
  * 分摊面板的参与人。**必须是 computed 而不是模板里直接调 meta.membersOn(date)**：
  * 那样每次渲染都返回一个新数组，prop 身份一直在变，SplitEditor 里那个

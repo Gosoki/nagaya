@@ -18,7 +18,6 @@ from app.services import settings as settings_svc
 from app.services.bill import (
     BillError,
     build_bill,
-    build_total_expense,
     cut_statement,
     entries_of,
 )
@@ -276,8 +275,6 @@ def test_partial_settlement_is_not_settled(session: Session, members) -> None:
 
 def test_cut_without_monthly_leaves_fixed_costs_in_draft(session: Session, members) -> None:
     """提前出个小账：只结日常那部分，固定费留在草稿里等账单来。"""
-    from app.models import Category
-
     a, *_ = members
     rent = Category(name="房租", monthly=True)
     daily = Category(name="日用品", monthly=False)
@@ -298,8 +295,6 @@ def test_cut_without_monthly_leaves_fixed_costs_in_draft(session: Session, membe
 
 
 def test_cut_without_monthly_refuses_when_nothing_daily(session: Session, members) -> None:
-    from app.models import Category
-
     a, *_ = members
     rent = Category(name="房租", monthly=True)
     session.add(rent)
@@ -595,7 +590,8 @@ def test_the_list_endpoint_agrees_with_the_per_bill_one(session: Session, member
     totals = list_totals(session)
     settled = list_settled(session, sts)
     for st in sts:
-        assert totals.get(st.id, 0) == build_total_expense(session, st), st.id
+        expense = sum(e.amount_jpy for e in entries_of(session, st.id) if e.kind == EntryKind.expense)
+        assert totals.get(st.id, 0) == expense, st.id
         assert settled[st.id] == settlement_progress(session, st)["settled"], st.id
     # 至少有一张没结清，否则这条用例等于什么都没验
     assert not all(settled.values())

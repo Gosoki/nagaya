@@ -11,14 +11,11 @@ from app.settings_spec import SETTINGS_SPEC
 
 
 def seed_settings(session: Session) -> None:
-    """把声明里的项补进表（含中日文说明）。已存在的值不覆盖，只刷新说明文字。"""
+    """把声明里有、表里还没有的项按默认值补进去。已存在的值不动。
+    说明文字不进库：接口直接从 SETTINGS_SPEC 拿，改文案不用碰数据"""
     for key, spec in SETTINGS_SPEC.items():
-        row = session.get(Setting, key)
-        if row is None:
-            row = Setting(key=key, value_json=spec["default"])
-        row.note_zh = spec["note_zh"]
-        row.note_ja = spec["note_ja"]
-        session.add(row)
+        if session.get(Setting, key) is None:
+            session.add(Setting(key=key, value_json=spec["default"]))
     session.commit()
 
 

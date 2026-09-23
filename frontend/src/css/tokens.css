@@ -29,7 +29,6 @@
   --nagaya-bg: #f2f3f7;                     /* 页面底（分组灰） */
   --nagaya-surface: #ffffff;                /* 卡片、表单 */
   --nagaya-surface-2: #ffffff;              /* 浮起来的：弹窗、菜单 */
-  --nagaya-bg-sunken: var(--nagaya-bg);     /* 旧名，等于页面底 */
   /* 顶栏/底栏：半透明 + 背景模糊，内容从底下滚过去看得见一点影子。
      不透明的那个值给 theme-color 和不支持模糊的浏览器用 */
   --nagaya-bar: rgba(249, 249, 251, 0.92);
@@ -75,7 +74,6 @@
 
   /* ---------------------------------------------------------- 字号
      七级够用。**金额一律 tabular-nums**，否则同一列的数字左右跳 */
-  --nagaya-fs-display: 46px;  /* 金额输入框 */
   --nagaya-fs-figure: 28px;   /* 「你要给 X」那个数、账单合计 */
   --nagaya-fs-figure-s: 20px; /* 转账方案里的单笔金额 */
   --nagaya-fs-title: 17px;    /* 分区标题、页标题 */
@@ -143,8 +141,7 @@ html.dark {
 
 /* 等宽数位。金额、比例、任何会竖着排成一列的数字都该带上它 —— 不带的话
    「1」比「8」窄，同一列的小数点和千分位会左右错开，扫读时对不齐 */
-.num,
-.tabular {
+.num {
   font-variant-numeric: tabular-nums;
 }
 
@@ -185,8 +182,7 @@ html.dark .text-expense { color: var(--nagaya-kind-expense) !important; }
   Safari 会把整页放大一点点（然后停在那个放大位上）。Quasar 自己的
   q-input 默认 14px，也在这条里。
 */
-.q-field__native,
-.q-field__input { font-size: 16px; }
+.q-field__native { font-size: 16px; }
 
 /*
   **双击不放大。**

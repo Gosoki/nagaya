@@ -18,7 +18,6 @@ vi.mock('src/api/client', () => ({
   api: {
     get: (url: string) => {
       if (url.startsWith('/api/entries')) return Promise.resolve(Array.from({ length: entryCount }, () => ({})))
-      if (url.startsWith('/api/balances')) return Promise.resolve({ balances: {} })
       return Promise.resolve({ prev_cut_at: null, prev_label: null })
     },
   },

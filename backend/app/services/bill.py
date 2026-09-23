@@ -513,7 +513,7 @@ def _really_changed(session: Session, touched: list[Entry], after_cut: tuple[Any
 def list_totals(session: Session) -> dict[int, int]:
     """每张账单的支出合计，一次查完。
 
-    列表页每一行都要这个数。原来是逐张调 build_total_expense，60 张就是 60 次
+    列表页每一行都要这个数。原来是逐张逐笔加，60 张就是 60 次
     全表扫 —— 实测 5 年规模下 /api/statements 要 51ms，而它是**每次打开账单页
     都调**的那个接口。
     """
@@ -564,13 +564,6 @@ def list_settled(session: Session, statements: list[Statement]) -> dict[int, boo
                 paid[key] = paid.get(key, 0) + amount
         out[st.id] = all(paid.get((t["from_id"], t["to_id"]), 0) >= t["amount"] for t in plan)
     return out
-
-
-def build_total_expense(session: Session, statement: Statement) -> int:
-    """一张账单的支出合计，逐笔加。列表页走的是 list_totals 那条聚合，这个留给测试对账"""
-    return sum(
-        e.amount_jpy for e in entries_of(session, statement.id) if e.kind == EntryKind.expense
-    )
 
 
 # ------------------------------------------------------------------ 出账

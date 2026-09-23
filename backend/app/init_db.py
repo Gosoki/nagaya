@@ -12,7 +12,7 @@ from sqlmodel import Session, select
 
 from app import migrate
 from app.db import DB_PATH, engine
-from app.models import CATEGORY_COLORS, Category, Member
+from app.models import CATEGORY_COLORS, Category
 from app.services import settings as settings_svc
 from app.services.settings import seed_settings
 
@@ -56,12 +56,3 @@ def init_db() -> None:
                 session.refresh(created[-1])
                 settings_svc.set_(session, "fallback_category_id", created[-1].id)
 
-
-def has_members() -> bool:
-    with Session(engine) as session:
-        return session.exec(select(Member)).first() is not None
-
-
-if __name__ == "__main__":
-    init_db()
-    print("建库完成：", engine.url)

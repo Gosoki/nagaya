@@ -21,7 +21,7 @@ import { ref, watch } from 'vue'
 import { ApiError, api } from 'src/api/client'
 import type { Bill, Entry, MonthlyData, Statement } from 'src/api/types'
 
-export interface BillView {
+interface BillView {
   bill: Bill
   entries: Entry[]
 }
@@ -273,14 +273,12 @@ export const useBills = defineStore('bills', () => {
    * 记了一笔 / 改了一笔之后：把**已经缓存过的**几张在后台刷一遍。
    * 不清缓存 —— 清了下次进去又白屏，而白屏正是要治的毛病。
    */
-  function refreshCached(touched?: Entry): void {
+  function refreshCached(touched: Entry): void {
     // 出过账的单子只有两种事动得了它：**改/删它里头的账**，和**记一笔转账**
     // （「已结清」认的是出账之后的转账）。新记一笔支出/收入落的是草稿，
     // 跟它一个数字都不沾 —— 而在 5 年的库上重算一张旧单子要 70ms 上下，
     // 翻过几张就刷几张，每记一笔都来一轮。
-    // 不知道动了什么（没传参数）时照旧全刷：宁可白刷，不能让数字发旧
-    const all =
-      touched === undefined || touched.statement_id !== null || touched.kind === 'settlement'
+    const all = touched.statement_id !== null || touched.kind === 'settlement'
     for (const ck of Object.keys(views.value)) {
       if (!all && ck !== 'draft') continue
       run(ck as BillKey, true).catch(() => {})

@@ -201,8 +201,6 @@ const props = defineProps<{
    * 新记的那一笔在保存之前没有 id，那 1 円归谁只能以后端为准。
    */
   entryId?: number | null
-  /** 段选中态的颜色，跟着账目类型走（支出蓝 / 收入绿 / 转账黄）。固定费面板不传，就是蓝 */
-  color?: string
 }>()
 const emit = defineEmits<{
   /**
@@ -786,10 +784,6 @@ html.dark .sign.on { color: var(--nagaya-surface); }
   box-shadow: inset 0 0 0 1px var(--nagaya-line);
 }
 
-.weight-input::-webkit-outer-spin-button,
-.weight-input::-webkit-inner-spin-button {
-  opacity: 1;                 /* 桌面上把上下箭头显出来，手机上本来就没有 */
-}
 .num-input {
   width: 100%;
   min-width: 0;

@@ -10,7 +10,6 @@ from sqlmodel import Session, SQLModel, create_engine
 
 from fastapi.testclient import TestClient
 
-import app.db  # noqa: F401  —— 导入即注册 PRAGMA（外键约束默认是关的）
 from app.auth import hash_password
 from app.db import get_session
 from app.main import app as fastapi_app

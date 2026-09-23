@@ -17,7 +17,7 @@ import { useLedger } from 'src/stores/ledger'
 
 const KEY = 'nagaya.drafts'
 
-export interface Draft {
+interface Draft {
   id: string
   savedAt: string
   payload: EntryPayload
@@ -116,5 +116,5 @@ export const useDrafts = defineStore('drafts', () => {
     return { ok, offline, rejected }
   }
 
-  return { items, mine, count, add, remove, clear, submitAll }
+  return { count, add, clear, submitAll }
 })

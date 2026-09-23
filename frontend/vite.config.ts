@@ -47,7 +47,7 @@ export default defineConfig({
         // API 一律走网络，绝不能缓存 —— 账本读到旧数据比读不到更糟。
         // 不另写 runtimeCaching 的 NetworkOnly 规则：没匹配上的请求本来就直接走网络，
         // 多一层规则等于多一层可能出问题的东西。
-        navigateFallbackDenylist: [/^\/api/],
+
         // 图标字体也进预缓存。不进的话 iOS 把 HTTP 缓存清掉之后，断网冷启动时
         // 底栏和按钮上的图标全是空白，三秒后变成「add_circle」这种英文字
         globPatterns: ['**/*.{js,css,html,woff2}'],

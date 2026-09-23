@@ -1,5 +1,5 @@
 export type EntryKind = 'expense' | 'income' | 'settlement'
-export type Lang = 'zh' | 'ja'
+type Lang = 'zh' | 'ja'
 
 export interface Member {
   id: number
@@ -81,7 +81,7 @@ export interface Statement {
 }
 
 /** 账单上的一行人。钱是全局累计的，这里拆成「期初 + 本期 + 已收付」 */
-export interface BillRow {
+interface BillRow {
   member_id: number
   opening: number
   owed: number

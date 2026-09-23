@@ -55,7 +55,7 @@
               <q-icon :name="row.icon" size="16px" />
             </q-avatar>
           </q-item-section>
-          <!-- 状态字（参考 8/31 出账 / 有 2 笔 / 会删掉）写在名字**旁边**，不另起一行：
+          <!-- 状态字（有 2 笔 / 会删掉 / 已归档）写在名字**旁边**，不另起一行：
                另起一行的话有状态的行比没状态的高一截，一列高高低低 -->
           <q-item-section>
             <!-- 不用 flex：items-baseline 会按两种字号各自的基线去对齐，
@@ -417,10 +417,6 @@ async function carry(list: Row[]) {
       failed: { name: string }[]
     }>('/api/monthly/carry', { category_ids: list.map((r) => r.category_id) })
     bills.monthlyWritten()
-    if (!created.length && !failed.length) {
-      await load()
-      return
-    }
     await load()
     if (created.length) {
       emit('saved')
@@ -514,11 +510,7 @@ const stateClass = (row: Row) =>
     ? 'text-warning'
     : willDelete(row)
       ? 'text-negative'
-      : row.archived
-        ? 'text-grey-6'
-        : row.entry_id !== null
-          ? 'text-positive'
-          : 'text-grey-6'
+      : 'text-grey-6'   // 已归档；stateText 只在这三种情况下有字，别的情况不会调到这儿
 
 /** 还没存上的行数（存失败才会 >0）。和 saveRow 用同一个判据 */
 const dirtyCount = computed(() => rows.value.filter((r) => r.dirty).length)
@@ -775,7 +767,7 @@ async function setPayer(row: Row, payerId: number) {
 
 
 // flush / dirtyCount：出账之前账单页要先把这里没存完的存掉、再看还有没有存不上的（BillView.doCut）
-defineExpose({ reload: load, flush, dirtyCount })
+defineExpose({ flush, dirtyCount })
 </script>
 
 <style scoped>

@@ -157,7 +157,6 @@ def test_editing_a_billed_entry_self_corrects(session, members) -> None:
     多付了就在下张扣回来，少付了就补上，不需要任何锁。
     """
     from app.services.bill import cut_statement
-    from app.services.ledger import update_entry
 
     a, b, c = members
     e = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,

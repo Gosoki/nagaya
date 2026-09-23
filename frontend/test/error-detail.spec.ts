@@ -41,9 +41,6 @@ function detailKeys(): Record<string, Set<string>> {
 
 const holes = (msg: string) => [...msg.matchAll(/\{(\w+)\}/g)].map((m) => m[1])
 
-/** 这几个的参数是前端自己填的，不来自后端 detail */
-const FRONTEND_FILLED = new Set(['network', 'unauthorized', 'unknown'])
-
 describe('错误文案的占位符 ↔ 后端 detail', () => {
   const backend = detailKeys()
 
@@ -56,10 +53,9 @@ describe('错误文案的占位符 ↔ 后端 detail', () => {
     it(`${lang}：每个占位符后端都传得出来`, () => {
       const bad: string[] = []
       for (const [code, msg] of Object.entries(dict.errors as Record<string, string>)) {
-        if (FRONTEND_FILLED.has(code)) continue
         const want = holes(msg)
         const got = backend[code]
-        if (!got) continue // 「有文案没 code」由 error-codes.spec 那条管
+        if (!got) continue // 后端不抛的 code：前端自己填参数的（network 这类）；「有文案没 code」由 error-codes.spec 管
         for (const h of want) if (!got.has(h)) bad.push(`${code} 要 {${h}}，后端只传 ${[...got]}`)
       }
       expect(bad, '界面上会留一个插不进去的空洞').toEqual([])

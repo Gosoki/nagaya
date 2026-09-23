@@ -145,9 +145,8 @@ onMounted(async () => {
   statements.value = await bills.loadStatements()
 })
 
-/** 某一天出过的账单。cut_at 是 UTC 时间戳，得按**日本时间**归日 —— 见 src/date.ts */
 /**
- * 按日本时间的那一天归好。原来每个日期组都把全部单子过滤一遍、每张都格式化一次日期，
+ * 某一天出过的账单，按日本时间的那一天归好（cut_at 是 UTC 时间戳，见 src/date.ts）。原来每个日期组都把全部单子过滤一遍、每张都格式化一次日期，
  * 模板里还调两次 —— 5 年的数据一次重画要 1.8 万次日期格式化（实测 17ms）
  */
 const statementsByDay = computed(() => {

@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import datetime as dt
-
 import io
 
 from app.auth import hash_password
-from app.models import Member
 
 SEP = "2026-09-10"
 
@@ -103,7 +100,6 @@ def test_soft_delete_and_restore(client, auth, members):
     assert client.delete(f"/api/entries/{e['id']}", headers=auth).status_code == 204
     assert client.get("/api/entries", headers=auth).json() == []
     assert sum(client.get("/api/balances", headers=auth).json()["balances"].values()) == 0
-    assert len(client.get("/api/entries?include_deleted=true", headers=auth).json()) == 1
 
     client.post(f"/api/entries/{e['id']}/restore", headers=auth)
     assert len(client.get("/api/entries", headers=auth).json()) == 1

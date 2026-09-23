@@ -393,7 +393,8 @@ class Template(SQLModel, table=True):
 
 
 class Setting(SQLModel, table=True):
-    """key-value 配置。note 存中日文说明，面板逐项渲染（见 settings_spec.py）。"""
+    """key-value 配置。说明文字在 settings_spec.py，接口从那儿拿；
+    note_zh / note_ja 两列是早先存说明用的，现在没人读写（表结构不动，留着）。"""
 
     __tablename__ = "setting"
 

@@ -141,8 +141,6 @@ def test_monthly_rows_of_a_past_statement_only_lists_what_is_on_it(session, memb
 
     空行会诱人往里填，而填出来的是**新账目**，落进当前草稿，根本不会进这张单子。
     """
-    from app.services.bill import carry_same_as_last, cut_statement, monthly_rows, unbilled
-
     a, *_ = members
     rent = Category(name="家賃", monthly=True, display_order=0)
     water = Category(name="水道", monthly=True, display_order=1)

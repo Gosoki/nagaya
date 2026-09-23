@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 
 class RuleError(ValueError):

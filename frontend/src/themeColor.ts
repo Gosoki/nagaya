@@ -15,7 +15,7 @@
  */
 import { ref, watch } from 'vue'
 
-export interface ThemeColor {
+interface ThemeColor {
   id: string
   /** 浅色下：字色和按钮底用同一个 */
   light: string

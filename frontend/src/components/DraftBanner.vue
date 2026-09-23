@@ -70,9 +70,6 @@ function discard() {
 
 <style scoped>
 /* 安全区由顶栏统一让（MainLayout），这里再让一次就是让两遍 */
-</style>
-
-<style scoped>
 .draft-banner {
   background: var(--nagaya-warn-bg);
   color: var(--nagaya-warn);

@@ -15,10 +15,8 @@ import { useBills } from 'src/stores/bills'
  */
 export const useLedger = defineStore('ledger', () => {
   const entries = ref<Entry[]>([])
-  const loading = ref(false)
   /** 上一张出过的账单是什么时候切的。用来挡住把日期选回已出账的范围里 */
   const prevCutAt = ref<string | null>(null)
-  const prevLabel = ref<string | null>(null)
   /**
    * 账目是一次性拉这么多笔。筛选和合计都在前端算，所以**拉少了就筛不全**。
    * 三个人按种子数据的速率大约每年一百笔，500 笔够五年 —— 到那天不能让合计
@@ -40,35 +38,29 @@ export const useLedger = defineStore('ledger', () => {
   async function refresh() {
     const my = ++seq
     const w = writes
-    loading.value = true
-    try {
-      // 不拉 /api/balances：它存下来之后没有任何组件读过（余额页早就并进账单页了），
-      // 每次开 App、每记一笔都白跑一个来回
-      const [e, sts] = await Promise.all([
-        // 筛选在前端做，拉少了就筛不全
-        api.get<Entry[]>(`/api/entries?limit=${LIMIT}`),
-        // 「上一次出账」就是单子列表的第一张。原来为这两个字段去拉整张草稿账单
-        // （后端要把整本账算一遍），而账单页切回前台时自己还要再拉一次同一张
-        useBills().loadStatements(),
-      ])
-      if (my !== seq) return                       // 后面还有更新的一发，交给它
-      // 我出发之后本地写过（记了一笔、删了一笔）：这份列表里没有它。
-      // **别整份丢掉就算了** —— 冷启动慢网时刚记的那一笔会成了流水里唯一的一笔，
-      // 日期锁也跟着失效。再取一次，那一笔已经落库，新的列表里就有它
-      if (w !== writes) return refresh()
-      // 十有八九什么都没变（切回前台就刷一次）：没变就不换数组，
-      // 换了的话账目页几百行、账单页每一块都跟着整个重画
-      const sig = signature(e)
-      if (sig !== lastSig) {
-        lastSig = sig
-        entries.value = e
-      }
-      truncated.value = e.length >= LIMIT
-      prevCutAt.value = sts[0]?.cut_at ?? null
-      prevLabel.value = sts[0]?.label ?? null
-    } finally {
-      loading.value = false
+    // 不拉 /api/balances：它存下来之后没有任何组件读过（余额页早就并进账单页了），
+    // 每次开 App、每记一笔都白跑一个来回
+    const [e, sts] = await Promise.all([
+      // 筛选在前端做，拉少了就筛不全
+      api.get<Entry[]>(`/api/entries?limit=${LIMIT}`),
+      // 「上一次出账」就是单子列表的第一张。原来为这个去拉整张草稿账单
+      // （后端要把整本账算一遍），而账单页切回前台时自己还要再拉一次同一张
+      useBills().loadStatements(),
+    ])
+    if (my !== seq) return                       // 后面还有更新的一发，交给它
+    // 我出发之后本地写过（记了一笔、删了一笔）：这份列表里没有它。
+    // **别整份丢掉就算了** —— 冷启动慢网时刚记的那一笔会成了流水里唯一的一笔，
+    // 日期锁也跟着失效。再取一次，那一笔已经落库，新的列表里就有它
+    if (w !== writes) return refresh()
+    // 十有八九什么都没变（切回前台就刷一次）：没变就不换数组，
+    // 换了的话账目页几百行、账单页每一块都跟着整个重画
+    const sig = signature(e)
+    if (sig !== lastSig) {
+      lastSig = sig
+      entries.value = e
     }
+    truncated.value = e.length >= LIMIT
+    prevCutAt.value = sts[0]?.cut_at ?? null
   }
 
   /** 存完用**后端返回的 shares 覆盖本地预览值** —— 以后端为准（SPEC §7.3）。 */
@@ -134,7 +126,7 @@ export const useLedger = defineStore('ledger', () => {
   }
 
   return {
-    entries, loading, truncated, prevCutAt, prevLabel,
+    entries, truncated, prevCutAt,
     refresh, create, update, remove, restore, confirmTransfer,
   }
 })

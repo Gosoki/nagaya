@@ -17,8 +17,8 @@ import { ref, watch } from 'vue'
 import { api } from 'src/api/client'
 import type { EntryKind, Memo } from 'src/api/types'
 
-export type EntriesTab = 'ledger' | 'settings'
-export type AddTab = 'add' | 'memo'
+type EntriesTab = 'ledger' | 'settings'
+type AddTab = 'add' | 'memo'
 const TAB_KEY = 'nagaya.entriesTab'
 
 function savedTab(): EntriesTab {
