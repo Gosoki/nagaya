@@ -146,6 +146,14 @@ html.dark .bill-tabs .q-tab.q-tab--active { background: var(--nagaya-surface-2);
 /* 每页最后一块底下留出同样的 12px，别顶着底栏 */
 .q-page { padding-bottom: 12px; }
 
+/* 折叠起来的卡片（应用设置、固定费项目、系统设置）只剩这一条标题：上下对称，字在正中。
+   标题条平时是上 16 下 4 —— 那是给「下面紧跟着列表」留的，单独一条时字就沉到了下半截 */
+.bill-section > .section-head:only-child {
+  min-height: 56px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
 /* 每块的标题条：比正文粗一档，不再是细细的 14px */
 .section-head .q-item__section--main {
   min-width: 0;
