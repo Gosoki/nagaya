@@ -10,9 +10,9 @@ from sqlmodel import Session, select
 from app.auth import MIN_PASSWORD_LEN, current_member, hash_password, verify_password
 from app.db import get_session
 from app.errors import AppError, not_found, reject_nulls
+from app.images import open_image
 from app.models import Member, free_color
 from app.routers.auth import to_member_out
-from app.routers.appearance import IMAGE_FORMATS, MAX_PIXELS
 from app.schemas import MemberIn, MemberOut
 from app.services import audit
 
@@ -168,11 +168,7 @@ def _compress_avatar(raw: bytes) -> bytes:
     from PIL import Image, ImageOps   # 用到才载：Pillow 常驻要 6MB，而换头像一年没几次
 
     try:
-        img = Image.open(io.BytesIO(raw), formats=IMAGE_FORMATS)
-        if img.width * img.height > MAX_PIXELS:
-            raise ValueError("too many pixels")
-        img = ImageOps.exif_transpose(img) or img
-        img = ImageOps.fit(img, (AVATAR_SIZE, AVATAR_SIZE), method=Image.Resampling.LANCZOS)
+        img = ImageOps.fit(open_image(raw), (AVATAR_SIZE, AVATAR_SIZE), method=Image.Resampling.LANCZOS)
         img = img.convert("RGB")
     except Exception as e:  # Pillow 认不出的、或者解压炸弹
         raise AppError("avatar_not_image", "not an image") from e

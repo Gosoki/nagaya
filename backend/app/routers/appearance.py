@@ -21,6 +21,7 @@ from sqlmodel import Session
 from app.auth import current_member
 from app.db import get_session
 from app.errors import AppError
+from app.images import open_image
 from app.models import AppIcon, Member, now_utc
 from app.services import settings as settings_svc
 
@@ -32,11 +33,6 @@ MASTER = 512
 SIZES = {32, 180, 192, 512}
 #: 前端已经缩成 512 的 PNG 再传（src/shrinkImage.ts），最多几百 KB；留余量给旧页面
 MAX_ICON_BYTES = 2 * 1024 * 1024
-#: 只认这几种格式。Pillow 默认什么都敢开，EPS 这类还会转手交给 Ghostscript
-IMAGE_FORMATS = ["JPEG", "PNG", "WEBP", "GIF"]
-#: 解码前先看像素数。Pillow 自己的炸弹闸在 1.79 亿像素，而 1 亿像素的小 PNG
-#: 文件才几百 KB、解开要 1GB 多内存 —— 手机照片也就一两千万像素，4000 万足够宽
-MAX_PIXELS = 40_000_000
 
 
 def _to_master(raw: bytes) -> bytes:
@@ -51,11 +47,7 @@ def _to_master(raw: bytes) -> bytes:
     from PIL import Image, ImageOps   # 用到才载：Pillow 常驻要 6MB，而没换过图标的屋子一次都用不上
 
     try:
-        img = Image.open(io.BytesIO(raw), formats=IMAGE_FORMATS)
-        if img.width * img.height > MAX_PIXELS:
-            raise ValueError("too many pixels")
-        img = ImageOps.exif_transpose(img) or img
-        img = img.convert("RGBA")
+        img = open_image(raw).convert("RGBA")
         img = ImageOps.fit(img, (MASTER, MASTER), method=Image.Resampling.LANCZOS)
     except Exception as e:  # Pillow 认不出的、或者解压炸弹
         raise AppError("icon_not_image", "not an image") from e
