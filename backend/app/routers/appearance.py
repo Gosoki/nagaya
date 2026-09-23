@@ -1,8 +1,8 @@
 """这屋的 App 叫什么、图标长什么样。
 
 **为什么值得做成可改的**：这东西是自托管的，一户一个实例。加到手机主屏之后，
-图标和名字就是「这是哪个屋的账本」的全部标识 —— 默认那个「長」字对住在
-長屋 的人合适，对别人不合适，而改它本来要去改代码再重新打包。
+图标和名字就是「这是哪个屋的账本」的全部标识 —— 默认那个红屋顶是長屋
+自己的，对别人不合适，而改它本来要去改代码再重新打包。
 
 名字和「有没有自定义图标」两项走的是**普通设置**（settings 表，跟着备份一起走）；
 图标本体存在库里的 app_icon 表里，同样跟着备份走 —— 放磁盘的话，
@@ -101,7 +101,7 @@ def delete_icon(
     session: Session = Depends(get_session),
     _: Member = Depends(current_member),
 ) -> dict[str, int]:
-    """撤掉自定义图标，回到打包时那个「長」字。"""
+    """撤掉自定义图标，回到打包时那个红屋顶。"""
     row = session.get(AppIcon, 1)
     if row is not None:
         session.delete(row)
@@ -157,7 +157,7 @@ def manifest(session: Session = Depends(get_session)) -> Response:
             {"src": f"/api/appearance/icon/192.png?v={version}", "sizes": "192x192", "type": "image/png"},
             {"src": f"/api/appearance/icon/512.png?v={version}", "sizes": "512x512", "type": "image/png"},
             # 自定义图标没法替用户留出安全区，所以 maskable 那一档用同一张：
-            # Android 裁圆时可能切掉边角，但总好过继续用别人家的「長」字
+            # Android 裁圆时可能切掉边角，但总好过继续用别人家的红屋顶
             {"src": f"/api/appearance/icon/512.png?v={version}", "sizes": "512x512",
              "type": "image/png", "purpose": "maskable"},
         ]
@@ -176,9 +176,9 @@ def manifest(session: Session = Depends(get_session)) -> Response:
                 "description": "合租记账 · シェアハウスの家計簿",
                 # theme_color 是浏览器拿去涂「页面之外」那块的色，跟着页面走 ——
                 # 藏青会在 iOS 上变成底栏下面的一大片深蓝（见 index.html 那段注释）。
-                # background_color 是启动闪屏的底，那儿要的正是藏青 + 白「長」字
+                # background_color 是启动闪屏的底，跟打包时那个图标的白底接上
                 "theme_color": "#ffffff",
-                "background_color": "#3d4785",
+                "background_color": "#ffffff",
                 "display": "standalone",
                 "orientation": "portrait",
                 "start_url": "/",

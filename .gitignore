@@ -35,3 +35,6 @@ frontend/e2e/shots/
 
 # deploy.sh 装的 Node（系统里没有够新的时候才装）
 .tools/
+
+# 设计稿：图标各轮草稿，本地留底，不进仓库
+design-drafts/

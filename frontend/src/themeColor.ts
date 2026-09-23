@@ -26,7 +26,7 @@ export interface ThemeColor {
 }
 
 export const THEME_COLORS: ThemeColor[] = [
-  { id: 'indigo', light: '#3d4785', darkFill: '#5664c8', darkInk: '#a3acf6' },   // 默认，和 App 图标同色
+  { id: 'indigo', light: '#3d4785', darkFill: '#5664c8', darkInk: '#a3acf6' },   // 默认，品牌色
   { id: 'blue', light: '#1d5fa8', darkFill: '#2f6fc0', darkInk: '#8cbcf4' },
   { id: 'teal', light: '#00766a', darkFill: '#0e7f72', darkInk: '#6fd6c7' },
   { id: 'purple', light: '#6b3fa0', darkFill: '#7e52b8', darkInk: '#c6a6f2' },

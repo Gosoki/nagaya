@@ -20,7 +20,6 @@ const CJK = /[一-鿿぀-ゟ゠-ヿ]/
 const ALLOWED: { text: string; why: string }[] = [
   { text: "'中文'", why: '语言切换按钮上的语言名，翻译它本身没有意义' },
   { text: "'日本語'", why: '同上' },
-  { text: '>長<', why: '项目 logo 的字形，不是文案' },
 ]
 
 function vueFiles(dir: string): string[] {

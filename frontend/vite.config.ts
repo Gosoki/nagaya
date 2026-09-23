@@ -28,7 +28,7 @@ export default defineConfig({
         short_name: '長屋',
         description: '合租记账',
         theme_color: '#3d4785',
-        background_color: '#3d4785',
+        background_color: '#ffffff',   // 启动闪屏的底，跟图标的白底接上
         display: 'standalone',       // 全屏，没有地址栏 —— 这就是「像个 App」的分界线
         orientation: 'portrait',
         start_url: '/',

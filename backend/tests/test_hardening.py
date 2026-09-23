@@ -583,7 +583,7 @@ def test_app_name_and_icon_can_be_changed(client: TestClient, auth) -> None:
     """这屋自己的 App 名字和图标。
 
     自托管、一户一个实例，加到主屏之后图标和名字就是「这是哪个屋的账本」的
-    全部标识 —— 默认那个「長」字对别人不合适，而改它本来要改代码重新打包。
+    全部标识 —— 默认那个红屋顶对别人不合适，而改它本来要改代码重新打包。
     """
     import io
 
