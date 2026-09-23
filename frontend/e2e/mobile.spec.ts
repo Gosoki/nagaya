@@ -198,13 +198,16 @@ test('分摊编辑器：实时算钱、合计对得上', async ({ page }) => {
   // mouse.wheel 直接报 "not supported in mobile WebKit"。
   // 所以改成直接验那条不变量：页面底部留位 ≥ 固定操作栏从视口底部往上占掉的高度。
   // 这条成立，滚到底时最后一行必然露得出来。
+  // 操作条画在底栏里（bea786d），留位由 Quasar 把底栏总高（导航 + 操作条）算进
+  // q-page-container 的 padding-bottom —— 量那一层，不量 .q-page
   const bar = (await page.locator('.actions').boundingBox())!
   const occupied = page.viewportSize()!.height - bar.y
   const padBottom = await page.evaluate(() =>
-    parseFloat(getComputedStyle(document.querySelector('.q-page')!).paddingBottom),
+    parseFloat(getComputedStyle(document.querySelector('.q-page-container')!).paddingBottom),
   )
+  // 留 1px：Quasar 按整数（offsetHeight）算底栏高，实际矩形是 122.39 这种小数
   expect(padBottom, '页面底部留位不够，滚到底时最后一行会被固定操作栏盖住')
-    .toBeGreaterThanOrEqual(occupied)
+    .toBeGreaterThanOrEqual(occupied - 1)
   await page.screenshot({ path: 'e2e/shots/04-split.png' })
 })
 
@@ -686,7 +689,10 @@ test('点一条账目进去改：金额改得动，自定义分摊不会被打�
 
   // **这条是要害**：分摊要从这笔自己的规则起步。
   // 从分类默认值起步的话，一打开就被悄悄改回 1:1:1，按下保存才发现钱变了。
-  await expect(page.locator('.adj-col .num-input').first()).toHaveValue('-600')
+  // 调整额的框里只写数，正负由旁边那颗 ± 按钮和 neg 样式表示（921bf58：数字键盘打不出负号）
+  const adj = page.locator('.adj-col .num-input').first()
+  await expect(adj).toHaveValue('600')
+  await expect(adj).toHaveClass(/\bneg\b/)
   const shares = await page.locator('.member-row .share-col').allTextContents()
   expect(shares.map((s) => Number(s.replace(/[^\d-]/g, ''))).sort((a, b) => a - b))
     .toEqual([600, 1200, 1200])
@@ -992,9 +998,13 @@ test('固定费项目在设置里管：加、删、和上期一样', async ({ pa
   await parking.locator('.icon-btn').click()
   await page.locator('.icon-cell').filter({ has: page.locator('.q-icon') }).nth(8).click()
   await expect.poll(async () => (await catOf('E2E停车位')).icon).toBe('local_parking')
-  await parking.locator('.icon-btn').click()
+  // 挑完图标菜单不关（图标和颜色一次挑完），颜色就在同一个菜单里 ——
+  // 原来这儿又点了一下图标按钮，那一下其实是把菜单关上
+  await expect(page.locator('.color-cell').first()).toBeVisible()
   // 点第几格就存第几格的颜色。**别写死色值** —— 色板换一组这条就红，
   // 而它要钉的是「点了真的存下去」，不是「第 4 个格子是红的」
+  // 「加好了」那条提示停 2 秒，正好浮在色板上 —— 等它走了再点
+  await expect(page.locator('.q-notification')).toHaveCount(0)
   const cell = page.locator('.color-cell').nth(3)
   const picked = await cell.evaluate((el) => {
     const bg = getComputedStyle(el).backgroundColor.match(/\d+/g) ?? []
@@ -1285,9 +1295,10 @@ test('应用名字和图标：改完页签标题和清单当场跟着变', async
   // 页签标题不是 Vue 管的 DOM，得手动贴上去 —— 这条钉的就是那一下
   await expect.poll(() => page.title()).toBe('三丁目の家計')
 
-  // 清单是后端按当前设置现拼的；前端把 link 指过去，才不会被 SW 缓存的静态清单挡住
+  // 清单是后端按当前设置现拼的；前端把 link 指过去，才不会被 SW 缓存的静态清单挡住。
+  // 地址带版本号（名字、图标一变就换地址），手机不会拿着旧清单不放
   await expect(page.locator('link[rel=manifest]'))
-    .toHaveAttribute('href', '/api/appearance/manifest.webmanifest')
+    .toHaveAttribute('href', /^\/api\/appearance\/manifest\.webmanifest(\?|$)/)
   const m = await (await page.request.get('/api/appearance/manifest.webmanifest')).json()
   expect(m.name).toBe('三丁目の家計')
 
@@ -1427,9 +1438,12 @@ test('换头像：传一张照片，全站跟着换；撤掉就回色圆', async
   await expect(page.locator('.swatch')).not.toHaveCount(0)
 
   // 后端得压到几 KB —— 原图一点七 MB，原样存进库里迟早把备份撑爆
+  // 头像走自己的地址（带版本号和内容指纹，能长缓存），不再把 base64 塞进每个成员接口
   const after = await me()
-  expect(after.avatar.startsWith('data:image/webp;base64,')).toBe(true)
-  const bytes = (after.avatar.length - 23) * 3 / 4
+  expect(after.avatar).toMatch(/^\/api\/members\/\d+\/avatar\?v=/)
+  const img = await page.request.get(after.avatar, { headers })
+  expect(img.headers()['content-type']).toBe('image/webp')
+  const bytes = (await img.body()).length
   expect(bytes, `压完还有 ${Math.round(bytes / 1024)}KB`).toBeLessThan(40_000)
 
   // 全站都读同一份：账单的「每人」里，**自己那一行**也换了。
