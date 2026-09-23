@@ -12,7 +12,8 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import DIST, app
+from app.main import app
+from app.spa import DIST
 
 pytestmark = pytest.mark.skipif(not DIST.is_dir(), reason="前端还没打包")
 
@@ -84,10 +85,10 @@ def test_app_name_with_backslash_keeps_index_alive(client, monkeypatch) -> None:
 
     `re.sub` 会把**字符串**替换串里的「\\1」「\\d」当反向引用/转义去解析，
     名字叫「a\\1」就是一个 500 —— 所有人连门都进不来，也就没法进设置改回去。"""
-    from app import main
+    from app import spa
 
     monkeypatch.setattr(
-        main.settings_svc, "get", lambda _s, key: "a\\1b\\d" if key == "app_name" else 0
+        spa.settings_svc, "get", lambda _s, key: "a\\1b\\d" if key == "app_name" else 0
     )
     r = client.get("/")
     assert r.status_code == 200

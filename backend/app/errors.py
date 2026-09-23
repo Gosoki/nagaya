@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from fastapi.responses import JSONResponse
+
 
 class AppError(ValueError):
     def __init__(self, code: str, message: str, *, status: int = 400, **detail: Any) -> None:
@@ -42,3 +44,22 @@ def reject_nulls(fields: dict[str, Any], names: tuple[str, ...]) -> None:
 def not_found(what: str) -> AppError:
     """找不到了。多半是别人刚删掉、或者手里这份列表旧了 —— 刷新一下再试。"""
     return AppError("not_found", f"{what} not found", status=404, what=what)
+
+
+#: 这些错误是「用户输入不对」，不是 500。个别要用 409 让前端知道该刷新。
+CONFLICT_CODES = {"version_conflict", "transfer_changed"}
+
+
+def error_response(exc: Any) -> JSONResponse:
+    """业务错误 → `{code, message, detail}`。
+
+    exc 是 main.py 注册的那六族之一（都带 code / detail）。参数不写成那几个类：
+    那样 errors.py 就得反过来 import services，而 services 本来就 import 这里。
+    """
+    # AppError 自己带状态码（404/403/409 都有），别的那几种统一 400，
+    # 只有 version_conflict 要 409 —— 前端靠它知道该刷新再重试
+    status_code = getattr(exc, "status", None) or (409 if exc.code in CONFLICT_CODES else 400)
+    return JSONResponse(
+        status_code=status_code,
+        content={"code": exc.code, "message": str(exc), "detail": exc.detail},
+    )

@@ -73,7 +73,8 @@ def test_backup_path_cannot_point_into_the_web_root(client: TestClient, auth) ->
 
 def test_database_files_are_never_served_as_static() -> None:
     """就算有 .db 落进了前端目录，也不许从静态回退里发出去。"""
-    from app.main import DIST, app
+    from app.main import app
+    from app.spa import DIST
 
     if not DIST.is_dir():
         pytest.skip("前端还没打包")
