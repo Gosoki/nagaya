@@ -2,8 +2,8 @@
 # 尤其是账本：打进镜像的话，谁拿到镜像谁就拿到整本账
 .git
 .tools
-.env
-.env.*
+**/.env
+**/.env.*
 **/__pycache__
 **/*.pyc
 **/.DS_Store
@@ -12,10 +12,13 @@ backend/.venv
 backend/data
 backend/backups
 backend/.pytest_cache
-*.db
-*.db-wal
-*.db-shm
-.secret
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/*.sqlite
+**/.secret
+**/*.log
+**/backups
 
 frontend/node_modules
 frontend/dist
@@ -26,3 +29,4 @@ frontend/e2e
 
 docs
 tests
+design-drafts
