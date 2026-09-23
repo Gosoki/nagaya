@@ -111,11 +111,10 @@ import { errorText } from 'src/api/client'
 import type { Entry, EntryKind, Statement } from 'src/api/types'
 import { jstDateOf } from 'src/date'
 import { formatYen } from 'src/i18n'
-import { FALLBACK } from 'src/palette'
 import SettingsPanel from 'src/components/settings/SettingsPanel.vue'
+import { useEntryLook } from 'src/composables/entryLook'
 import { useBills } from 'src/stores/bills'
 import { useLedger } from 'src/stores/ledger'
-import { KIND_COLOR } from 'src/theme'
 import { useMeta } from 'src/stores/meta'
 import { useNav } from 'src/stores/nav'
 import { statementLabel } from 'src/statement'
@@ -276,16 +275,7 @@ const grouped = computed(() => {
     .map(([date, items]) => ({ date, items }))
 })
 
-// 用含归档的反查表：归档过的分类，它名下的历史账目也要能显示原来的名字和图标
-const categoryOf = (e: Entry) =>
-  e.category_id === null ? undefined : meta.categoryById[e.category_id]
-const colorOf = (e: Entry) =>
-  e.kind === 'expense' ? (categoryOf(e)?.color ?? FALLBACK) : KIND_COLOR[e.kind]
-const iconOf = (e: Entry) =>
-  e.kind === 'settlement' ? 'swap_horiz' : e.kind === 'income' ? 'savings' : (categoryOf(e)?.icon ?? 'receipt_long')
-
-const labelOf = (e: Entry) =>
-  e.title || categoryOf(e)?.name || t(`kind.${e.kind}`)
+const { categoryOf, colorOf, iconOf, labelOf } = useEntryLook()
 
 /**
  * 分摊摘要。**绝大多数账就是均分**，把「Go ¥1,833 / Kan ¥1,834 / Zen ¥1,833」

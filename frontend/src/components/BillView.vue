@@ -455,21 +455,20 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 
 import { ApiError, api, errorText } from 'src/api/client'
-import type { Bill, BillTransfer, Entry, Statement } from 'src/api/types'
+import type { Bill, BillTransfer, Statement } from 'src/api/types'
 import { leftOf as leftOfPlan, mineOf, supersededIn } from 'src/core/transfers'
 import { parseTypedYen } from 'src/digits'
 import { escapeHtml } from 'src/html'
 import { isLoopback } from 'src/installGuide'
-import { FALLBACK } from 'src/palette'
 import MemberAvatar from 'src/components/MemberAvatar.vue'
 import MonthlyFixed from 'src/components/MonthlyFixed.vue'
+import { useEntryLook } from 'src/composables/entryLook'
 import { todayJst } from 'src/date'
 import { statementLabel } from 'src/statement'
 import { formatYen } from 'src/i18n'
 import { useAuth } from 'src/stores/auth'
 import { type BillKey, useBills } from 'src/stores/bills'
 import { useLedger } from 'src/stores/ledger'
-import { KIND_COLOR } from 'src/theme'
 import { useMeta } from 'src/stores/meta'
 
 const { t } = useI18n()
@@ -710,14 +709,13 @@ const others = computed(() =>
   }),
 )
 
-const categoryOfEntry = (e: Entry) =>
-  e.category_id === null ? undefined : meta.categoryById[e.category_id]
-// 收入没有分类，得有自己的图标色，否则跟「分类丢了」长得一模一样
-const colorOfEntry = (e: Entry) =>
-  e.kind === 'expense' ? (categoryOfEntry(e)?.color ?? FALLBACK) : KIND_COLOR[e.kind]
-const iconOfEntry = (e: Entry) =>
-  e.kind === 'income' ? 'savings' : (categoryOfEntry(e)?.icon ?? 'receipt_long')
-const labelOfEntry = (e: Entry) => e.title || categoryOfEntry(e)?.name || t(`kind.${e.kind}`)
+// 一笔账长什么样，和流水页同一份（composables/entryLook）
+const {
+  categoryOf: categoryOfEntry,
+  colorOf: colorOfEntry,
+  iconOf: iconOfEntry,
+  labelOf: labelOfEntry,
+} = useEntryLook()
 
 // 有缓存立刻渲染，同时后台校正。换页签时组件不重建、只换 prop，所以盯着 prop
 // 失败在 store 的 lastError 里已经说过了，这儿只是别留一个没人接的 rejection
