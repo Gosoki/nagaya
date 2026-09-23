@@ -329,6 +329,8 @@ backend/
     services/      账本、账单、出账、备份
     routers/       REST 接口
     models.py      表结构        migrate.py  开机升级
+    settings_spec.py  设置项登记表（加一个面板可改的设置，从这里下手）
+    errors.py      路由层的错误码（前端按码出中日文案）
   alembic/         迁移（versions/README.md 是改表的步骤）
   tools/           add_member / restore / seed_dev / gen_random_cases / gen_icons
   tests/
@@ -341,8 +343,10 @@ frontend/
     css/           tokens.css（颜色、字号、深色）/ skin.css
   test/            vitest        e2e/  Playwright
 tests/fixtures/    前后端共用的分摊用例
+deploy.sh          一键部署（systemd，或 --docker）   Dockerfile / docker-compose.yml
+run-e2e.sh         E2E：自己的端口和库，跑完就删
 docs/
-  SPEC.md          任务书：决策 D1–D35 各自「为什么是这样」
+  SPEC.md          任务书：每条决策「为什么是这样」
   AUDIT-2026-09.md 几轮审计的记录、替你定的事、还欠着的
 ```
 
