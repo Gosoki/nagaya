@@ -13,7 +13,7 @@
   <q-btn-toggle
     v-model="pane"
     spread no-caps unelevated
-    :toggle-color="memos.addTab === 'memo' ? 'grey-7' : KIND_PALETTE[memos.addKind]"
+    :toggle-color="nav.addTab === 'memo' ? 'grey-7' : KIND_PALETTE[nav.addKind]"
     class="kind-toggle"
     :options="options"
   />
@@ -24,17 +24,17 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import type { EntryKind } from 'src/api/types'
-import { useMemos } from 'src/stores/memos'
+import { useNav } from 'src/stores/nav'
 import { KIND_PALETTE } from 'src/theme'
 
 const { t } = useI18n()
-const memos = useMemos()
+const nav = useNav()
 
 const pane = computed({
-  get: () => (memos.addTab === 'memo' ? 'memo' : memos.addKind),
+  get: () => (nav.addTab === 'memo' ? 'memo' : nav.addKind),
   set: (v: string) => {
-    memos.addTab = v === 'memo' ? 'memo' : 'add'
-    if (v !== 'memo') memos.addKind = v as EntryKind
+    nav.addTab = v === 'memo' ? 'memo' : 'add'
+    if (v !== 'memo') nav.addKind = v as EntryKind
   },
 })
 

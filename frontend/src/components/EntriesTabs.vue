@@ -9,7 +9,7 @@
      和账单那两页一个做法。 -->
 <template>
   <q-tabs
-    v-model="memos.tab"
+    v-model="nav.entriesTab"
     no-caps
     class="bill-tabs text-grey-7"
     active-color="primary"
@@ -23,8 +23,8 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 
-import { useMemos } from 'src/stores/memos'
+import { useNav } from 'src/stores/nav'
 
 const { t } = useI18n()
-const memos = useMemos()
+const nav = useNav()
 </script>

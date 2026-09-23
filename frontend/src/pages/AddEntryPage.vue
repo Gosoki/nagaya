@@ -260,8 +260,8 @@ import { KIND_PALETTE } from 'src/theme'
 import { useAuth } from 'src/stores/auth'
 import { useDrafts } from 'src/stores/drafts'
 import { useLedger } from 'src/stores/ledger'
-import { useMemos } from 'src/stores/memos'
 import { useMeta } from 'src/stores/meta'
+import { useNav } from 'src/stores/nav'
 
 const { t, locale } = useI18n()
 const $q = useQuasar()
@@ -269,7 +269,7 @@ const route = useRoute()
 const router = useRouter()
 const meta = useMeta()
 const ledger = useLedger()
-const memos = useMemos()
+const nav = useNav()
 const drafts = useDrafts()
 const auth = useAuth()
 
@@ -315,13 +315,13 @@ const editingId = computed(() => (route.params.id ? Number(route.params.id) : nu
  * 改已有的账时读写自己的 editKind。
  */
 const kind = computed<EntryKind>({
-  get: () => (editingId.value === null ? memos.addKind : editKind.value),
+  get: () => (editingId.value === null ? nav.addKind : editKind.value),
   set: (v) => {
-    if (editingId.value === null) memos.addKind = v
+    if (editingId.value === null) nav.addKind = v
     else editKind.value = v
   },
 })
-const showMemo = computed(() => editingId.value === null && memos.addTab === 'memo')
+const showMemo = computed(() => editingId.value === null && nav.addTab === 'memo')
 const kindOptions = computed(() => [
   { label: t('kind.expense'), value: 'expense' },
   { label: t('kind.income'), value: 'income' },

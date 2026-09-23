@@ -94,7 +94,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { applyAppearance } from 'src/appearance'
 import { syncPrefs } from 'src/prefs'
 import { useOnline } from 'src/composables/online'
-import { useMemos } from 'src/stores/memos'
 import AddTabs from 'src/components/AddTabs.vue'
 import BillTabs from 'src/components/BillTabs.vue'
 import LayoutProbe from 'src/components/LayoutProbe.vue'
@@ -105,6 +104,7 @@ import { useBills } from 'src/stores/bills'
 import { useDrafts } from 'src/stores/drafts'
 import { useLedger } from 'src/stores/ledger'
 import { useMeta } from 'src/stores/meta'
+import { useNav } from 'src/stores/nav'
 
 const { t } = useI18n()
 const meta = useMeta()
@@ -112,7 +112,7 @@ const auth = useAuth()
 const bills = useBills()
 const ledger = useLedger()
 const drafts = useDrafts()
-const memos = useMemos()
+const nav = useNav()
 const route = useRoute()
 const router = useRouter()
 
@@ -137,7 +137,7 @@ function go(name: string) {
   // 同理：点底栏的「记一笔」＝回到这一屏的起点 —— 表单那一面、类型是支出。
   // 不拨的话，人站在备忘上点这一格，路由没变、屏幕也没变（底栏成了死键），
   // 上次选的「转账」也会一直留着
-  if (name === 'add') memos.goAddHome()
+  if (name === 'add') nav.goAddHome()
   if (route.name !== name) void router.push({ name })
 }
 

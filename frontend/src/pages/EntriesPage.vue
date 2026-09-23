@@ -4,7 +4,7 @@
      要删就点进那一笔，编辑页上有删除按钮（带确认）。 -->
 <template>
   <q-page class="q-pb-xl">
-    <SettingsPanel v-if="memos.tab === 'settings'" />
+    <SettingsPanel v-if="nav.entriesTab === 'settings'" />
     <template v-else>
     <!-- 筛选条吸顶：列表很长，翻到一半想换个筛法不该先滚回去 -->
     <div class="filter-bar row items-center no-wrap q-gutter-xs q-px-md q-py-sm">
@@ -115,9 +115,9 @@ import { FALLBACK } from 'src/palette'
 import SettingsPanel from 'src/components/SettingsPanel.vue'
 import { useBills } from 'src/stores/bills'
 import { useLedger } from 'src/stores/ledger'
-import { useMemos } from 'src/stores/memos'
 import { KIND_COLOR } from 'src/theme'
 import { useMeta } from 'src/stores/meta'
+import { useNav } from 'src/stores/nav'
 import { statementLabel } from 'src/statement'
 
 const { t } = useI18n()
@@ -125,7 +125,7 @@ const $q = useQuasar()
 const meta = useMeta()
 const ledger = useLedger()
 const bills = useBills()
-const memos = useMemos()
+const nav = useNav()
 
 const statements = ref<Statement[]>([])
 const router = useRouter()
@@ -133,12 +133,12 @@ const route = useRoute()
 
 onMounted(async () => {
   // 带着 ?category= 进来的（固定费面板上「本期有 N 笔」点进来）：直接筛好。
-  // **页签也要拨回流水**：这一屏显示哪块由 memos.tab 决定，而它记在 sessionStorage 里 ——
+  // **页签也要拨回流水**：这一屏显示哪块由 nav.entriesTab 决定，而它记在 sessionStorage 里 ——
   // 只要这次会话去过「更多 → 设置」，这个链接就把人送到设置面板上，
   // 一笔账都看不到。而固定费项目的增删改就在设置那一屏，停在 settings 是常态
   const wanted = Number(route.query.category)
   if (wanted) {
-    memos.tab = 'ledger'
+    nav.entriesTab = 'ledger'
     fCategory.value = wanted
   }
   // 和账单页共用同一份（同时只取一发）
