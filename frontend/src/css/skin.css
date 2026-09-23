@@ -35,20 +35,20 @@
 /* 底部三格导航。选中那格的图标后面垫一颗药丸 —— 光靠变色，
    浅色主题下「藏青 vs 灰」在户外看不太出来 */
 .nav-tabs .q-tab {
-  min-height: 54px;
+  min-height: 62px;
   padding: 0 4px;
 }
-.nav-tabs .q-tab__content { padding: 6px 0 4px; }
+.nav-tabs .q-tab__content { padding: 7px 0 6px; }
 .nav-tabs .q-tab__icon {
-  width: 56px;
-  height: 28px;
-  border-radius: 14px;
-  font-size: 22px;
+  width: 60px;
+  height: 32px;
+  border-radius: 16px;
+  font-size: 25px;
   transition: background-color 0.2s;
 }
 .nav-tabs .q-tab--active .q-tab__icon { background: var(--nagaya-accent-bg); }
 .nav-tabs .q-tab__label {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   line-height: 1.2;
   margin-top: 3px;

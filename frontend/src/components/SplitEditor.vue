@@ -593,11 +593,11 @@ defineExpose({
   display: grid;
   /* 四列在 375 上是挤的，每一列都按它真正要装的东西给：
        · 比例 96 ＝ 三格 × 32：中间那格算数，左右各一整格 —— 点得到，不是两条边角料
-       · 调整要装得下**六位数**「-123,456」（16px 实测 65px）外加一个正负号按钮（24），
-         所以是四列里最宽的。原来按「12,000」给，六位数在 390 宽上只露得出四位
+       · 调整装得下**五位数**「12,345」（16px 实测约 51px；符号在旁边的按钮上，框里只放数）
+         外加一个正负号按钮（24）。试过放到六位数，名字和应担两列就挤了 —— 你定的是五位
        · 应担最宽是「¥43,914」≈ 56，留一点余量就够
        · 名字那列只剩头像 + 两三个字，超了省略号 */
-  grid-template-columns: minmax(0, 0.56fr) 96px minmax(0, 1.04fr) minmax(0, 0.66fr);
+  grid-template-columns: minmax(0, 0.62fr) 96px minmax(0, 0.88fr) minmax(0, 0.70fr);
   align-items: center;
   column-gap: 2px;
 }
@@ -751,7 +751,7 @@ html.dark .sign.on { color: var(--nagaya-surface); }
 @media (max-width: 359px) {
   .member-row,
   .head-row {
-    grid-template-columns: minmax(0, 0.56fr) 80px minmax(0, 1.04fr) minmax(0, 0.66fr);
+    grid-template-columns: minmax(0, 0.62fr) 80px minmax(0, 0.88fr) minmax(0, 0.70fr);
   }
   .wheel {
     width: 80px;
@@ -797,7 +797,7 @@ html.dark .sign.on { color: var(--nagaya-surface); }
   text-align: right;
   font-family: inherit;
   font-size: 16px;           /* 16 是 iOS 的底线：再小一点，聚焦时整页会被放大 */
-  /* 左边只留 3px：数字右对齐，左内边距只在填满（六位数带负号）时才用得到 */
+  /* 左边只留 3px：数字右对齐，左内边距只在填满（五位数）时才用得到 */
   padding: 0 6px 0 3px;
   height: 38px;              /* 行高 52，输入框占满大半 —— 拇指点得准 */
   font-variant-numeric: tabular-nums;

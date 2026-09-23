@@ -410,7 +410,7 @@ onBeforeUnmount(() => document.removeEventListener('visibilitychange', onVisible
      兜底值必须自己把安全区算进去：写死 57 的话，首帧那一下固定操作条会按
      57 摆，而带 home indicator 的机器上底栏是 57+34 —— 操作条整条沉到底栏
      底下，只露出一条边。「第一次进应用下面凸起来」就是它 */
-  --nagaya-footer-h: calc(57px + env(safe-area-inset-bottom));
+  --nagaya-footer-h: calc(62px + env(safe-area-inset-bottom));   /* 导航那一条 62（skin.css） */
   /* 手机是主场。平板/电脑上不收一下的话，列表会被拉成「名字贴最左、
      数字贴最右」中间一片空白 —— 收到一个手机宽度居中，全站一致 */
   --nagaya-max-w: 480px;
