@@ -7,10 +7,10 @@
 <template>
   <q-avatar
     :size="size"
-    :style="member?.avatar ? undefined : { background: member?.color ?? FALLBACK }"
+    :style="src ? undefined : { background: member?.color ?? FALLBACK }"
     text-color="white"
   >
-    <img v-if="member?.avatar" :src="member.avatar" :alt="member.display_name" />
+    <img v-if="src" :src="src" :alt="member?.display_name" />
     <template v-else>{{ (member?.display_name ?? '?').slice(0, 1) }}</template>
   </q-avatar>
 </template>
@@ -18,6 +18,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
+import { avatarSrc } from 'src/avatars'
 import { useMeta } from 'src/stores/meta'
 import { FALLBACK } from 'src/palette'
 
@@ -28,4 +29,6 @@ const props = withDefaults(defineProps<{ memberId?: number | null; size?: string
 
 const meta = useMeta()
 const member = computed(() => (props.memberId == null ? null : meta.byId[props.memberId]))
+/** 图还没取到（或者没设过）就是 null，显示那个带首字的色圆 */
+const src = computed(() => avatarSrc(member.value?.avatar))
 </script>

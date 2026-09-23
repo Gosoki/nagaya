@@ -1,5 +1,6 @@
 /**
- * 主题色。每个人自己挑，**存在这台设备上**（和深浅色同一个理由，见 src/colorScheme.ts）。
+ * 主题色。每个人自己挑，**跟着账号走**（和服务器对表见 src/prefs.ts）；
+ * 这里的 localStorage 只是本机缓存，给首帧用。
  *
  * 管的是「界面的颜色」：底部导航、页签、按钮、链接、选中、聚焦框。
  * **不管三种账目的颜色** —— 支出藏青 / 收入绿 / 转账琥珀是「这一笔是什么」的信号，
@@ -48,7 +49,7 @@ function read(): string {
   }
 }
 
-/** 这台设备上挑的是哪一个。设置页那排色块直接绑它 */
+/** 现在用的是哪一个。设置页那排色块显示它，改它走 src/prefs.ts 的 setPref */
 export const themeColor = ref<string>(read())
 
 function varsOf(id: string): Record<string, string> {

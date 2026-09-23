@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import datetime as dt
 
-import base64
 import io
 
 from app.auth import hash_password
@@ -287,19 +286,23 @@ def _photo(width: int = 2400, height: int = 1600) -> bytes:
 
 
 def test_avatar_upload_compresses_hard(client, auth, members) -> None:
-    """五 MB 的手机照片进来，存下去得是几 KB 的小方图。"""
+    """前端会先缩小再传，但后端不信它：大图照样压成几 KB 的小方图。"""
     me, *_ = members
-    raw = _photo()
+    raw = _photo(1200, 800)
     assert len(raw) > 200_000, "测试素材本身要够大，不然压缩比没意义"
 
     r = client.post(f"/api/members/{me.id}/avatar", headers=auth,
                     files={"file": ("photo.jpg", raw, "image/jpeg")})
     assert r.status_code == 200
     out = r.json()
-    assert out["avatar"].startswith("data:image/webp;base64,")
+    assert out["avatar"] == f"/api/members/{me.id}/avatar?v=1", "列表里只带地址，地址里带版本号"
     assert out["avatar_version"] == 1
 
-    stored = base64.b64decode(out["avatar"].split(",", 1)[1])
+    got = client.get(out["avatar"], headers=auth)
+    assert got.status_code == 200
+    assert got.headers["content-type"] == "image/webp"
+    assert "immutable" in got.headers["cache-control"], "地址带版本号，图可以长缓存"
+    stored = got.content
     assert len(stored) < 30_000, f"压完还有 {len(stored)} 字节，太大了"
     assert len(stored) < len(raw) / 20, "至少要小一个数量级"
 
@@ -308,15 +311,24 @@ def test_avatar_upload_compresses_hard(client, auth, members) -> None:
     assert img.size == (192, 192), "头像是个圆，必须裁成正方形，不能压扁"
     assert img.format == "WEBP"
 
-    # 列表里也带着，前端拿一次成员就有头像，不用再发一轮请求
     listed = {m["id"]: m for m in client.get("/api/members", headers=auth).json()}
     assert listed[me.id]["avatar"] == out["avatar"]
+    assert "base64" not in client.get("/api/members", headers=auth).text, "图不跟着成员列表走"
+
+
+def test_avatar_image_needs_login(client, auth, members) -> None:
+    me, other, *_ = members
+    client.post(f"/api/members/{me.id}/avatar", headers=auth,
+                files={"file": ("photo.jpg", _photo(60, 60), "image/jpeg")})
+    assert client.get(f"/api/members/{me.id}/avatar?v=1").status_code == 401
+    # 没设过头像的人：404，前端退回色圆
+    assert client.get(f"/api/members/{other.id}/avatar?v=0", headers=auth).status_code == 404
 
 
 def test_avatar_rules(client, auth, members) -> None:
     me, other, *_ = members
-    # 超过 5MB 直接拒
-    big = b"\xff\xd8\xff" + b"0" * (5 * 1024 * 1024)
+    # 超过 1MB 直接拒（前端缩完只有十几 KB，这道闸是给 curl 和旧页面的）
+    big = b"\xff\xd8\xff" + b"0" * (1 * 1024 * 1024)
     assert client.post(f"/api/members/{me.id}/avatar", headers=auth,
                        files={"file": ("big.jpg", big, "image/jpeg")}).status_code == 413
     # 不是图片的，给 400 说清楚，别撞成 500
@@ -335,6 +347,40 @@ def test_avatar_can_be_removed(client, auth, members) -> None:
     r = client.delete(f"/api/members/{me.id}/avatar", headers=auth)
     assert r.status_code == 200 and r.json()["avatar"] is None
     assert r.json()["avatar_version"] == 2, "版本号要继续往前走，缓存才知道换了"
+    assert client.get(f"/api/members/{me.id}/avatar?v=1", headers=auth).status_code == 404
+
+
+def test_prefs_follow_the_account(client, auth, session, members) -> None:
+    """深浅色、主题色存在账号上：谁存的只给谁，换台设备登录还是这一套。"""
+    assert client.get("/api/prefs", headers=auth).json() == {}, "没存过就是空的，前端靠它认出「还没对过表」"
+
+    r = client.patch("/api/prefs", headers=auth, json={"scheme": "dark", "theme_color": "rose"})
+    assert r.status_code == 200
+    assert r.json() == {"scheme": "dark", "theme_color": "rose"}
+    r = client.patch("/api/prefs", headers=auth, json={"theme_color": "teal"})
+    assert r.json() == {"scheme": "dark", "theme_color": "teal"}, "只改发了的那一项"
+
+    # 另一台设备：重新登录拿一张新 token，读到的是同一份
+    again = client.post("/api/auth/login", json={"name": "a", "password": "pw123456"}).json()["token"]
+    assert client.get("/api/prefs", headers={"Authorization": f"Bearer {again}"}).json()["theme_color"] == "teal"
+
+    # 室友看不到、也改不到我的
+    b = members[1]
+    b.password_hash = hash_password("pw123456")
+    session.add(b)
+    session.commit()
+    tb = client.post("/api/auth/login", json={"name": "b", "password": "pw123456"}).json()["token"]
+    assert client.get("/api/prefs", headers={"Authorization": f"Bearer {tb}"}).json() == {}
+
+    assert client.get("/api/prefs").status_code == 401
+
+
+def test_prefs_reject_junk(client, auth) -> None:
+    for body in ({"font": "big"}, {"scheme": "<b>"}, {"scheme": "x" * 33}, {"scheme": ""}):
+        r = client.patch("/api/prefs", headers=auth, json=body)
+        assert r.status_code == 400 and r.json()["code"] == "pref_invalid", body
+    assert client.patch("/api/prefs", headers=auth, json={"scheme": 1}).status_code == 422
+    assert client.get("/api/prefs", headers=auth).json() == {}, "拒掉的一项都不许落库"
 
 
 def test_changing_the_password_kills_the_other_sessions(client, auth, members) -> None:

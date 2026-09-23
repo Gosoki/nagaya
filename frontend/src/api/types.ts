@@ -11,7 +11,7 @@ export interface Member {
   left_on: string | null
   lang: Lang
   is_active: boolean
-  /** 头像，data:image/webp;base64,…。没设过就是 null，界面退回那个带首字的色圆 */
+  /** 头像的地址（带版本号，图由 src/avatars.ts 取）。没设过就是 null，界面退回那个带首字的色圆 */
   avatar: string | null
   avatar_version: number
 }

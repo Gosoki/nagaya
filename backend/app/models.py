@@ -207,6 +207,22 @@ class RequestKey(SQLModel, table=True):
     created_at: dt.datetime = Field(default_factory=now_utc)
 
 
+class MemberPref(SQLModel, table=True):
+    """个人偏好（深浅色、主题色）。**跟着账号走**：换台手机登录，还是自己挑的那一套。
+
+    一人一项一行，不在 member 上加列 —— 和 request_key 同一个理由（D18 之前
+    不给已有的表加字段）。以后多一项偏好就是多一个键，表不用动。
+    前端本机那份只是缓存：首帧要靠它在 JS 起来之前就上色。
+    """
+
+    __tablename__ = "member_pref"
+
+    member_id: int = Field(foreign_key="member.id", primary_key=True)
+    key: str = Field(primary_key=True, max_length=32)
+    value: str = Field(max_length=32)
+    updated_at: dt.datetime = Field(default_factory=now_utc)
+
+
 class AppIcon(SQLModel, table=True):
     """这屋自己的 App 图标（主屏那个、页签那个小的）。只有一行，id 恒为 1。
 

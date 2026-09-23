@@ -104,13 +104,13 @@
         </q-item-section>
       </q-item>
 
-      <!-- 深浅色。存在这台设备上，不进账号（理由见 src/colorScheme.ts） -->
+      <!-- 深浅色、主题色：跟着账号走，换台设备登录还是这一套（src/prefs.ts） -->
       <q-item class="profile-row">
         <q-item-section>
           <q-item-label class="row items-center no-wrap">
             <div class="col">{{ t('profile.scheme') }}</div>
             <q-btn-toggle
-              v-model="scheme"
+              :model-value="scheme"
               dense unelevated no-caps
               toggle-color="primary"
               class="mini-seg scheme-toggle"
@@ -119,6 +119,7 @@
                 { label: t('profile.schemeLight'), value: 'light' },
                 { label: t('profile.schemeDark'), value: 'dark' },
               ]"
+              @update:model-value="(v: string) => savePref('scheme', v)"
             />
           </q-item-label>
           <q-item-label caption>{{ t('profile.schemeHint') }}</q-item-label>
@@ -139,7 +140,7 @@
               :aria-label="t(`profile.themeColors.${c.id}`)"
               :aria-pressed="themeColor === c.id"
               :title="t(`profile.themeColors.${c.id}`)"
-              @click="themeColor = c.id"
+              @click="savePref('theme_color', c.id)"
             />
           </div>
           <q-item-label caption class="q-mt-xs">{{ t('profile.themeColorHint') }}</q-item-label>
@@ -208,6 +209,8 @@ import { ApiError } from 'src/api/client'
 import { schemePref as scheme } from 'src/colorScheme'
 import { THEME_COLORS, themeColor } from 'src/themeColor'
 import { MEMBER_COLORS } from 'src/palette'
+import { setPref } from 'src/prefs'
+import { shrinkSquare } from 'src/shrinkImage'
 import MemberAvatar from 'src/components/MemberAvatar.vue'
 import { useAuth } from 'src/stores/auth'
 import { useMeta } from 'src/stores/meta'
@@ -229,9 +232,6 @@ const busy = ref(false)
 const fileEl = ref<HTMLInputElement | null>(null)
 const uploading = ref(false)
 
-/** 5MB 上限在前端也挡一道：手机拍的照片动辄七八 MB，传上去再被拒等于白等 */
-const MAX_BYTES = 5 * 1024 * 1024
-
 function pickFile() {
   fileEl.value?.click()
 }
@@ -241,13 +241,18 @@ async function onFile(e: Event) {
   const file = input.files?.[0]
   input.value = ''              // 清掉，下次选同一张照片也能再触发 change
   if (!file) return
-  if (file.size > MAX_BYTES) {
-    $q.notify({ type: 'negative', message: t('profile.tooBig'), timeout: 4000 })
-    return
-  }
   uploading.value = true
   try {
-    const saved = await auth.uploadAvatar(file)
+    // 先在手机上裁方缩小（后端存的就是 192 的方图），传上去只有十几 KB。
+    // 照片多大都行，不用再挡 —— 原来超过 5MB 就拒，而手机拍的动辄七八 MB
+    let small: File
+    try {
+      small = await shrinkSquare(file, 192, 'image/jpeg')
+    } catch {
+      $q.notify({ type: 'negative', message: t('errors.avatar_not_image'), timeout: 4000 })
+      return
+    }
+    const saved = await auth.uploadAvatar(small)
     meta.members = meta.members.map((m) => (m.id === saved.id ? saved : m))
   } catch (err) {
     $q.notify({ type: 'negative', message: err instanceof ApiError ? err.text : String(err), timeout: 5000 })
@@ -263,6 +268,13 @@ async function removePhoto() {
   } catch (err) {
     $q.notify({ type: 'negative', message: err instanceof ApiError ? err.text : String(err), timeout: 5000 })
   }
+}
+
+/** 深浅色、主题色。点下去当场换上，再存进账号；存不上就换回去 */
+function savePref(key: 'scheme' | 'theme_color', value: string) {
+  setPref(key, value).catch((e) => {
+    $q.notify({ type: 'negative', message: e instanceof ApiError ? e.text : String(e), timeout: 5000 })
+  })
 }
 
 function toggle() {

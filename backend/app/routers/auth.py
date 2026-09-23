@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import threading
 import time
 
@@ -55,7 +54,8 @@ def to_member_out(m: Member) -> MemberOut:
     return MemberOut(
         **data,
         is_active=m.is_active(),
-        avatar=f"data:image/webp;base64,{base64.b64encode(blob).decode()}" if blob else None,
+        # 地址里带版本号：换一次头像地址就变，旧的那张可以放心长缓存
+        avatar=f"/api/members/{m.id}/avatar?v={m.avatar_version}" if blob else None,
     )
 
 

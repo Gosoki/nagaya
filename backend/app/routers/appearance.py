@@ -30,7 +30,8 @@ router = APIRouter(prefix="/api/appearance", tags=["appearance"])
 MASTER = 512
 #: 允许取的尺寸。不开放任意值 —— 免得有人拿 /icon/99999.png 让服务器去画一张大图
 SIZES = {32, 180, 192, 512}
-MAX_ICON_BYTES = 5 * 1024 * 1024
+#: 前端已经缩成 512 的 PNG 再传（src/shrinkImage.ts），最多几百 KB；留余量给旧页面
+MAX_ICON_BYTES = 2 * 1024 * 1024
 #: 只认这几种格式。Pillow 默认什么都敢开，EPS 这类还会转手交给 Ghostscript
 IMAGE_FORMATS = ["JPEG", "PNG", "WEBP", "GIF"]
 #: 解码前先看像素数。Pillow 自己的炸弹闸在 1.79 亿像素，而 1 亿像素的小 PNG

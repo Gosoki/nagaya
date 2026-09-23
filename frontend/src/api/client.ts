@@ -131,8 +131,22 @@ async function send<T>(method: string, path: string, body?: unknown): Promise<T>
   return data as T
 }
 
+/** 取一张图（头像）。和 send 同一个登录头；回来的不是 JSON，不走那边的解析 */
+async function blob(path: string): Promise<Blob> {
+  const token = getToken()
+  let res: Response
+  try {
+    res = await fetch(path, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  } catch {
+    throw new ApiError('network', 'fetch failed')
+  }
+  if (!res.ok) throw new ApiError('unknown', res.statusText, {}, res.status)
+  return res.blob()
+}
+
 export const api = {
   get: <T>(path: string) => request<T>('GET', path),
+  blob,
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
   patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, body),
   put: <T>(path: string, body?: unknown) => request<T>('PUT', path, body),

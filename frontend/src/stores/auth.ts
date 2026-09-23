@@ -4,6 +4,7 @@ import { ref } from 'vue'
 import { ApiError, api, setToken } from 'src/api/client'
 import type { Member } from 'src/api/types'
 import { setLang } from 'src/i18n'
+import { syncPrefs } from 'src/prefs'
 
 // 自己是谁，也在本地留一份 —— 和 meta 那份缓存同一个道理。
 //  它只用来做**界面门卫**（谁能点「确认已完成」、显不显示个人设置、默认付款人），
@@ -38,6 +39,8 @@ export const useAuth = defineStore('auth', () => {
     me.value = r.member
     cacheMe(r.member)
     setLang(r.member.lang)          // 语言跟人走
+    // 深浅色、主题色也跟人走。等它换好再进门，免得先闪一下上一位的颜色
+    await syncPrefs(false).catch(() => {})
   }
 
   /**

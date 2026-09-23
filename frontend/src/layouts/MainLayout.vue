@@ -93,6 +93,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { applyAppearance } from 'src/appearance'
+import { syncPrefs } from 'src/prefs'
 import { useOnline } from 'src/composables/online'
 import { useMemos } from 'src/stores/memos'
 import AddTabs from 'src/components/AddTabs.vue'
@@ -164,6 +165,8 @@ async function boot() {
     bootFailed.value = true
     return
   }
+  // 深浅色、主题色：别的设备上可能改过。首帧已经按本机缓存上过色了，不用等它
+  void syncPrefs(true).catch(() => {})
   // 账本刷新失败**不该挡住界面**：离线时照样要能把这一笔填完存成草稿
   try {
     await ledger.refresh()
@@ -383,8 +386,10 @@ watch(
 function onVisible() {
   if (document.visibilityState !== 'visible') return
   void meta.load().catch(() => {})
-  // 上次冷启动时没认出自己是谁（服务器那会儿没起来）：这次顺手再认一遍
-  if (!auth.me) void auth.restore()
+  // 自己的资料和偏好也对一下：语言、深浅色、主题色都跟着账号走，
+  // 在另一台设备上改过的，切回来就该换上。顺带把「上次冷启动时没认出自己」补上
+  void auth.restore()
+  void syncPrefs(true).catch(() => {})
   // 挂在后台的这段时间，室友可能记了账、出了账 —— 流水和账单原来从不重取，
   // 一直要到整页刷新才看得到
   void ledger.refresh().catch(() => {})

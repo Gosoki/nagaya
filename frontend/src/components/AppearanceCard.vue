@@ -72,6 +72,7 @@ import { useI18n } from 'vue-i18n'
 
 import { ApiError, api } from 'src/api/client'
 import { applyAppearance, iconSrc } from 'src/appearance'
+import { shrinkSquare } from 'src/shrinkImage'
 import { useMeta } from 'src/stores/meta'
 
 const { t } = useI18n()
@@ -97,7 +98,15 @@ async function onFile(e: Event) {
   if (!file) return
   busy.value = true
   try {
-    await api.upload<{ version: number }>('/api/appearance/icon', file)
+    // 先在手机上缩成 512 的方图（后端的母版就是这么大），PNG 留着透明
+    let small: File
+    try {
+      small = await shrinkSquare(file, 512, 'image/png')
+    } catch {
+      $q.notify({ type: 'negative', message: t('errors.icon_not_image'), timeout: 4000 })
+      return
+    }
+    await api.upload<{ version: number }>('/api/appearance/icon', small)
     await after()
   } catch (err) {
     $q.notify({ type: 'negative', message: err instanceof ApiError ? err.text : String(err), timeout: 5000 })

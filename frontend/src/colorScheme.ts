@@ -1,12 +1,11 @@
 /**
  * 深浅色。默认跟系统走，每个人可以在「设置 → 个人」里钉成浅色或深色。
  *
- * **存在这台设备上（localStorage），不进账号。** 进账号就得给 member 表加一列，
- * 而 D18 之前的约定是不给已有的表加字段（create_all 不补列，老库一开就是
- * `no such column`）。每个人用的是自己的手机，存在本机就等于「归个人」；
- * 同一个人换一台设备要再选一次 —— 这是代价，切 Alembic 之后可以挪进账号。
+ * **跟着账号走**（存在服务器的 member_pref 表里，和服务器对表见 src/prefs.ts）。
+ * 这里的 localStorage 只是本机缓存：首帧的深浅在 index.html 里那段小脚本定
+ * （读同一个键），那会儿 JS 还没起来、更没登录。
  *
- * 首帧的深浅在 index.html 里那段小脚本定（读同一个键），这里接手之后的切换：
+ * 这里接手之后的切换：
  * html 上挂不挂 .dark（tokens.css 的深色值挂在它上面）、Quasar 的 Dark 插件
  * （弹窗、菜单、日期选择器这些 Quasar 自己画的东西）、以及 theme-color。
  */
@@ -26,7 +25,7 @@ function read(): SchemePref {
   }
 }
 
-/** 这台设备上选的是哪一档。设置页那个三选一直接绑它 */
+/** 现在用的是哪一档。设置页那个三选一显示它，改它走 src/prefs.ts 的 setPref */
 export const schemePref = ref<SchemePref>(read())
 
 watch(schemePref, (p) => {

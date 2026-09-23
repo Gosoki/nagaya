@@ -41,9 +41,10 @@ class MemberOut(SQLModel):
     left_on: Optional[dt.date]
     lang: Lang
     is_active: bool
-    #: 头像，`data:image/webp;base64,...`。**随成员一起下发**，不单开一个图片地址：
-    #: `<img>` 带不了 Bearer token，做成公开端点等于在局域网上开个口子；
-    #: 而且压完才几 KB，跟着成员走还能进本地缓存，离线时头像照样在
+    #: 头像的地址 `/api/members/{id}/avatar?v={版本}`，没设过是 null。
+    #: 图不跟着成员走：原来是整张 base64 塞在这儿，每次拉成员列表都重传一遍。
+    #: 现在列表只带地址，图单取、按地址长缓存（版本号一变地址就变）。
+    #: 那个端点照样要登录 —— 前端 fetch 下来给 <img>，不开公开的口子
     avatar: Optional[str] = None
     avatar_version: int = 0
 

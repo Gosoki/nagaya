@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 
 import { api } from 'src/api/client'
 import type { Category, Member, Setting } from 'src/api/types'
+import { forgetAvatars } from 'src/avatars'
 import { useAuth } from 'src/stores/auth'
 
 /** 成员、分类、配置 —— 变得少，登录后拉一次就够。 */
@@ -75,6 +76,7 @@ export const useMeta = defineStore('meta', () => {
     members.value = []
     categories.value = []
     settings.value = []
+    forgetAvatars()
     try {
       localStorage.removeItem(CACHE_KEY)
     } catch {

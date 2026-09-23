@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import io
 
-from fastapi import APIRouter, Depends, File, UploadFile, status
+from fastapi import APIRouter, Depends, File, Response, UploadFile, status
 from PIL import Image, ImageOps
 from sqlmodel import Session, select
 
@@ -125,14 +125,19 @@ def update_member(
     return to_member_out(member)
 
 
-#: 头像上传上限。手机随手拍就是四五 MB，挡在读之前 —— 不能先读进内存再判断
-MAX_AVATAR_BYTES = 5 * 1024 * 1024
+#: 头像上传上限。照片在前端就裁方缩小了（src/shrinkImage.ts），传上来的只有十几 KB；
+#: 1MB 是留给 curl 和没更新的旧页面的。挡在读之前 —— 不能先读进内存再判断
+MAX_AVATAR_BYTES = 1 * 1024 * 1024
 #: 存下来的边长。界面上最大只用到 40px，三倍屏也就 120px，192 足够清楚了
 AVATAR_SIZE = 192
 
 
 def _compress_avatar(raw: bytes) -> bytes:
     """把上传的图片压成一张小方图。
+
+    前端已经裁方缩小过一遍，这里**照样再做一遍**：传上来的字节不可信，
+    重新解码、重新编码才能保证存下去的一定是一张干净的小 WebP。
+    好在已经是小图了，这一下是毫秒级的活。
 
     做四件事，缺一不可：
       * **按 EXIF 摆正** —— 手机横过来拍的照片，不转的话头像是躺着的
@@ -184,6 +189,31 @@ async def upload_avatar(
     session.commit()
     session.refresh(member)
     return to_member_out(member)
+
+
+@router.get("/{member_id}/avatar")
+def get_avatar(
+    member_id: int,
+    session: Session = Depends(get_session),
+    _: Member = Depends(current_member),
+) -> Response:
+    """头像图片。成员列表里只带它的地址（`?v=版本号`），图在这儿单取。
+
+    **可以缓存一年**：换头像版本号就加一、地址跟着变，浏览器手里那张旧的
+    不会再被用到 —— 所以别人换了头像，这边下一次拉成员列表（冷启动、切回前台）
+    就会换上新的；没换的时候一张图都不重下。
+    原来头像是 base64 塞在成员列表里的，每次切回前台都把三个人的头像整个重传一遍。
+
+    要登录：`<img>` 带不了 token，前端是 fetch 下来再给 img 的（src/avatars.ts）。
+    """
+    member = session.get(Member, member_id)
+    if member is None or not member.avatar:
+        raise not_found("avatar")
+    return Response(
+        content=member.avatar,
+        media_type="image/webp",
+        headers={"Cache-Control": "private, max-age=31536000, immutable"},
+    )
 
 
 @router.delete("/{member_id}/avatar", response_model=MemberOut)
