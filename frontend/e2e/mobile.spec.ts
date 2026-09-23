@@ -1,8 +1,9 @@
 /**
  * 手机视口 E2E —— SPEC §7.4 的硬性验收。
  *
- * 跑之前要有后端在 127.0.0.1:8000 上跑着，并且已经 seed 过开发数据：
- *   cd backend && .venv/bin/python -m tools.seed_dev && ./run.sh
+ * 用仓库根目录的 ./run-e2e.sh 跑：它在自己的端口（8765）上用一个专用库起服务、
+ * seed 好开发数据、跑完删掉，不碰 8000 上那个服务和 data/nagaya.db。
+ * 手动跑的话，NAGAYA_URL 指向一个 seed 过开发数据的服务（默认 127.0.0.1:8000）
  */
 import { expect, test } from '@playwright/test'
 
