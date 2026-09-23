@@ -137,6 +137,18 @@ def participants(rule: Mapping[str, Any]) -> list[str]:
     return list(rule.get("weights", {}))
 
 
+def named_members(rule: Mapping[str, Any]) -> list[int]:
+    """这次提交的**原始**规则点了哪几个人（participants 吃的是展开后的规则）。
+
+    先验形状：`{"weights": "abc"}`、`{"x": 1}` 这种，直接 int() 会抛出
+    TypeError/ValueError 冒成裸 500；这里抛 RuleError，和 POST 同样的输入一样是 400
+    """
+    section = rule.get("exact") if rule.get("mode") == "exact" else rule.get("weights")
+    if section is None:
+        return []
+    return [int(k) for k in _normalize(section)]
+
+
 def _normalize(d: Any) -> dict[str, Any]:
     """把 key 统一成字符串形式的 member id。
 

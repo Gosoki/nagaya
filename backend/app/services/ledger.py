@@ -14,7 +14,7 @@ from sqlalchemy import func, union_all
 from sqlalchemy import update as sa_update
 from sqlmodel import Session, SQLModel, select
 
-from app.core.rules import _normalize, expand, mkey, participants, pick_rule
+from app.core.rules import expand, mkey, named_members, participants, pick_rule
 from app.core.split import split
 from app.models import (
     AuditLog,
@@ -454,7 +454,7 @@ def update_entry(
             #      以 unknown_member 挡死，那笔账从此再也改不动
             #   2. 这笔账原来的参与人（**不按新日期重挑**：改日期不该换人）
             #   3. 实在没有，才按这笔账的日期取在籍成员
-            from_rule = _named_in(rule) if rule is not None else []
+            from_rule = named_members(rule) if rule is not None else []
             from_entry = [int(k) for k in participants(entry.split_rule_json)] if inheritable else []
             ids = from_rule or from_entry or [m.id for m in active_members(session, on)]
             # 参与人从规则里推出来时，得自己再验一遍存在性 —— 上面那次 _check_refs
@@ -526,15 +526,6 @@ def delete_entry(
     session.refresh(entry)
     _audit(session, actor_id, "delete", "entry", entry.id, before, None)
     session.commit()
-
-
-def _named_in(rule: dict[str, Any]) -> list[int]:
-    """这次提交的规则点了哪几个人。**先验形状**：`{"weights": "abc"}`、`{"x": 1}` 这种，
-    直接 int() 会抛出 TypeError/ValueError 冒成裸 500；走 POST 同样的输入是 400"""
-    section = rule.get("exact") if rule.get("mode") == "exact" else rule.get("weights")
-    if section is None:
-        return []
-    return [int(k) for k in _normalize(section)]
 
 
 def restore_entry(session: Session, entry: Entry, *, actor_id: int | None) -> None:
