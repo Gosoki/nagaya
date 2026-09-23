@@ -288,6 +288,9 @@ cd frontend && npm test                     # 161 条：分摊引擎（对后端
 ./run-e2e.sh                                # 47 条：375px 手机视口，真浏览器（WebKit）
 ```
 
+只查类型用 `cd frontend && npm run typecheck`。别拿 `npm run build` 查：它会覆盖 `dist/pwa`，
+而 8000 上的服务正发着这个目录 —— 查一下类型就等于把没改完的前端推到了大家手机上。
+
 第一次跑 E2E 之前：`cd frontend && npx playwright install webkit`。
 
 `run-e2e.sh` 用**自己的端口（8765）和自己的库**（`backend/data/e2e.db`）：每次重置到确定基线、
