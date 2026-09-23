@@ -8,4 +8,5 @@ umask 077
 # Linux 上 glibc 给每个线程开一块自己的堆（最多「核数 × 8」块），线程池里几十个线程
 # 各占一块、用完不还，常驻内存就这么一点点涨上去。两块足够这点并发。macOS 上没有这回事
 export MALLOC_ARENA_MAX="${MALLOC_ARENA_MAX:-2}"
-exec .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}" "$@"
+# --ws none：这个 app 没有 WebSocket，不必开机就把那套协议实现载进来（也少一个用不上的面）
+exec .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}" --ws none "$@"
