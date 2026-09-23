@@ -283,9 +283,32 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
         "simplified": simplify,
         # 出账之后又被改过的话要说出来，否则下一张的「上期结转」没人解释得清
         "edited_after_cut": _edited_after_cut(session, statement, rows),
+        # 已出的账单上「本期固定费」列哪几项（没记钱的按 ¥0 列）。草稿那页有自己的面板
+        "monthly_ids": billed_monthly_ids(session, statement) if statement is not None else None,
         # 这张单子上的转账记完了没有 —— 「转账按钮都点过了就显示结清」
         **settlement_progress(session, statement),
     }
+
+
+def billed_monthly_ids(session: Session, statement: Statement) -> list[int]:
+    """一张出过的账单上，「本期固定费」列哪几项 —— **没记钱的也列，按 ¥0**。
+
+    只列有钱的那几项的话，出账前面板上是五行、出账后只剩一行：两页同一块
+    高低不一，而且「燃气那期没填」和「燃气那期不存在」看上去一模一样。
+    清单在出账那一刻记进快照（cut_statement）；这个标记之前出的老账单按现在的
+    固定费清单列。没结固定费的那种小账（include_monthly=False）一项都不列。
+    """
+    snap = statement.snapshot_json or {}
+    if "monthly_ids" in snap:
+        return list(snap["monthly_ids"])
+    if snap.get("include_monthly", True) is False:
+        return []
+    rows = session.exec(
+        select(Category)
+        .where(Category.monthly == True, Category.archived == False)  # noqa: E712
+        .order_by(Category.display_order, Category.id)
+    )
+    return [c.id for c in rows]
 
 
 def _last_monthly_cut(session: Session, before: dt.datetime | None = None) -> Statement | None:
@@ -549,6 +572,16 @@ def cut_statement(
         snapshot.pop(key, None)
     # 这一张结没结固定费。「不含固定费」的小账不是一期的边界（见 _last_monthly_cut）
     snapshot["include_monthly"] = include_monthly
+    # 出账那一刻面板上是哪几项：没归档的全部，加上归档了但这张还挂着钱的。
+    # 没填的那几项按 ¥0 结，账单上也照样列着（见 billed_monthly_ids）
+    with_money = {e.category_id for e in entries if e.category_id in monthly_ids}
+    snapshot["monthly_ids"] = [
+        c.id
+        for c in session.exec(
+            select(Category).where(Category.monthly == True).order_by(Category.display_order, Category.id)  # noqa: E712
+        )
+        if not c.archived or c.id in with_money
+    ] if include_monthly else []
     statement.snapshot_json = snapshot
     session.add(statement)
     session.add(

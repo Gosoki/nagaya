@@ -108,6 +108,8 @@ export interface Bill {
     /** 这张单子自己一笔没动，是更早那张被改了才漂的 */
     from_earlier: boolean
   } | null
+  /** 已出的账单上「本期固定费」列哪几项（没记钱的按 ¥0 列）。草稿是 null —— 那页用面板 */
+  monthly_ids?: number[] | null
   prev_cut_at: string | null
   prev_label: string | null
   days_since_prev_cut: number | null

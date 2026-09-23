@@ -9,8 +9,8 @@
   1. **不填就是 0，而且照样能出账。**
      这一屏不摆「上期是多少」当参考 —— 参考值就在输入框那个位置，
      长得跟亲手填的没两样，某个月忘了改就带着上月的电费把账单发出去了。
-     每期真的不变的项（房租这种）去设置里开「和上期一样」：面板顶上列出来
-     「会按上期记多少」，**人点一下**才记成黑字实数（出账对话框里也有一个勾）。
+     每期真的不变的项（房租这种）去设置里开「和上期一样」：那一行上有个
+     「照上期」，**人点一下**才记成黑字实数（出账对话框里也有一个勾）。
      原来是打开账单页就自动记 —— 看一眼和记了几笔钱分不开。
      没开的项空着就空着，按 0 结。
 
@@ -40,22 +40,6 @@
       <q-item-section side><q-icon name="chevron_right" size="18px" class="invisible" /></q-item-section>
     </q-item>
 
-    <!-- 「和上期一样」的那几项：写明点下去记哪几项、多少钱，人点了才记 -->
-    <div v-if="carryReady.length" class="carry-bar row items-center no-wrap">
-      <div class="col carry-text">{{ t('monthly.carryReady', { list: carryList(carryReady) }) }}</div>
-      <q-btn
-        dense unelevated no-caps color="primary"
-        class="q-ml-sm"
-        :loading="carrying"
-        :label="t('monthly.carryDo')"
-        @click="carry"
-      />
-    </div>
-    <!-- 开了开关却照抄不了的：原来是每次打开页面弹一次提示，现在一直写在这儿，填了就消失 -->
-    <div v-if="carryBlocked.length" class="carry-bar carry-blocked">
-      {{ t('monthly.carryBlocked', { list: carryBlocked.map((r) => r.name).join('、') }) }}
-    </div>
-
     <q-list separator>
       <q-expansion-item
         v-for="row in rows"
@@ -83,8 +67,23 @@
                    否则多出来的那几笔在界面上既打不开也删不掉，钱却实实在在算在账单里 -->
               <!-- 已经录了的行状态位本来就是空的（黑色实数自己说明了「录了」），
                    正好用来说清**这笔算谁垫的** —— 这是这一屏唯一会悄悄出错的地方 -->
+              <!-- 「和上期一样」就放在这一行上，点了才记（记上的金额当场出现在右边的框里，
+                   出账对话框里也写着多少）。字只写「照上期」：带上金额这一行放不下，会被省略号吃掉。
+                   不另起一条横条 —— 那条会把这一块撑高，出账前后两页就不一样高了 -->
+              <button
+                v-if="!stateText(row) && isCarryReady(row)"
+                class="state carry-chip"
+                :disabled="carrying"
+                @click.stop="carry([row])"
+                :aria-label="`${t('monthly.carryOne')} ${formatYen(row.carry_amount ?? 0)}`"
+              >{{ t('monthly.carryOne') }}</button>
+              <!-- 开了开关却照抄不了（垫付人搬走了、来了新室友）：一直写在这儿，填了就消失 -->
               <span
-                v-if="!stateText(row) && payerName(row)"
+                v-else-if="!stateText(row) && isCarryBlocked(row)"
+                class="state text-warning"
+              >{{ t('monthly.carryStale') }}</span>
+              <span
+                v-else-if="!stateText(row) && payerName(row)"
                 class="state text-grey-6"
               >{{ payerName(row) }}</span>
               <button
@@ -380,16 +379,13 @@ onMounted(() => {
 })
 
 /**
- * 「和上期一样」这一下能记哪几项。正在手填的行不算 —— 按钮上没写它，
- * 点下去也就不记它（后端按传过去的 category_ids 只记这几项）
+ * 这一行能不能「照上期」一键记上。正在手填的行不算 —— 人已经在填了，
+ * 再给一个按钮只会记出两笔（后端也只记传过去的那几项）
  */
-const carryReady = computed(() =>
-  historic.value ? [] : rows.value.filter((r) => r.carry_amount && r.entry_id === null && !r.dirty && !r.text),
-)
-const carryBlocked = computed(() =>
-  historic.value ? [] : rows.value.filter((r) => r.carry_blocked && r.entry_id === null && !r.dirty && !r.text),
-)
-const carryList = (list: Row[]) => list.map((r) => `${r.name} ${formatYen(r.carry_amount ?? 0)}`).join('、')
+const isCarryReady = (r: Row) =>
+  !historic.value && Boolean(r.carry_amount) && r.entry_id === null && !r.dirty && !r.text
+const isCarryBlocked = (r: Row) =>
+  !historic.value && Boolean(r.carry_blocked) && r.entry_id === null && !r.dirty && !r.text
 const carrying = ref(false)
 
 /**
@@ -399,14 +395,14 @@ const carrying = ref(false)
  * 「预填的数字长得跟亲手填的一模一样，某个月忘了改也没人看得出」。
  * 这个开关是那条规矩唯一的出口，所以记上的每一笔都当场报出来。
  */
-async function carry() {
-  if (historic.value || carrying.value) return
+async function carry(list: Row[]) {
+  if (historic.value || carrying.value || !list.length) return
   carrying.value = true
   try {
     const { created, failed } = await api.post<{
       created: { name: string; amount: number }[]
       failed: { name: string }[]
-    }>('/api/monthly/carry', { category_ids: carryReady.value.map((r) => r.category_id) })
+    }>('/api/monthly/carry', { category_ids: list.map((r) => r.category_id) })
     if (!created.length && !failed.length) {
       await load()
       return
@@ -784,17 +780,7 @@ defineExpose({ reload: load })
   transition: box-shadow 0.15s;
 }
 .amount-input:focus { box-shadow: inset 0 0 0 1.5px var(--nagaya-accent); }
-/* 「和上期一样」那条：压在标题下面、列表上面，淡主题色底 */
-.carry-bar {
-  margin: 0 12px 8px;
-  padding: 8px 10px 8px 12px;
-  border-radius: var(--nagaya-r-sm);
-  background: var(--nagaya-accent-bg);
-  font-size: var(--nagaya-fs-label);
-  line-height: 1.45;
-}
-.carry-text { color: var(--nagaya-ink); }
-.carry-blocked { background: var(--nagaya-warn-bg); color: var(--nagaya-warn); }
+
 /* 灰色占位＝还没填，不是值。改过的才变实色 */
 .amount-input::placeholder { color: var(--nagaya-ink-5); }
 /* **没存上的样子不能借主色。** 原来是蓝下划线 + 加粗，看着像「存好了」，
@@ -822,4 +808,18 @@ defineExpose({ reload: load })
   text-decoration: underline;
   cursor: pointer;
 }
+/* 「照上期 ¥…」：一颗能点的小药丸。纵向内边距不许撑高这一行（行高交给名字的 strut） */
+.carry-chip {
+  border: none;
+  border-radius: var(--nagaya-r-pill);
+  padding: 4px 8px;
+  margin-top: -4px;
+  margin-bottom: -4px;
+  background: var(--nagaya-accent-bg);
+  color: var(--nagaya-accent);
+  font-family: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.carry-chip:disabled { opacity: 0.5; }
 </style>

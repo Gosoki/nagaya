@@ -574,3 +574,31 @@ def test_carry_endpoint_takes_an_optional_list(client, auth, session, members) -
     assert r.status_code == 200 and r.json()["created"] == [], "给了空列表就一项都不记"
     r = client.post("/api/monthly/carry", headers=auth)
     assert [m["name"] for m in r.json()["created"]] == ["家賃"], "不带 body 还是全部能记的"
+
+
+def test_an_issued_bill_still_lists_the_fixed_items_that_were_zero(session: Session, members) -> None:
+    """出账时没填的固定费按 ¥0 结 —— 账单上也得照样列着，别出账前五行、出账后一行。"""
+    from app.services.bill import billed_monthly_ids, build_bill
+
+    a, *_ = members
+    c = cats(session)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG,
+                 amount=120_000, payer_id=a.id, category_id=c["家賃"].id)
+    st = cut_statement(session, actor_id=a.id)
+
+    listed = build_bill(session, st)["monthly_ids"]
+    assert listed == [c["家賃"].id, c["電気"].id, c["水道"].id], "没填的电费、水费也要列着"
+    assert c["旧契約"].id not in listed, "归档了、这张上也没钱的不列"
+    assert c["日用品"].id not in listed
+
+    # 清单是出账那一刻的：之后再加一项固定费，这张旧账单上不许冒出来
+    session.add(Category(name="ネット", monthly=True, display_order=9))
+    session.commit()
+    assert billed_monthly_ids(session, st) == listed
+
+    # 没结固定费的小账：一项都不列
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                 amount=500, payer_id=a.id, category_id=c["日用品"].id)
+    small = cut_statement(session, actor_id=a.id, include_monthly=False)
+    assert build_bill(session, small)["monthly_ids"] == []
+    assert build_bill(session, None)["monthly_ids"] is None, "草稿那页用的是面板，不给这个"

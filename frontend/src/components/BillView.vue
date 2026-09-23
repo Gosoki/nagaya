@@ -191,19 +191,23 @@
         </q-item>
         <!-- 行的尺寸照着未出账那页的可编辑面板来：一样的行高、一样的金额字号、
              一样的右边距。两页看的是同一件事，来回切时这一块不该变样 -->
-        <q-list v-if="monthlyEntries.length" separator class="monthly-list">
-          <q-item v-for="e in monthlyEntries" :key="e.id" dense>
+        <!-- 出账时没填的那几项也列着，按 ¥0：出账前面板上是五行，出账后也得是五行 ——
+             两页同一块不该高低不一，「那期没填」也不该看着像「那期没这一项」 -->
+        <q-list v-if="monthlyRows.length" separator class="monthly-list">
+          <q-item v-for="r in monthlyRows" :key="r.key" dense>
             <q-item-section avatar>
-              <q-avatar size="30px" :style="{ background: colorOfEntry(e) }" text-color="white">
-                <q-icon :name="iconOfEntry(e)" size="16px" />
+              <q-avatar size="30px" :style="{ background: r.color }" text-color="white">
+                <q-icon :name="r.icon" size="16px" />
               </q-avatar>
             </q-item-section>
             <!-- 只写分类名，不写备注：固定费这一屏（可编辑面板那边）根本没有
                  填备注的入口，这里却显示一条，等于凭空冒出个改不了的字段 -->
             <q-item-section>
-              <q-item-label>{{ categoryOfEntry(e)?.name ?? labelOfEntry(e) }}</q-item-label>
+              <q-item-label>{{ r.name }}</q-item-label>
             </q-item-section>
-            <q-item-section side class="amount text-grey-9">{{ formatYen(e.amount_jpy) }}</q-item-section>
+            <q-item-section side class="amount" :class="r.amount ? 'text-grey-9' : 'text-grey-5'">
+              {{ formatYen(r.amount) }}
+            </q-item-section>
           </q-item>
         </q-list>
         <div v-else class="text-caption text-grey-6 q-px-md q-pb-md">{{ t('monthly.noneBilled') }}</div>
@@ -759,6 +763,30 @@ const monthlyEntries = computed(() =>
         (meta.categoryById[b.category_id!]?.display_order ?? 0),
     ),
 )
+
+/**
+ * 已出账单上「本期固定费」的行：每笔一行，出账时没填的那几项补一行 ¥0。
+ * 列哪几项是出账那一刻定下的（后端 billed_monthly_ids），这里只负责补齐和排序
+ */
+const monthlyRows = computed(() => {
+  const withMoney = new Set(monthlyEntries.value.map((e) => e.category_id))
+  const zero = (bill.value?.monthly_ids ?? [])
+    .filter((id) => !withMoney.has(id))
+    .map((id) => meta.categoryById[id])
+    .filter((c): c is NonNullable<typeof c> => Boolean(c))
+  const order = (id: number | null) => meta.categoryById[id ?? -1]?.display_order ?? 0
+  return [
+    ...monthlyEntries.value.map((e) => ({
+      key: `e${e.id}`,
+      order: order(e.category_id),
+      color: colorOfEntry(e),
+      icon: iconOfEntry(e),
+      name: categoryOfEntry(e)?.name ?? labelOfEntry(e),
+      amount: e.amount_jpy,
+    })),
+    ...zero.map((c) => ({ key: `c${c.id}`, order: c.display_order, color: c.color, icon: c.icon, name: c.name, amount: 0 })),
+  ].sort((a, b) => a.order - b.order)
+})
 
 const monthlyTotal = computed(() =>
   monthlyEntries.value.reduce((sum, e) => sum + e.amount_jpy, 0),
