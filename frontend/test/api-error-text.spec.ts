@@ -11,12 +11,7 @@
  */
 import { describe, expect, it } from 'vitest'
 
-Object.assign(globalThis, {
-  localStorage: { getItem: () => null, setItem: () => {} },
-  sessionStorage: { getItem: () => null, setItem: () => {} },
-})
-
-const { ApiError } = await import('../src/api/client')
+import { ApiError } from '../src/api/client'
 
 describe('报错文案', () => {
   it('路由错（只有一句 detail）也要把那句话说出来', () => {

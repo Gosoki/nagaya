@@ -7,11 +7,7 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const store = () => {
-  const m = new Map<string, string>([['nagaya.lang', 'zh']])
-  return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) }
-}
-Object.assign(globalThis, { localStorage: store(), sessionStorage: store() })
+import { useLedger } from '../src/stores/ledger'
 
 let entryCount = 0
 vi.mock('src/api/client', () => ({
@@ -22,8 +18,6 @@ vi.mock('src/api/client', () => ({
     },
   },
 }))
-
-const { useLedger } = await import('../src/stores/ledger')
 
 beforeEach(() => setActivePinia(createPinia()))
 

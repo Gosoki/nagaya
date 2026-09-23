@@ -12,15 +12,7 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const store = { s: {} as Record<string, string | null> }
-Object.assign(globalThis, {
-  localStorage: {
-    getItem: (k: string) => store.s[k] ?? null,
-    setItem: (k: string, v: string) => (store.s[k] = v),
-    removeItem: (k: string) => delete store.s[k],
-  },
-  sessionStorage: { getItem: () => null, setItem: () => {} },
-})
+import { useBills } from '../src/stores/bills'
 
 /** 每个地址一个「什么时候回」的闸门，测试自己决定谁先回 */
 const gates = new Map<string, { resolve: (v: unknown) => void; promise: Promise<unknown> }>()
@@ -46,8 +38,6 @@ function gate(path: string) {
   gates.set(path, { resolve, promise })
   return () => resolve(null)
 }
-
-const { useBills } = await import('../src/stores/bills')
 
 describe('账单缓存的竞态', () => {
   beforeEach(() => {

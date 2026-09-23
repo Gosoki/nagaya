@@ -10,5 +10,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['test/**/*.spec.ts'],
+    // 浏览器存储的替身，每个测试文件跑之前各挂一份新的
+    setupFiles: ['test/setup.ts'],
   },
 })

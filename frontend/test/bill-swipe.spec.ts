@@ -8,16 +8,9 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
 
-// store 这条 import 链最后会碰到 i18n 和浏览器存储（跑在 node 里，没有这些东西）。
-// 只为了一个纯逻辑的翻页函数去拉 jsdom 不值当，给两个最小替身就够了
-const store = () => {
-  const m = new Map<string, string>([['nagaya.lang', 'zh']])
-  return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) }
-}
-Object.assign(globalThis, { localStorage: store(), sessionStorage: store() })
+import { useBillSwipe } from '../src/composables/billSwipe'
+import { useBills } from '../src/stores/bills'
 
-const { useBillSwipe } = await import('../src/composables/billSwipe')
-const { useBills } = await import('../src/stores/bills')
 type BillTab = 'draft' | 'current'
 
 beforeEach(() => setActivePinia(createPinia()))

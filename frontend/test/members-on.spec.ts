@@ -8,16 +8,10 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const store = () => {
-  const m = new Map<string, string>([['nagaya.lang', 'zh']])
-  return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) }
-}
-Object.assign(globalThis, { localStorage: store(), sessionStorage: store() })
+import { useMeta } from '../src/stores/meta'
 
 vi.mock('src/api/client', () => ({ api: { get: () => Promise.resolve([]) } }))
 vi.mock('src/stores/auth', () => ({ useAuth: () => ({ me: { id: 2 } }) }))
-
-const { useMeta } = await import('../src/stores/meta')
 
 const mk = (id: number, joined: string, left: string | null = null) => ({
   id, name: `m${id}`, display_name: `M${id}`, color: '#000', display_order: id,
