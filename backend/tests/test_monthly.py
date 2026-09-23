@@ -12,8 +12,9 @@ import datetime as dt
 from sqlmodel import Session, select
 
 from app.models import Category, Entry, EntryKind, Member
-from app.services.bill import carry_same_as_last, cut_statement, monthly_rows, unbilled
+from app.services.bill import cut_statement, unbilled
 from app.services.ledger import create_entry, delete_entry
+from app.services.monthly import carry_same_as_last, monthly_rows
 
 AUG = dt.date(2026, 8, 10)
 SEP = dt.date(2026, 9, 10)

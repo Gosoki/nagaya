@@ -326,7 +326,7 @@ cd frontend && npm test                     # 161 条：分摊引擎（对后端
 backend/
   app/
     core/          分摊算法、规则解析、转账方案（纯函数，不碰库）
-    services/      账本、账单、出账、备份
+    services/      账本、账单、出账、固定费（照上期）、审计、备份
     routers/       REST 接口
     models.py      表结构        migrate.py  开机升级
     settings_spec.py  设置项登记表（加一个面板可改的设置，从这里下手）

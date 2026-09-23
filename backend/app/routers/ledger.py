@@ -12,6 +12,7 @@ from app.models import Member, Statement, today_jst
 from app.routers.entries import to_entry_out
 from app.schemas import BalancesOut, CarryIn, ConfirmIn, EntryOut, StatementOut
 from app.services import bill as bill_svc
+from app.services import monthly as monthly_svc
 from app.services import ledger as ledger_svc
 
 router = APIRouter(prefix="/api", tags=["ledger"])
@@ -44,7 +45,7 @@ def monthly(
         st = session.get(Statement, statement_id)
         if st is None:
             raise not_found("statement")
-    return bill_svc.monthly_rows(session, st)
+    return monthly_svc.monthly_rows(session, st)
 
 
 @router.post("/monthly/carry")
@@ -70,7 +71,7 @@ def carry_monthly(
     # 要去掉的事。现在的前端永远带着按钮上列出来的那几项
     if body is None or body.category_ids is None:
         return {"created": [], "failed": []}
-    return bill_svc.carry_same_as_last(session, actor_id=member.id, only=set(body.category_ids))
+    return monthly_svc.carry_same_as_last(session, actor_id=member.id, only=set(body.category_ids))
 
 
 @router.get("/statements", response_model=list[StatementOut])
