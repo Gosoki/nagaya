@@ -14,7 +14,7 @@ from sqlalchemy import func, union_all
 from sqlalchemy import update as sa_update
 from sqlmodel import Session, SQLModel, select
 
-from app.core.rules import expand, mkey, participants, pick_rule
+from app.core.rules import _normalize, expand, mkey, participants, pick_rule
 from app.core.split import split
 from app.models import (
     AuditLog,
@@ -411,21 +411,24 @@ def update_entry(
     prev_kind = entry.kind          # 下面几行就要被覆盖掉，先留一份
     prev_category_id = entry.category_id
 
-    for key in ("title", "note", "category_id", "bundle_id"):
-        if key in fields:
-            setattr(entry, key, fields[key])
-
     amount = fields.get("amount_jpy", entry.amount_jpy)
     kind = fields.get("kind", entry.kind)
     on = fields.get("date", entry.date)
     payer_id = fields.get("payer_id", entry.payer_id)
     to_member_id = fields.get("to_member_id", entry.to_member_id)
+    # **先验再改。** 原来先把 category_id / bundle_id 写到 entry 上再验：验的时候
+    # session.get() 触发 autoflush，把一个不存在的分类 id 先 UPDATE 进库 —— 撞外键，
+    # 裸 500。同一个输入走 POST 是规规矩矩的 400 unknown_category
     _check_refs(session, payer_id=payer_id, to_member_id=to_member_id,
                 member_ids=member_ids, category_id=fields.get("category_id"),
                 bundle_id=fields.get("bundle_id"))
     _validate_amount(kind, amount)
     _validate_text(fields.get("title", entry.title), fields.get("note", entry.note))
     _validate_date(on)
+
+    for key in ("title", "note", "category_id", "bundle_id"):
+        if key in fields:
+            setattr(entry, key, fields[key])
 
     entry.kind, entry.date, entry.amount_jpy = kind, on, amount
     entry.payer_id, entry.to_member_id = payer_id, to_member_id
@@ -451,7 +454,7 @@ def update_entry(
             #      以 unknown_member 挡死，那笔账从此再也改不动
             #   2. 这笔账原来的参与人（**不按新日期重挑**：改日期不该换人）
             #   3. 实在没有，才按这笔账的日期取在籍成员
-            from_rule = [int(k) for k in participants(rule)] if rule is not None else []
+            from_rule = _named_in(rule) if rule is not None else []
             from_entry = [int(k) for k in participants(entry.split_rule_json)] if inheritable else []
             ids = from_rule or from_entry or [m.id for m in active_members(session, on)]
             # 参与人从规则里推出来时，得自己再验一遍存在性 —— 上面那次 _check_refs
@@ -517,8 +520,21 @@ def delete_entry(
     session.commit()
 
 
+def _named_in(rule: dict[str, Any]) -> list[int]:
+    """这次提交的规则点了哪几个人。**先验形状**：`{"weights": "abc"}`、`{"x": 1}` 这种，
+    直接 int() 会抛出 TypeError/ValueError 冒成裸 500；走 POST 同样的输入是 400"""
+    section = rule.get("exact") if rule.get("mode") == "exact" else rule.get("weights")
+    if section is None:
+        return []
+    return [int(k) for k in _normalize(section)]
+
+
 def restore_entry(session: Session, entry: Entry, *, actor_id: int | None) -> None:
     """从回收站捞回来。"""
+    # 本来就没删（撤销提示被连点两下）：什么都不做。照做的话 version 白涨一次、
+    # 审计里多一条 restore —— 它若是出过账的那笔，那张账单就平白挂上「出账后被改过 1 处」
+    if entry.deleted_at is None:
+        return
     entry.deleted_at = None
     entry.version += 1
     session.add(entry)

@@ -605,7 +605,8 @@ def test_app_name_and_icon_can_be_changed(client: TestClient, auth) -> None:
     r = client.post("/api/appearance/icon", headers=auth,
                     files={"file": ("logo.png", buf.getvalue(), "image/png")})
     assert r.status_code == 200, r.text
-    assert r.json()["version"] == 1
+    version = r.json()["version"]
+    assert version > 0
 
     for size in (32, 180, 192, 512):
         got = client.get(f"/api/appearance/icon/{size}.png")
@@ -617,7 +618,7 @@ def test_app_name_and_icon_can_be_changed(client: TestClient, auth) -> None:
 
     m = client.get("/api/appearance/manifest.webmanifest").json()
     assert all("/api/appearance/icon/" in i["src"] for i in m["icons"])
-    assert all("v=1" in i["src"] for i in m["icons"]), "地址里得带版本号，否则手机永远用死缓存那张"
+    assert all(f"v={version}" in i["src"] for i in m["icons"]), "地址里得带版本号，否则手机永远用死缓存那张"
 
     # 不是图片的当场拒掉，别存进库
     bad = client.post("/api/appearance/icon", headers=auth,
@@ -625,6 +626,11 @@ def test_app_name_and_icon_can_be_changed(client: TestClient, auth) -> None:
     assert bad.status_code == 400 and bad.json()["code"] == "icon_not_image"
 
     # 撤回默认
+    assert client.delete("/api/appearance/icon", headers=auth).json()["version"] == 0
+    # 再传一张：版本号不许和第一张撞（撞了的话地址一样，手机拿着缓存的旧图不放）
+    again = client.post("/api/appearance/icon", headers=auth,
+                        files={"file": ("logo.png", buf.getvalue(), "image/png")}).json()["version"]
+    assert again != version and again > 0
     assert client.delete("/api/appearance/icon", headers=auth).json()["version"] == 0
     assert client.get("/api/appearance/icon/192.png").status_code == 404
     assert all(i["src"].startswith("/icons/") for i in

@@ -572,8 +572,11 @@ def test_carry_endpoint_takes_an_optional_list(client, auth, session, members) -
 
     r = client.post("/api/monthly/carry", headers=auth, json={"category_ids": []})
     assert r.status_code == 200 and r.json()["created"] == [], "给了空列表就一项都不记"
+    # 今天之前的旧版 PWA 打开账单页就调它、不带 body —— 不许再替人记钱
     r = client.post("/api/monthly/carry", headers=auth)
-    assert [m["name"] for m in r.json()["created"]] == ["家賃"], "不带 body 还是全部能记的"
+    assert r.status_code == 200 and r.json()["created"] == [], "不带清单就什么都不记"
+    r = client.post("/api/monthly/carry", headers=auth, json={"category_ids": [c["家賃"].id]})
+    assert [m["name"] for m in r.json()["created"]] == ["家賃"]
 
 
 def test_an_issued_bill_still_lists_the_fixed_items_that_were_zero(session: Session, members) -> None:

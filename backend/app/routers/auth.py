@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import threading
 import time
 
@@ -39,23 +40,42 @@ def _wait_left(key: tuple[str, str], now: float) -> int:
     return max(0, int(last + wait - now + 0.999))
 
 
+#: 节流表最多记这么多条。先清过期的；还超就从最久没动静的清起 ——
+#: 原来只清「过期的」，一直换着名字刷的话一条都清不掉
+MAX_TRACKED = 1000
+
+
 def _note_fail(key: tuple[str, str], now: float) -> None:
     n, _ = _fails.get(key, (0, 0.0))
     _fails[key] = (n + 1, now)
-    if len(_fails) > 1000:                       # 防有人换着名字刷，把内存撑大
+    if len(_fails) > MAX_TRACKED:                # 防有人换着名字刷，把内存撑大
         for k, (_, t) in list(_fails.items()):
             if now - t > MAX_WAIT:
                 del _fails[k]
+        if len(_fails) > MAX_TRACKED:
+            for k, _ in sorted(_fails.items(), key=lambda kv: kv[1][1])[: len(_fails) - MAX_TRACKED]:
+                del _fails[k]
 
 
-def to_member_out(m: Member) -> MemberOut:
+def to_member_out(m: Member, viewer: int | None = None) -> MemberOut:
+    """`viewer` 给了、又不是本人：登录名留空。
+
+    个人设置里写着「登录名只有自己看得到」—— 原来接口却把每个人的登录名发给所有人，
+    那是一对凭据的一半。建人的那一次不给 viewer：新室友的登录名是加人的那位亲手敲的，
+    还得由他转告
+    """
     data = m.model_dump()
     blob = data.pop("avatar", None)
+    if viewer is not None and viewer != m.id:
+        data["name"] = ""
     return MemberOut(
         **data,
         is_active=m.is_active(),
-        # 地址里带版本号：换一次头像地址就变，旧的那张可以放心长缓存
-        avatar=f"/api/members/{m.id}/avatar?v={m.avatar_version}" if blob else None,
+        # 地址里带版本号和内容指纹：换一次头像地址就变，旧的那张可以放心长缓存。
+        # 光靠版本号不够 —— 恢复一份旧备份会把号码退回去，之后再换的头像会撞上
+        # 别的手机早就缓存过的那个地址，一直显示恢复之前的照片
+        avatar=f"/api/members/{m.id}/avatar?v={m.avatar_version}-{hashlib.sha1(blob).hexdigest()[:8]}"
+        if blob else None,
     )
 
 

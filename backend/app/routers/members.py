@@ -24,9 +24,9 @@ router = APIRouter(prefix="/api/members", tags=["members"])
 
 
 @router.get("", response_model=list[MemberOut])
-def list_members(session: Session = Depends(get_session), _: Member = Depends(current_member)):
+def list_members(session: Session = Depends(get_session), me: Member = Depends(current_member)):
     rows = session.exec(select(Member).order_by(Member.display_order, Member.id)).all()
-    return [to_member_out(m) for m in rows]
+    return [to_member_out(m, viewer=me.id) for m in rows]
 
 
 @router.post("", response_model=MemberOut, status_code=status.HTTP_201_CREATED)
@@ -144,7 +144,7 @@ def update_member(
         ledger.audit_config(session, me.id, "password", "member", member.id, None, {"password_changed": True})
     session.commit()
     session.refresh(member)
-    return to_member_out(member)
+    return to_member_out(member, viewer=me.id)
 
 
 #: 头像上传上限。照片在前端就裁方缩小了（src/shrinkImage.ts），传上来的只有十几 KB；

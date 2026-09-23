@@ -27,8 +27,10 @@ def _no_bool_amount(v: Any) -> Any:
 
 
 class LoginIn(SQLModel):
-    name: str
-    password: str
+    # 限长：不限的话，有人拿一串串 1MB 的名字刷登录，节流表会把每一个都存下来，
+    # 一分钟就能把进程的内存撑爆（审计实测 60 次请求常驻 97MB）
+    name: str = Field(max_length=64)
+    password: str = Field(max_length=256)
 
 
 class MemberOut(SQLModel):

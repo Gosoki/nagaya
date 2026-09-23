@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 
 from fastapi import APIRouter, Depends
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlmodel import Session, select
 
 from app.auth import current_member
@@ -41,12 +42,18 @@ def set_prefs(
     me: Member = Depends(current_member),
 ):
     for key, value in body.items():
-        if key not in PREF_KEYS or not _VALUE.match(value):
+        # fullmatch：match 配 $ 的话，"dark\n" 这种带换行的也会放进来
+        if key not in PREF_KEYS or not _VALUE.fullmatch(value):
             raise AppError("pref_invalid", f"bad pref {key}={value!r}", key=key)
+    # upsert：两台手机同时第一次存同一项，先查后插的写法两边都查到「没有」、都去插，
+    # 后提交的那个撞主键 → 裸 500
     for key, value in body.items():
-        row = session.get(MemberPref, (me.id, key)) or MemberPref(member_id=me.id, key=key, value=value)
-        row.value = value
-        row.updated_at = now_utc()
-        session.add(row)
+        session.execute(
+            sqlite_insert(MemberPref)
+            .values(member_id=me.id, key=key, value=value, updated_at=now_utc())
+            .on_conflict_do_update(
+                index_elements=["member_id", "key"], set_={"value": value, "updated_at": now_utc()}
+            )
+        )
     session.commit()
     return _mine(session, me)

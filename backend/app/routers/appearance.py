@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import time
 
 from fastapi import APIRouter, Depends, File, Response, UploadFile
 from PIL import Image, ImageOps
@@ -87,7 +88,10 @@ async def upload_icon(
 
     # 版本号进设置表：前端靠它知道「有没有自定义图标」，也靠它绕开缓存 ——
     # 主屏图标是浏览器和系统都会死缓存的东西，地址不变就永远不刷新
-    version = int(settings_svc.get(session, "app_icon_version") or 0) + 1
+    # **不许和以前用过的撞号。** 原来是 +1：删掉图标归 0、再传一张又是 1 —— 地址和第一张
+    # 一模一样，浏览器和主屏拿着缓存了一周的旧图不放。恢复一份旧备份也会把号码退回去。
+    # 取「上传那一刻」的毫秒数就不会再撞（仍然比旧号大）
+    version = max(int(settings_svc.get(session, "app_icon_version") or 0) + 1, int(time.time() * 1000))
     settings_svc.set_(session, "app_icon_version", version)
     return {"version": version}
 
@@ -120,13 +124,17 @@ def get_icon(
     row = session.get(AppIcon, 1)
     if row is None or not row.png:
         raise AppError("not_found", "no custom icon", status=404, what="icon")
-    img = Image.open(io.BytesIO(row.png))
-    if size != MASTER:
-        img = img.resize((size, size), Image.Resampling.LANCZOS)
-    buf = io.BytesIO()
-    img.save(buf, "PNG", optimize=True)
+    if size == MASTER:
+        # 存的就是 512 的母版：原样给。原来每次都解码再编码一遍（40ms 的 CPU），
+        # 而这个端点不要求登录，谁都能拿它反复刷
+        content = row.png
+    else:
+        img = Image.open(io.BytesIO(row.png)).resize((size, size), Image.Resampling.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, "PNG", optimize=True)
+        content = buf.getvalue()
     return Response(
-        content=buf.getvalue(),
+        content=content,
         media_type="image/png",
         # 地址里带着版本号（前端拼的 ?v=），所以可以放心长缓存
         headers={"Cache-Control": "public, max-age=604800"},

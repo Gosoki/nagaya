@@ -65,8 +65,12 @@ def carry_monthly(
     自动记的钱必须让人看见（这是那个开关唯一的出口），而搬不过来的那几项
     同样必须让人看见 —— 否则「自动记账已经停了」这件事没有任何人会知道。
     """
-    only = set(body.category_ids) if body is not None and body.category_ids is not None else None
-    return bill_svc.carry_same_as_last(session, actor_id=member.id, only=only)
+    # **不带清单就什么都不记。** 今天之前的前端是打开账单页就调这个接口、不带 body ——
+    # 手机上缓存着旧版 PWA 的，一打开账单页照样会替人记钱，而这正是改成「人点才记」
+    # 要去掉的事。现在的前端永远带着按钮上列出来的那几项
+    if body is None or body.category_ids is None:
+        return {"created": [], "failed": []}
+    return bill_svc.carry_same_as_last(session, actor_id=member.id, only=set(body.category_ids))
 
 
 @router.get("/statements", response_model=list[StatementOut])

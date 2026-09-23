@@ -295,7 +295,8 @@ def test_avatar_upload_compresses_hard(client, auth, members) -> None:
                     files={"file": ("photo.jpg", raw, "image/jpeg")})
     assert r.status_code == 200
     out = r.json()
-    assert out["avatar"] == f"/api/members/{me.id}/avatar?v=1", "列表里只带地址，地址里带版本号"
+    assert out["avatar"].startswith(f"/api/members/{me.id}/avatar?v=1-"), "列表里只带地址，地址里带版本号"
+    assert len(out["avatar"].rsplit("-", 1)[1]) == 8, "还带着内容指纹：恢复备份把版本号退回去也不会撞上旧地址"
     assert out["avatar_version"] == 1
 
     got = client.get(out["avatar"], headers=auth)
@@ -431,3 +432,47 @@ def test_housemates_can_add_and_move_people_out(client, auth, members) -> None:
     assert r.status_code == 200, "住一天也算"
     listed = {m["id"]: m for m in client.get("/api/members", headers=auth).json()}
     assert listed[other.id]["left_on"] is None, "被拒的那次一个字段都不许落下"
+
+
+def test_login_names_are_only_visible_to_their_owner(client, auth, members) -> None:
+    """个人设置写着「登录名只有自己看得到」：列表里别人的登录名是空的。"""
+    me, other, *_ = members
+    listed = {m["id"]: m for m in client.get("/api/members", headers=auth).json()}
+    assert listed[me.id]["name"] == "a"
+    assert listed[other.id]["name"] == "", "别人的登录名（凭据的一半）不许发出去"
+    r = client.patch(f"/api/members/{other.id}", headers=auth, json={"left_on": "2026-12-31"})
+    assert r.json()["name"] == ""
+
+
+def test_patch_entry_rejects_bad_refs_and_rules_with_400(client, auth, session, members) -> None:
+    """同样的坏输入，POST 是 400、PATCH 原来是裸 500。"""
+    me, *_ = members
+    e = client.post("/api/entries", headers=auth, json={
+        "date": "2026-09-01", "amount_jpy": 3000, "payer_id": me.id,
+    }).json()
+    for body in ({"category_id": 99999}, {"rule": {"weights": "abc"}}, {"rule": {"weights": {"x": 1}}},
+                 {"rule": {"mode": "exact", "exact": {"1.5": 3000}}}):
+        r = client.patch(f"/api/entries/{e['id']}?version={e['version']}", headers=auth, json=body)
+        assert r.status_code == 400, (body, r.status_code, r.text[:200])
+        # 测试里所有请求共用一个 session：线上每个请求自己的 session 出错就整个回滚
+        session.rollback()
+
+
+def test_restoring_an_entry_that_is_not_deleted_changes_nothing(client, auth, members) -> None:
+    me, *_ = members
+    e = client.post("/api/entries", headers=auth, json={
+        "date": "2026-09-01", "amount_jpy": 3000, "payer_id": me.id,
+    }).json()
+    r = client.post(f"/api/entries/{e['id']}/restore", headers=auth)
+    assert r.status_code == 200 and r.json()["version"] == e["version"], "没删过就什么都别动"
+
+
+def test_login_input_is_bounded(client, members) -> None:
+    r = client.post("/api/auth/login", json={"name": "x" * 1_000_000, "password": "p"})
+    assert r.status_code == 422, "超长的名字在进节流表之前就挡掉"
+
+
+
+def test_pref_values_with_a_trailing_newline_are_rejected(client, auth) -> None:
+    r = client.patch("/api/prefs", headers=auth, json={"scheme": "dark\n"})
+    assert r.status_code == 400
