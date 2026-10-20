@@ -203,6 +203,19 @@ def _covers_from(prev: Statement | None, dates: list[dt.date]) -> str | None:
 # ------------------------------------------------------------------ 账单
 
 
+def help_buy_for(kind: EntryKind, payer_id: int, shares: dict[int, int]) -> int | None:
+    """这笔是不是「帮买」：一笔支出，付款人自己一分不担、全算在**一个**别人头上。是就返回那个人。
+
+    帮买不是单独一种账（记一笔那屏是转账页里的一个开关），存下去就是一笔普通支出 ——
+    余额、转账方案、「已结清」全照支出算，只有显示时要认出来。
+    **前端 src/core/helpBuy.ts 是同一条规则**，改一边要改另一边（各有单测钉着）。
+    """
+    if kind != EntryKind.expense:
+        return None
+    bearers = [m for m, v in shares.items() if v]
+    return bearers[0] if len(bearers) == 1 and bearers[0] != payer_id else None
+
+
 def build_bill(session: Session, statement: Statement | None = None) -> dict[str, Any]:
     """statement 传 None ＝ 当前这张还没出的草稿账单。"""
     entries = unbilled(session) if statement is None else entries_of(session, statement.id)
@@ -219,6 +232,8 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
     out_: dict[int, int] = {}
     in_: dict[int, int] = {}
     total_expense = total_income = 0
+    #: 帮买那几笔。合计照算（口径不变），账单上注一句「含帮买 ¥X」，复制出去的文字里单列
+    help_items: list[dict[str, Any]] = []
 
     for e in entries:
         if e.kind == EntryKind.settlement:
@@ -231,6 +246,12 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
             owed[m] = owed.get(m, 0) + sh
         if e.kind == EntryKind.expense:
             total_expense += e.amount_jpy
+            helped = help_buy_for(e.kind, e.payer_id, shares.get(e.id, {}))
+            if helped is not None:
+                help_items.append(
+                    {"entry_id": e.id, "payer_id": e.payer_id, "for_id": helped,
+                     "amount": e.amount_jpy, "title": e.title}
+                )
         else:
             total_income += e.amount_jpy
 
@@ -333,6 +354,8 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
         "covers_to": max(dates).isoformat() if dates else None,
         "total_expense": total_expense,
         "total_income": total_income,
+        "help_total": sum(h["amount"] for h in help_items),
+        "help_items": help_items,
         "entry_count": len(entries),
         "members": rows,
         "transfers": [t._asdict() for t in transfers],

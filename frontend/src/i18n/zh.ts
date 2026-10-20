@@ -16,6 +16,8 @@ export default {
   entry: {
     payer: '谁付的', receiver: '谁收的',
     to: '转给谁', title: '备注（选填）',
+    helpBuy: '帮买', helpFor: '帮谁买', helpTitle: '买了什么（选填）',
+    helpBuyFor: '替 {name} 买', helpBy: '{payer} 替 {name} 买',
     saved: '已记下',
     savedWhat: '已记下 · {what} {amount}',
     undone: '撤销了，这笔没记',
@@ -76,6 +78,7 @@ export default {
     owed: '应担', paid: '已垫付', prepaid: '已预付', received: '已收到', carried: '上期结转',
     toReceive: '应收', toPay: '应付', settled: '已结清',
     total: '合计', unsettled: '未结清',
+    helpIncluded: '含帮买 {amount}', helpLine: '帮买：{payer} 替 {name} {amount}',
     plan: '转账方案（{n} 笔）', planEmpty: '大家都平了，不用转账',
     planSuperseded: '这张的方案已经被后来的账单接手了 —— 要结账去「未出账」那页',
     planSupersededMine: '这张的方案已经被后来的账单接手了 —— 你此刻还欠 {amount}，去「未出账」那页结',

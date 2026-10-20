@@ -115,6 +115,9 @@
             <template v-if="bill.covers_from">
               {{ shortRange(bill.covers_from, bill.covers_to) }}
             </template>
+            <!-- 合计里含着帮人买的钱（口径不变）：说一句，不然 Kan 那份为什么多了解释不清。
+                 接在这一行里不另起一行：两页要一样高 -->
+            <span v-if="bill.help_total" class="help-total"> · {{ t('bill.helpIncluded', { amount: formatYen(bill.help_total) }) }}</span>
           </div>
           <q-space />
           <!-- 这一格就是「这张单子现在什么状态」：草稿报笔数，出过的账单
@@ -734,7 +737,8 @@ watch(viewKey, () => bills.ensure(viewKey.value).catch(() => {}))
 function textOf(b: Bill): string {
   const lines: string[] = []
   const head = b.is_draft ? t('bill.draft') : statementLabel(b)
-  lines.push(`【${head}】 ${t('bill.total')} ${formatYen(b.total_expense)}`)
+  const helped = b.help_total ? `（${t('bill.helpIncluded', { amount: formatYen(b.help_total) })}）` : ''
+  lines.push(`【${head}】 ${t('bill.total')} ${formatYen(b.total_expense)}${helped}`)
   if (b.covers_from) lines.push(t('bill.coversRange', { from: b.covers_from, to: b.covers_to }))
   if (!b.is_draft) lines.push(b.settled ? t('bill.settledBadge') : t('bill.unsettled'))
   // 每人明细是**实时**重算的，而发进群里的是出账那一刻的数 —— 这张单子
@@ -763,6 +767,11 @@ function textOf(b: Bill): string {
         ? t('bill.settled')
         : `${r.closing > 0 ? t('bill.toReceive') : t('bill.toPay')} ${formatYen(Math.abs(r.closing))}`
     lines.push(`${nameOf(r.member_id)}  ${bits.join(' / ')} → ${tail}`)
+  }
+  // 帮买一笔一行：某人的应担为什么多了一块，看这几行就明白
+  for (const h of b.help_items ?? []) {
+    const what = h.title ? ` ${h.title}` : ''
+    lines.push(t('bill.helpLine', { payer: nameOf(h.payer_id), name: nameOf(h.for_id), amount: formatYen(h.amount) }) + what)
   }
   // **不带转账方案**（你定的）：复制出去的是「大家都要看的那份」—— 这一期花了多少、
   // 每人应担/垫付/该收该付多少。谁给谁转、转了没有，点链接进来看（方案会随后来的

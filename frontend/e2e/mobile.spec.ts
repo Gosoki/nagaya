@@ -1611,3 +1611,64 @@ test('出账后改一笔：那张账单要打出「被改过」，而且复制�
   const text = await page.evaluate(() => navigator.clipboard.readText().catch(() => ''))
   if (text) expect(text, '复制文本里也要说明这张被改过').toContain('出账后被改过')
 })
+
+test('帮买：转账页里点亮开关，记成只算那个人的支出；再点灭就变回转账', async ({ page }) => {
+  await login(page)
+  const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
+  const members = await (await page.request.get('/api/members', { headers })).json()
+  const idOf = (name: string) => members.find((m: { display_name: string }) => m.display_name === name).id
+  const go = idOf('Go')
+  const kan = idOf('Kan')
+  type Row = { member_id: number; owed: number; paid: number; transferred_out: number; transferred_in: number }
+  const bill = async () => (await page.request.get('/api/bill', { headers })).json()
+  const row = (b: { members: Row[] }, id: number) => b.members.find((r) => r.member_id === id)!
+  const before = await bill()
+
+  // 开关在转账页里；点亮之后第二行叫「帮谁买」，备注提示变成「买了什么」
+  await page.getByRole('button', { name: '转账', exact: true }).click()
+  await page.locator('.help-toggle').click()
+  await expect(page.locator('.field', { hasText: '帮谁买' })).toBeVisible()
+  await page.locator('input.amount').fill('3200')
+  await page.getByPlaceholder('买了什么（选填）').fill('E2E洗发水')
+  await page.locator('.field', { hasText: '谁付的' }).locator('.pick', { hasText: 'Go' }).click()
+  await page.locator('.field', { hasText: '帮谁买' }).locator('.pick', { hasText: 'Kan' }).click()
+  await expectNoHorizontalScroll(page)
+  await page.waitForTimeout(300)   // 选中的底色有 0.15s 渐变，等它落定再拍
+  await page.screenshot({ path: 'e2e/shots/27-help-buy.png' })
+  await page.getByRole('button', { name: '记入账' }).click()
+  await expect(page.locator('.q-notification')).toContainText('E2E洗发水')
+
+  // 存下去是一笔只算 Kan 的支出，不挂分类
+  const [saved] = await (await page.request.get('/api/entries?limit=1', { headers })).json()
+  expect(saved.kind).toBe('expense')
+  expect(saved.category_id).toBeNull()
+  expect(saved.payer_id).toBe(go)
+  expect(saved.shares).toEqual({ [String(kan)]: 3200 })
+
+  // 账单：进 Kan 的应担、Go 的垫付，不进转出/转入；合计照算，另外说一句「含帮买」
+  const after = await bill()
+  expect(row(after, kan).owed - row(before, kan).owed).toBe(3200)
+  expect(row(after, go).paid - row(before, go).paid).toBe(3200)
+  expect(row(after, go).transferred_out).toBe(row(before, go).transferred_out)
+  expect(row(after, kan).transferred_in).toBe(row(before, kan).transferred_in)
+  expect(after.total_expense - before.total_expense).toBe(3200)
+  expect((after.help_total ?? 0) - (before.help_total ?? 0)).toBe(3200)
+
+  // 流水上认得出来
+  await page.goto('/entries')
+  const item = page.locator('.entry-row', { hasText: 'E2E洗发水' })
+  await expect(item).toContainText('Go 替 Kan 买')
+  await page.screenshot({ path: 'e2e/shots/28-help-buy-entries.png' })
+
+  // 点进去：回到转账页、开关亮着；点灭再存就是一笔真的转账
+  await item.click()
+  await expect(page.locator('.help-toggle')).toHaveAttribute('aria-checked', 'true')
+  await expect(page.locator('.field', { hasText: '帮谁买' }).locator('.pick.on')).toHaveText('Kan')
+  await page.locator('.help-toggle').click()
+  await expect(page.locator('.field', { hasText: '转给谁' })).toBeVisible()
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.locator('.q-notification')).toContainText('已记下')
+  const back = await (await page.request.get(`/api/entries/${saved.id}`, { headers })).json()
+  expect(back.kind).toBe('settlement')
+  expect(back.to_member_id).toBe(kan)
+})

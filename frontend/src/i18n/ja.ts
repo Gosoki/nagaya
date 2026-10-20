@@ -16,6 +16,8 @@ export default {
   entry: {
     payer: '支払者', receiver: '受取者',
     to: '送金先', title: '備考（任意）',
+    helpBuy: '代わりに購入', helpFor: '誰の分', helpTitle: '買ったもの（任意）',
+    helpBuyFor: '{name}の分を購入', helpBy: '{payer} が {name}の分を購入',
     saved: '記帳しました',
     savedWhat: '記帳しました · {what} {amount}',
     undone: '取り消しました（記帳されていません）',
@@ -76,6 +78,7 @@ export default {
     owed: '負担額', paid: '立替', prepaid: '前払い', received: '受取済み', carried: '前期繰越',
     toReceive: '受取', toPay: '支払', settled: '精算済み',
     total: '合計', unsettled: '未精算',
+    helpIncluded: 'うち代わりに購入 {amount}', helpLine: '代わりに購入：{payer} → {name} {amount}',
     plan: '送金プラン（{n} 件）', planEmpty: '全員ぴったり。送金不要です',
     planSuperseded: 'この送金プランは以降の請求書に引き継がれています —— 精算は「未請求」から',
     planSupersededMine: 'この請求書のプランは後の請求書に引き継がれました —— 現時点の未払いは {amount}、「未請求」タブで精算してください',

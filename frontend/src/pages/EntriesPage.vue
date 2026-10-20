@@ -82,7 +82,8 @@
 
               <q-item-section>
                 <q-item-label>{{ labelOf(e) }}</q-item-label>
-                <q-item-label caption class="ellipsis">
+                <q-item-label v-if="helpCaptionOf(e)" caption class="ellipsis help-caption">{{ helpCaptionOf(e) }}</q-item-label>
+                <q-item-label v-else caption class="ellipsis">
                   {{ meta.byId[e.payer_id]?.display_name }}
                   <span v-if="e.kind === 'settlement'"> → {{ meta.byId[e.to_member_id ?? 0]?.display_name }}</span>
                   <span v-else> · {{ sharesText(e) }}</span>
@@ -275,7 +276,7 @@ const grouped = computed(() => {
     .map(([date, items]) => ({ date, items }))
 })
 
-const { categoryOf, colorOf, iconOf, labelOf } = useEntryLook()
+const { categoryOf, colorOf, iconOf, labelOf, helpCaptionOf } = useEntryLook()
 
 /**
  * 分摊摘要。**绝大多数账就是均分**，把「Go ¥1,833 / Kan ¥1,834 / Zen ¥1,833」

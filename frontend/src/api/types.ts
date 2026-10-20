@@ -132,6 +132,9 @@ export interface Bill {
   live_transfers: BillTransfer[]
   /** 「此刻」每个人的净额。键是 member_id */
   live_closing: Record<string, number>
+  /** 帮买那几笔（付款人不担、全算一个别人的支出）。合计里照算，账单上注一句「含帮买」；老缓存里没有 */
+  help_total?: number
+  help_items?: { entry_id: number; payer_id: number; for_id: number; amount: number; title: string }[]
   simplified: boolean
 }
 

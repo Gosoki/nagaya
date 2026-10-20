@@ -45,7 +45,7 @@
           v-model="title"
           dense borderless
           class="col"
-          :placeholder="t('entry.title')"
+          :placeholder="isHelpBuy ? t('entry.helpTitle') : t('entry.title')"
           maxlength="40"
         />
         <q-btn dense flat no-caps icon="event" :label="dateLabel" class="text-grey-7 date-btn">
@@ -99,6 +99,16 @@
       <!-- 谁付的 / 转给谁 / 备注 三行统一行高，中间拉细分隔线 ——
            原来它们各自飘着，看上去像三段无关的文字，不像一个表单 -->
       <div class="fields">
+      <!-- 帮买：转账页里一个开关。帮人买东西和转账在余额上是一回事（Go 出钱、Kan 欠 Go），
+           差在显示：帮买进 Kan 的「应担」、写着买了什么，不会被当成还款点亮「已结清」。
+           存下去是一笔只算 Kan 的支出（见 core/helpBuy）；开着时两行人换成「谁付的 / 帮谁买」，
+           方向和转账一样，按错了也只是显示不同，钱不会算错 -->
+      <div v-if="kind === 'settlement'" class="row items-center field">
+        <q-icon name="shopping_bag" size="18px" class="text-grey-6 q-mr-sm" />
+        <div class="col-auto text-grey-7 label">{{ t('entry.helpBuy') }}</div>
+        <q-space />
+        <q-toggle v-model="helpBuy" class="help-toggle" :color="kindPalette" :aria-label="t('entry.helpBuy')" />
+      </div>
       <div class="row items-center field">
         <div class="col-auto text-grey-7 label">
           {{ kind === 'income' ? t('entry.receiver') : t('entry.payer') }}
@@ -108,7 +118,7 @@
       </div>
 
       <div v-if="kind === 'settlement'" class="row items-center field">
-        <div class="col-auto text-grey-7 label">{{ t('entry.to') }}</div>
+        <div class="col-auto text-grey-7 label">{{ isHelpBuy ? t('entry.helpFor') : t('entry.to') }}</div>
         <q-space />
         <MemberPicker v-model="toMemberId" :members="meta.activeMembersSelfFirst.filter((m) => m.id !== payerId)" />
       </div>
@@ -251,8 +261,10 @@ import { digitsOf } from 'src/digits'
 import { isSubmitEnter } from 'src/html'
 import { formatYen } from 'src/i18n'
 import { statementLabel } from 'src/statement'
-import type { Entry, EntryKind } from 'src/api/types'
+import type { Entry, EntryKind, EntryPayload } from 'src/api/types'
 import AmountInput from 'src/components/AmountInput.vue'
+import { useEntryLook } from 'src/composables/entryLook'
+import { helpBuyFor } from 'src/core/helpBuy'
 import MemberPicker from 'src/components/MemberPicker.vue'
 import MemoPanel from 'src/components/MemoPanel.vue'
 import SplitEditor from 'src/components/SplitEditor.vue'
@@ -272,6 +284,7 @@ const ledger = useLedger()
 const nav = useNav()
 const drafts = useDrafts()
 const auth = useAuth()
+const { labelOf } = useEntryLook()
 
 /** 改一笔已有的账时，类型是那笔账自己的 —— 不能去动记新账那边存着的选择 */
 const editKind = ref<EntryKind>('expense')
@@ -279,6 +292,8 @@ const amount = ref(0)
 const categoryId = ref<number | null>(null)
 const payerId = ref<number | null>(null)
 const toMemberId = ref<number | null>(null)
+/** 转账页上那个「帮买」开关（见模板里那段注释）。离开转账页就关 */
+const helpBuy = ref(false)
 const title = ref('')
 const date = ref(todayJst())
 /**
@@ -322,6 +337,8 @@ const kind = computed<EntryKind>({
   },
 })
 const showMemo = computed(() => editingId.value === null && nav.addTab === 'memo')
+/** 这一笔按「帮买」存：转账页、开关开着 */
+const isHelpBuy = computed(() => kind.value === 'settlement' && helpBuy.value)
 const kindOptions = computed(() => [
   { label: t('kind.expense'), value: 'expense' },
   { label: t('kind.income'), value: 'income' },
@@ -392,6 +409,7 @@ const gridCategories = computed(() => {
 let hydrating = false
 watch(kind, (now, before) => {
   if (hydrating) return
+  if (now !== 'settlement') helpBuy.value = false
   if (before === 'settlement' && now !== 'settlement') {
     ownRule.value = null
     loadedRule.value = null
@@ -552,11 +570,14 @@ async function loadForEdit(id: number) {
     const e = await api.get<Entry>(`/api/entries/${id}`)
     hydrating = true
     loaded.value = e
-    editKind.value = e.kind
+    // 帮买存下去是支出，打开时回到它记的地方：转账页、开关点亮、「帮谁买」选着那个人
+    const helped = helpBuyFor(e)
+    editKind.value = helped !== null ? 'settlement' : e.kind
+    helpBuy.value = helped !== null
     amount.value = Math.abs(e.amount_jpy)
     categoryId.value = e.category_id
     payerId.value = e.payer_id
-    toMemberId.value = e.to_member_id
+    toMemberId.value = helped ?? e.to_member_id
     title.value = e.title
     date.value = e.date
     version.value = e.version
@@ -587,8 +608,8 @@ async function saveEdit() {
   if (busy.value || !canSave.value || payerId.value === null || editingId.value === null) return
   busy.value = true
   try {
-    if (!(await ensureCategory())) return
-    await ledger.update(editingId.value, version.value, {
+    if (!isHelpBuy.value && !(await ensureCategory())) return
+    await ledger.update(editingId.value, version.value, isHelpBuy.value ? helpBuyBody() : {
       kind: kind.value,
       date: date.value,
       amount_jpy: signedAmount.value,
@@ -812,13 +833,33 @@ async function ensureCategory(): Promise<boolean> {
   return true
 }
 
+/**
+ * 帮买存成什么：一笔只算「帮谁买」那一个人的支出，付款人不担（core/helpBuy 认的就是这个形状）。
+ * **新记的不挂分类**：它是一个人的东西，不该混进家里的分类统计，也不走「没选分类就记其他」
+ * 那一套。改已有的那笔时分类原样留着 —— 打开再存，不该悄悄改掉别的字段
+ */
+function helpBuyBody(): EntryPayload {
+  const who = toMemberId.value!
+  return {
+    kind: 'expense',
+    date: date.value,
+    amount_jpy: amount.value,
+    payer_id: payerId.value!,
+    to_member_id: null,
+    category_id: editingId.value === null ? null : categoryId.value,
+    title: title.value,
+    rule: { mode: 'ratio', weights: { [String(who)]: 1 } },
+    member_ids: [who],
+  }
+}
+
 async function save() {
   // busy 一进门就占上（理由见 saveEdit）
   if (busy.value || !canSave.value || payerId.value === null) return
   busy.value = true
   try {
-    if (!(await ensureCategory())) return
-    const body = {
+    if (!isHelpBuy.value && !(await ensureCategory())) return
+    const body = isHelpBuy.value ? helpBuyBody() : {
       kind: kind.value,
       date: date.value,
       amount_jpy: signedAmount.value,
@@ -867,8 +908,7 @@ async function save() {
  * 撤销走的是软删（和编辑页的删除同一条路），流水和账单缓存一并刷新
  */
 function notifySaved(saved: Entry) {
-  const cat = saved.category_id === null ? undefined : meta.categoryById[saved.category_id]
-  const what = saved.title || cat?.name || t(`kind.${saved.kind}`)
+  const what = labelOf(saved)   // 和流水同一套名字：备注 → 「替 Kan 买」→ 分类 → 类型
   $q.notify({
     type: 'positive',
     message: t('entry.savedWhat', { what, amount: formatYen(Math.abs(saved.amount_jpy)) }),

@@ -154,7 +154,10 @@ def test_statements_are_ordered_and_labelled(session: Session, members) -> None:
     a, *_ = members
     create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=1_000, payer_id=a.id)
     first = cut_statement(session, actor_id=a.id)
-    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=OCT, amount=2_000, payer_id=a.id)
+    # 出账是「此刻」，所以下一笔的日期也得相对它定：原来写死 10/10，
+    # 等真实日期过了 10/10，这笔就成了「补录的、比上次出账还早」，走的是另一条分支
+    after = jst_date(first.cut_at) + dt.timedelta(days=10)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=after, amount=2_000, payer_id=a.id)
     second = cut_statement(session, actor_id=a.id)
 
     rows = list(session.exec(select(Statement).order_by(Statement.cut_at)))
@@ -165,11 +168,11 @@ def test_statements_are_ordered_and_labelled(session: Session, members) -> None:
     # 「10 月那张从 10/10 开始」是错觉，10 月上旬没人花钱而已，
     # 它管的是上次出账之后的一切
     assert second.covers_from == jst_date(first.cut_at)
-    assert second.covers_to == OCT
+    assert second.covers_to == after
     # 名字留空：后端不拼展示文案（拼出来的中文会被写进库，日文界面上救不回来），
     # 前端按 cut_at 用 i18n 渲染。自己起的名字才存
     assert first.label == ""
-    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=OCT, amount=300, payer_id=a.id)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=after, amount=300, payer_id=a.id)
     named = cut_statement(session, actor_id=a.id, label="搬家那次")
     assert named.label == "搬家那次"
 
@@ -703,3 +706,36 @@ def test_an_old_bill_tells_you_what_is_still_owed_right_now(session: Session, me
     assert live.get((b.id, c_.id), 0) == 0, "b 已经不欠 c 了，此刻的方案里不许还有这一对"
     assert after["live_closing"][b.id] == 0
     assert after["transfers"][1]["amount"] == 10_000, "当初那份方案还是不许变"
+
+
+def test_help_buy_is_an_expense_borne_by_one_other_person(session: Session, members) -> None:
+    """帮买：Go 付钱、全算 Kan 的。钱照支出算（Kan 的应担多了、Go 的垫付多了），
+    合计照算，但要单列出来 —— 不然群里看账单的人不知道 Kan 那份为什么多了 3,200"""
+    a, b, c = members
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=9_000, payer_id=a.id)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=3_200, payer_id=a.id,
+                 title="洗发水", member_ids=[b.id], rule={"mode": "ratio", "weights": {str(b.id): 1}})
+    bill = build_bill(session, None)
+
+    assert bill["total_expense"] == 12_200
+    assert bill["help_total"] == 3_200
+    assert bill["help_items"] == [
+        {"entry_id": bill["help_items"][0]["entry_id"], "payer_id": a.id, "for_id": b.id,
+         "amount": 3_200, "title": "洗发水"}
+    ]
+    assert row_of(bill, b.id)["owed"] == 3_000 + 3_200
+    assert row_of(bill, a.id)["paid"] == 12_200
+    assert sum(r["closing"] for r in bill["members"]) == 0
+
+
+def test_not_every_uneven_split_is_a_help_buy(session: Session, members) -> None:
+    """付款人自己也担一份、或者全算在两个人头上的，都是普通支出，不叫帮买"""
+    a, b, c = members
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=1_000, payer_id=a.id,
+                 member_ids=[a.id, b.id], rule={"mode": "ratio", "weights": {str(a.id): 1, str(b.id): 1}})
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=1_000, payer_id=a.id,
+                 member_ids=[b.id, c.id], rule={"mode": "ratio", "weights": {str(b.id): 1, str(c.id): 1}})
+    create_entry(session, actor_id=b.id, kind=EntryKind.settlement, on=SEP, amount=500,
+                 payer_id=b.id, to_member_id=a.id)
+    bill = build_bill(session, None)
+    assert bill["help_items"] == [] and bill["help_total"] == 0

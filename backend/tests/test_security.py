@@ -131,15 +131,35 @@ def test_chunked_oversized_body_is_413_too(client: TestClient) -> None:
     assert r.json()["code"] == "payload_too_large"
 
 
-def test_login_throttle_holds_under_concurrency(client: TestClient, auth) -> None:
-    """并发发一批错密码，原来先查后记，一批全部真的去验了密码。"""
+def test_login_throttle_holds_under_concurrency(client: TestClient, tmp_path) -> None:  # noqa: ANN001
+    """并发发一批错密码，原来先查后记，一批全部真的去验了密码。
+
+    跑在真文件库上，每个请求一条自己的连接（和线上一样）。原来用的是测试那套内存库：
+    StaticPool 只有一条连接，十几个线程同时读它偶尔会读出半截行（'' 不是合法的 lang），
+    十次里红一次 —— 那测的是 sqlite3 的线程安全，不是节流
+    """
     from concurrent.futures import ThreadPoolExecutor
 
-    def attempt(_):
+    from sqlmodel import Session, SQLModel, create_engine
+
+    from app.db import get_session
+    from app.main import app
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'login.db'}", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+
+    def per_request():  # noqa: ANN202
+        with Session(engine) as s:
+            yield s
+
+    app.dependency_overrides[get_session] = per_request
+
+    def attempt(_):  # noqa: ANN001, ANN202
         return client.post("/api/auth/login", json={"name": "a", "password": "wrong"}).status_code
 
     with ThreadPoolExecutor(max_workers=12) as pool:
         codes = list(pool.map(attempt, range(24)))
+    engine.dispose()
     assert codes.count(401) <= 5
     assert codes.count(429) >= 19
 
