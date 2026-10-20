@@ -1,8 +1,8 @@
 """分摊引擎 —— SPEC §4.1〜§4.3。
 
 两种模式：
-    ratio   比例 ＋ 调整额（水电煤网、日用品）
-    exact   固定金额（家賃）
+    ratio   比例 ＋ 调整额（房租、水电煤网、日用品 —— 房租按房间大小也写成「同权 ＋ 调整额」，D12）
+    exact   固定金额（界面上已经没有这个模式了，老数据里还有，照样能分）
 
 三条铁律：
     1. 全程整数 / Fraction 运算，**不出现 float**
@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import math
 from fractions import Fraction
-from typing import Literal, Mapping, Sequence
+from typing import Any, Literal, Mapping, Sequence
+
+from app.core.rules import expand
 
 RemainderTo = Literal["payer", "order", "rotate"]
 
@@ -170,6 +172,25 @@ def split(
             rotate_seed=rotate_seed,
         )
     raise SplitError("unknown_mode", f"未知的分摊模式：{mode}", mode=mode)
+
+
+def try_default_rule(rule: Mapping[str, Any], member_ids: Sequence[int]) -> None:
+    """一条要拿来当**默认**的规则（全局默认、分类默认）用不用得了。用不了就抛 RuleError / SplitError。
+
+    写坏了不会在存的时候报错，而是等到下一次「记一笔」才炸 —— 那时人正在记账，
+    也看不出跟设置有关。所以存之前当场试着用一下：
+
+      * 不能是定额：定额要和每一笔的总额对得上，而默认规则要套在任意金额上；
+      * 拿**今天在籍的人**、几个不同的金额各试一次：只拿 1000 试一次的话，
+        整除的那几种情况会把坏规则放过去（比如余数规则写坏了，1000/2 人不报）。
+
+    设置面板和分类原来各写一份，已经分了叉：分类那份只试 1000，定额规则只有合计恰好 ¥1,000 才收
+    """
+    if rule.get("mode") == "exact":
+        raise SplitError("exact_default", "默认规则不能是定额：定额要和每一笔的总额对上")
+    order = [str(i) for i in member_ids]
+    for amount in (1, 999, 1_001, 100_003):
+        split(expand(rule, member_ids), amount, order=order, payer=order[0] if order else None)
 
 
 # ---------------------------------------------------------------- 内部工具

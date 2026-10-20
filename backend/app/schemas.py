@@ -220,7 +220,8 @@ class ConfirmIn(SQLModel):
 
 
 class CarryIn(SQLModel):
-    """点「按上期记上」。category_ids 是按钮上列出来的那几项；不给就是全部能记的"""
+    """点「按上期记上」。category_ids 是按钮上列出来的那几项；**不给就什么都不记**
+    （旧版前端打开账单页就不带 body 调一次，见 routers/bill.carry_monthly）"""
 
     category_ids: Optional[list[int]] = None
 

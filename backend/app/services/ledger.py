@@ -12,7 +12,7 @@ from sqlalchemy import func, union_all
 from sqlalchemy import update as sa_update
 from sqlmodel import Session, select
 
-from app.core.rules import expand, mkey, named_members, participants, pick_rule
+from app.core.rules import _prune_rule, expand, mkey, named_members, participants, pick_rule
 from app.core.split import split
 from app.models import (
     Category,
@@ -127,6 +127,22 @@ def _check_refs(
         raise LedgerError("unknown_category", f"分类不存在：{category_id}", category_id=category_id)
 
 
+def _inherit(
+    rule: dict[str, Any] | None,
+    category_rule: dict[str, Any] | None,
+    global_rule: dict[str, Any] | None,
+    ids: Sequence[int],
+) -> dict[str, Any]:
+    """这一笔用哪条规则：送来的 → 分类默认 → 全局默认。
+
+    后两条是**继承来的**，当初按那时候的人写：点名了这笔里没有的人（搬走了、这次没参与），
+    就把他剔掉再用，别让 expand() 以 unknown_member 整笔拒收 —— 前端预览（core/seed.ts）
+    本来就把这些人剔掉了，屏幕上一份好好的分摊，点保存却报错。**这次送来的规则不剔**，照旧严格校验
+    """
+    keep = set(ids)
+    return pick_rule(rule, _prune_rule(category_rule, keep), _prune_rule(global_rule, keep))
+
+
 def create_entry(
     session: Session,
     *,
@@ -167,7 +183,7 @@ def create_entry(
         if not ids:
             raise LedgerError("no_participants", "这一天没有在籍成员，没法分摊")
         global_rule = settings_svc.get(session, "default_rule")
-        expanded = expand(pick_rule(rule, category_rule, global_rule), ids)
+        expanded = expand(_inherit(rule, category_rule, global_rule, ids), ids)
 
     remainder_to = settings_svc.get(session, "remainder_to")
     if kind != EntryKind.settlement and not expanded.get("remainder_to"):
@@ -396,7 +412,7 @@ def update_entry(
         global_rule = settings_svc.get(session, "default_rule")
         keep_old = member_ids is None and inheritable and not category_changed
         base = rule if rule is not None else (entry.split_rule_json if keep_old else None)
-        expanded = expand(pick_rule(base, category_rule, global_rule), ids)
+        expanded = expand(_inherit(base, category_rule, global_rule, ids), ids)
         if not expanded.get("remainder_to"):
             expanded["remainder_to"] = settings_svc.get(session, "remainder_to")
 

@@ -64,7 +64,17 @@ def members(session: Session) -> list[Member]:
 
 @pytest.fixture
 def client(session: Session):
-    fastapi_app.dependency_overrides[get_session] = lambda: session
+    def _session():
+        # 生产上每个请求一个 Session，被拒的请求关掉时整个回滚。这里所有请求共用一个 ——
+        # 不在出错时回滚的话，一个 400 留下的半截（create_entry 在分摊之前已经 flush 了那笔）
+        # 会被下一个请求顺手提交：同一个用例里先 400 再出账，就撞上一笔不存在的幽灵账
+        try:
+            yield session
+        except Exception:
+            session.rollback()
+            raise
+
+    fastapi_app.dependency_overrides[get_session] = _session
     yield TestClient(fastapi_app)   # 不用 with：避免触发 lifespan 去建真实的库
     fastapi_app.dependency_overrides.clear()
 

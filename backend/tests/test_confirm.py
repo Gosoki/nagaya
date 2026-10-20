@@ -64,7 +64,25 @@ def test_partial_payment_then_fresh_view_still_works(client: TestClient, auth, m
 
     rest = {**part, "amount": left, "expect_left": left}
     assert client.post("/api/bill/confirm", json=rest, headers=auth).status_code == 201
-    assert _plan(client, auth) == [p for p in _plan(client, auth)]  # 仍能正常出账单页
+    # 两次凑够了：此刻的方案里不该再有这一对
+    pair = (tr["from_id"], tr["to_id"])
+    assert all((p["from_id"], p["to_id"]) != pair for p in _plan(client, auth))
+
+
+def test_confirm_on_an_issued_bill_is_refused_the_second_time(
+    client: TestClient, auth, members
+) -> None:
+    """在**出过的**账单上点「已完成」：按那张冻结的方案减掉出账后已经转的。
+    同一个画面再点一次（另一方也点了、或者连点），不重复记"""
+    _setup(client, auth, members)
+    st = client.post("/api/statements", headers=auth).json()["id"]
+    tr = client.get(f"/api/statements/{st}/bill", headers=auth).json()["transfers"][0]
+    body = {"statement_id": st, "from_id": tr["from_id"], "to_id": tr["to_id"],
+            "amount": tr["amount"], "expect_left": tr["amount"]}
+    assert client.post("/api/bill/confirm", json=body, headers=auth).status_code == 201
+    again = client.post("/api/bill/confirm", json=body, headers=auth)
+    assert again.status_code == 409
+    assert again.json()["detail"]["left"] == 0
 
 
 def test_pair_not_in_plan_has_nothing_left(client: TestClient, auth, members) -> None:

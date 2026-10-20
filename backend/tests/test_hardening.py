@@ -190,6 +190,18 @@ def test_category_name_is_stripped_and_unique(client: TestClient, auth) -> None:
                        json={"name": " 停车位 "}).status_code == 201
     dup = client.post("/api/categories", headers=auth, json={"name": "停车位"})
     assert dup.status_code == 409, "同名分类在界面上长得一模一样，改哪个删哪个全靠猜"
+    too_long = client.post("/api/categories", headers=auth, json={"name": "长" * 65})
+    assert too_long.status_code == 400 and too_long.json()["code"] == "text_too_long"
+
+
+def test_unarchiving_cannot_bring_back_a_duplicate_name(client: TestClient, auth) -> None:
+    """固定费面板上的「撤销删除」只发 archived:false。归档期间又建了一个同名的，
+    撤销时不查重就复活出两个一模一样的分类"""
+    old = client.post("/api/categories", headers=auth, json={"name": "网费"}).json()["id"]
+    assert client.patch(f"/api/categories/{old}", headers=auth, json={"archived": True}).status_code == 200
+    assert client.post("/api/categories", headers=auth, json={"name": "网费"}).status_code == 201
+    r = client.patch(f"/api/categories/{old}", headers=auth, json={"archived": False})
+    assert r.status_code == 409 and r.json()["code"] == "name_taken"
 
 
 def test_category_refuses_a_broken_default_rule(client: TestClient, auth) -> None:

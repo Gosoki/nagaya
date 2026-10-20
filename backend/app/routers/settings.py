@@ -6,8 +6,8 @@ from fastapi import APIRouter, Depends
 from sqlmodel import Session
 
 from app.auth import current_member
-from app.core.rules import RuleError, expand
-from app.core.split import SplitError, split
+from app.core.rules import RuleError
+from app.core.split import SplitError, try_default_rule
 from app.db import get_session
 from app.errors import AppError, not_found
 from app.models import Category, Member, today_jst
@@ -116,22 +116,13 @@ def update_setting(
     ):
         raise _bad(key, "list")
     elif spec["type"] == "json":
-        # **当场试着用一下**。这一项是每笔账的兜底分摊规则，写坏了不会在这里报错，
-        # 而是等到下一次「记一笔」时才 500 —— 那时人正在记账，也看不出跟设置有关
+        # **当场试着用一下**（每笔账的兜底分摊规则，怎么试见 try_default_rule）
         if not isinstance(value, dict):
             raise _bad(key, "object")
-        # 全局兜底规则不可能是定额：定额要和每一笔的总额对得上，而它要套在任意金额上
-        if value.get("mode") == "exact":
-            raise AppError("bad_rule", f"{key} cannot be exact", key=key, why="exact")
         try:
-            # 拿**今天在籍的人**、几个不同的金额各试一次：只拿 1000 试一次的话，
-            # 整除的那几种情况把坏规则放了过去（比如余数规则写坏了，1000/2 人不报）
-            ids = [m.id for m in ledger_svc.active_members(session, today_jst())]
-            order = [str(i) for i in ids]
-            for amount in (1, 999, 1_001, 100_003):
-                split(expand(value, ids), amount, order=order, payer=order[0] if order else None)
+            try_default_rule(value, [m.id for m in ledger_svc.active_members(session, today_jst())])
         except (RuleError, SplitError) as e:
-            raise AppError("bad_rule", f"{key} rule unusable: {e}", key=key, why=str(e)) from e
+            raise AppError("bad_rule", f"{key} rule unusable: {e}", key=key, why=e.code) from e
 
     # 留痕：余数归谁、兜底规则、默认垫付人这些一改，之后每一笔都换一种分法。
     # set_ 自己 commit，审计那一行跟着它一起进库

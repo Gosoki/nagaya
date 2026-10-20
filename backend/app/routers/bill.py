@@ -147,4 +147,10 @@ def cut_statement(
     只是下一张账单会把「这张出账后被改过」标出来。
     """
     st = bill_svc.cut_statement(session, actor_id=member.id, include_monthly=include_monthly)
-    return st
+    # 金额和结清状态和列表接口同一个算法。原来直接回 ORM 对象，这两项落成默认值：
+    # 刚出的 ¥9,000 回来写着 0、「没结清」—— 现在前端只用 id，但这是一颗等着谁来踩的雷
+    return StatementOut(
+        **st.model_dump(),
+        total_expense=bill_svc.list_totals(session).get(st.id, 0),
+        settled=bill_svc.list_settled(session, [st]).get(st.id, False),
+    )

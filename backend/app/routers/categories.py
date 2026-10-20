@@ -4,15 +4,19 @@ from fastapi import APIRouter, Depends, status
 from sqlmodel import Session, select
 
 from app.auth import current_member
-from app.core.rules import RuleError, expand
-from app.core.split import SplitError, split
+from app.core.rules import RuleError
+from app.core.split import SplitError, try_default_rule
 from app.db import get_session
 from app.errors import AppError, not_found, reject_nulls
-from app.models import Category, Member
+from app.models import Category, Member, today_jst
 from app.schemas import CategoryIn, CategoryOut
 from app.services import audit
+from app.services.ledger import active_members
 
 router = APIRouter(prefix="/api/categories", tags=["categories"])
+
+#: 文字字段的上限（和账目、备忘一样只防滥用，正常用碰不到）。不设的话一个分类名能塞进几兆
+MAX_TEXT = {"name": 64, "icon": 64, "color": 64, "note": 2_000}
 
 
 def _check(session: Session, body: CategoryIn, *, me: int | None = None) -> None:
@@ -26,28 +30,31 @@ def _check(session: Session, body: CategoryIn, *, me: int | None = None) -> None
       * **同名** —— 分类名是界面上唯一的标识，重名之后两行长得一模一样，
         改哪个、删哪个全靠猜。
     """
+    for field, limit in MAX_TEXT.items():
+        value = getattr(body, field)
+        if isinstance(value, str) and len(value) > limit:
+            raise AppError("text_too_long", f"category {field} too long", field=field, limit=limit)
     if body.default_payer_id is not None and session.get(Member, body.default_payer_id) is None:
         raise AppError("not_found", "member not found", what="member", member_id=body.default_payer_id)
     if body.default_rule_json is not None:
-        ids = [m.id for m in session.exec(select(Member).order_by(Member.display_order))]
         try:
-            split(
-                expand(body.default_rule_json, ids),
-                1000,
-                order=[str(i) for i in ids],
-                payer=str(ids[0]) if ids else None,
-            )
+            try_default_rule(body.default_rule_json, [m.id for m in active_members(session, today_jst())])
         except (RuleError, SplitError) as e:
-            raise AppError("bad_rule", f"category rule unusable: {e}", why=str(e)) from e
+            raise AppError("bad_rule", f"category rule unusable: {e}", why=e.code) from e
     if body.name is not None:
-        clash = session.exec(
-            select(Category).where(
-                Category.name == body.name,
-                Category.archived == False,  # noqa: E712
-            )
-        ).first()
-        if clash is not None and clash.id != me:
-            raise AppError("name_taken", f"category {body.name} exists", status=409, name=body.name)
+        _refuse_clash(session, body.name, me)
+
+
+def _refuse_clash(session: Session, name: str, me: int | None) -> None:
+    """在用的分类里已经有这个名字了就拒收（归档的不算）"""
+    clash = session.exec(
+        select(Category).where(
+            Category.name == name,
+            Category.archived == False,  # noqa: E712
+        )
+    ).first()
+    if clash is not None and clash.id != me:
+        raise AppError("name_taken", f"category {name} exists", status=409, name=name)
 
 
 @router.get("", response_model=list[CategoryOut])
@@ -97,6 +104,10 @@ def update_category(
         if not body.name:
             raise AppError("name_required", "category needs a name")
     _check(session, body, me=category_id)
+    # 取消归档（固定费面板上的「撤销」只发 archived:false）也得查重：归档期间
+    # 可能又建了一个同名的，不查就复活出两个一模一样的分类，改哪个删哪个全靠猜
+    if body.archived is False and row.archived and body.name is None:
+        _refuse_clash(session, row.name, category_id)
     # default_rule_json / default_payer_id 要能被显式清空（None 在这里是「清掉」的意思），
     # 其余几个是 NOT NULL —— 传 null 进来得当场挡掉，不然要等 commit 才炸成 500
     data = body.model_dump(exclude_unset=True)

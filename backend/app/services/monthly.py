@@ -13,6 +13,8 @@ from typing import Any
 from sqlalchemy import func
 from sqlmodel import Session, select
 
+from app.core.rules import _prune_rule, expand
+from app.core.split import split
 from app.models import Category, Entry, EntryKind, Statement, today_jst
 from app.services import ledger
 from app.services.bill import entries_of, last_monthly_cut, unbilled
@@ -57,7 +59,8 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
     # 而界面上改房租怎么分只能逐笔改，于是每期手填一次房租，分摊就打回均分一次。
     # 人变了（有人搬走/搬进来）就不抄：退回分类默认，由人自己重新定
     last = _last_billed(session, [c.id for c in categories]) if statement is None else {}
-    active = {m.id for m in ledger.active_members(session, today_jst())} if statement is None else set()
+    ids = [m.id for m in ledger.active_members(session, today_jst())] if statement is None else []
+    active = set(ids)
     # 「和上期一样」这一步现在要人点（面板上那个按钮、出账时那个勾），
     # 所以得先告诉界面：点下去会记哪几项、多少钱，哪几项记不了
     ready: dict[int, int] = {}
@@ -74,7 +77,9 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
         prev_payer = None
         if prev is not None:
             if prev.split_rule_json and _stale_for_today(prev.split_rule_json, None, active) is None:
-                seed = _prune_rule(prev.split_rule_json, active)
+                pruned = _carried_rule(prev.split_rule_json, active)
+                if pruned and _splits(pruned, prev.amount_jpy, ids):
+                    seed = pruned
             prev_payer = prev.payer_id if prev.payer_id in active else None
         # 翻一张已经出过的账单时只列它真有的那几项。空行会诱人往里填，
         # 而填出来的是**新账目**，落进当前草稿，根本不会进这张单子。
@@ -199,7 +204,8 @@ def _carry_plan(
         dropped = dropped.where(Entry.deleted_at > since.cut_at)
     handled |= {e.category_id for e in session.exec(dropped)}
     last = _last_billed(session, [c.id for c in categories])
-    active = {m.id for m in ledger.active_members(session, today_jst())}
+    ids = [m.id for m in ledger.active_members(session, today_jst())]
+    active = set(ids)
 
     todo: list[tuple[Category, Entry, int | None, dict[str, Any] | None]] = []
     failed: list[dict[str, Any]] = []
@@ -223,8 +229,37 @@ def _carry_plan(
             # 自动记的钱必须看得见 —— 这一条也包括「这次没敢替你记」
             failed.append({"category_id": c.id, "name": c.name, "reason": stale})
             continue
-        todo.append((c, prev, payer, _prune_rule(rule, active)))
+        pruned = _carried_rule(rule, active)
+        # 剔完人还得分得下去：上期「只算 Zen」而 Zen 搬走了，剔完是谁都不担；exact 的老规则
+        # 剔掉一个人，合计就对不上总额。点下去必然失败的，按钮就别亮着 ——
+        # 和「人变了」一样请人自己重填（docstring 那句「按钮上写的和点下去记的是同一份口径」）
+        if pruned and not _splits(pruned, prev.amount_jpy, ids):
+            failed.append({"category_id": c.id, "name": c.name, "reason": "rule_stale"})
+            continue
+        todo.append((c, prev, payer, pruned))
     return todo, failed
+
+
+def _carried_rule(rule: dict[str, Any] | None, active: set[int]) -> dict[str, Any] | None:
+    """照上期抄过来的分摊规则：剔掉搬走的人（_prune_rule），**再去掉「余数归谁」**。
+
+    每笔存下的规则都带着记账那一刻设置里的 remainder_to（界面上没有逐笔改它的地方）。
+    原样抄的话，设置里改成「按成员顺序」之后，固定费还一期一期按「给付款人」分 ——
+    设置说明写的是「改了之后新账都按新的分」。去掉它，记账时按现在的设置补上
+    """
+    out = _prune_rule(rule, active)
+    if out:
+        out.pop("remainder_to", None)
+    return out
+
+
+def _splits(rule: dict[str, Any], amount: int, ids: list[int]) -> bool:
+    """这条规则套在今天这几个人、这个金额上分不分得下去。试算一遍，不写库"""
+    try:
+        split(expand(rule, ids), amount, order=[str(i) for i in ids])
+    except (ValueError, KeyError):
+        return False
+    return True
 
 
 def _carry(session: Session, *, actor_id: int | None, only: set[int] | None) -> dict[str, Any]:
@@ -249,7 +284,8 @@ def _carry(session: Session, *, actor_id: int | None, only: set[int] | None) -> 
             )
         except (ValueError, KeyError) as e:   # LedgerError / RuleError / SplitError 都是 ValueError
             session.rollback()
-            failed.append({"category_id": c.id, "name": c.name, "reason": str(e)})
+            # 只回码（和别处一样，文案归前端）；KeyError 之类没有码的才退回原文
+            failed.append({"category_id": c.id, "name": c.name, "reason": getattr(e, "code", str(e))})
             continue
         made.append({"category_id": c.id, "name": c.name, "amount": entry.amount_jpy})
     return {"created": made, "failed": failed}
@@ -285,35 +321,6 @@ def _stale_for_today(rule: dict[str, Any] | None, payer: int | None, active: set
         if active - listed:
             return "rule_stale"
     return None
-
-
-def _prune_rule(rule: dict[str, Any] | None, active: set[int]) -> dict[str, Any] | None:
-    """把分类默认规则里**已经不在籍的人**剔掉。
-
-    分类的默认分摊是当年按那时候几个人写死的（房租那条就点名了 adjustments）。
-    有人搬走之后，expand() 会拿「今天在籍的人」当参与人，发现规则里多出一个
-    不认识的 id，直接抛 unknown_member —— 于是那一行固定费永远存不上，
-    「和上期一样」也从此一声不吭地停了。
-
-    剔掉而不是报错：这是一条**为上一期写的**规则，拿它硬套今天的人本来就不对。
-    注意剩下的人分摊会变（adjustments 是「先抠掉再按比例分」），所以调整额一并去掉
-    的那份钱会回到大家头上 —— 这是唯一说得通的默认，规则本身该由用户重新定。
-
-    **它只管「人少了」。**「人多了」是另一回事，在 _stale_for_today 那儿拦下来 ——
-    往这条规则里补一个新人，补多少只有住的人知道。
-    """
-    if not rule:
-        return rule
-    out = dict(rule)
-    for field in ("weights", "adjustments", "exact"):
-        if isinstance(out.get(field), dict):
-            out[field] = {k: v for k, v in out[field].items() if int(k) in active}
-            if not out[field]:
-                out.pop(field)
-    # weights 全被剔光时退回「所有在籍成员同权」，别留一条空规则
-    if out.get("mode", "ratio") == "ratio" and "weights" not in out:
-        out.setdefault("equal_weight", 1)
-    return out
 
 
 def _last_billed(session: Session, category_ids: list[int]) -> dict[int, Entry]:

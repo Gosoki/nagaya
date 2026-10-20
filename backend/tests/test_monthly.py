@@ -11,7 +11,7 @@ import datetime as dt
 
 from sqlmodel import Session, select
 
-from app.models import Category, Entry, EntryKind, Member
+from app.models import Category, Entry, EntryKind, EntryShare, Member
 from app.services.bill import cut_statement, unbilled
 from app.services.ledger import create_entry, delete_entry
 from app.services.monthly import carry_same_as_last, monthly_rows
@@ -282,17 +282,19 @@ def test_carry_survives_a_roommate_moving_out(session: Session, members) -> None
     """
     a, b, c_ = members
     c = cats(session)
-    for name, amount in [("家賃", 120_000), ("電気", 8_000)]:
-        create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG,
-                     amount=amount, payer_id=a.id, category_id=c[name].id)
-    cut_statement(session, actor_id=a.id)
-
-    # 房租这条规则点名了三个人（按房间大小分），电费没有规则
-    c["家賃"].same_as_last = True
+    # 房租这条规则点名了三个人（按房间大小分），电费没有规则。
+    # 上期那一笔就是照它记的 —— 照上期抄的是**那一笔**的规则，不是分类上这条
     c["家賃"].default_rule_json = {
         "mode": "ratio", "equal_weight": 1,
         "adjustments": {str(a.id): 5_000, str(c_.id): -5_000},
     }
+    for name, amount in [("家賃", 120_000), ("電気", 8_000)]:
+        create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG,
+                     amount=amount, payer_id=a.id, category_id=c[name].id,
+                     category_rule=c[name].default_rule_json)
+    cut_statement(session, actor_id=a.id)
+
+    c["家賃"].same_as_last = True
     c["電気"].same_as_last = True
     session.add(c["家賃"]); session.add(c["電気"])
     c_.left_on = dt.date(2026, 8, 31)                 # 第三个人搬走了
@@ -308,6 +310,11 @@ def test_carry_survives_a_roommate_moving_out(session: Session, members) -> None
     # 搬走的人不该再被分摊
     entry = next(e for e in unbilled(session) if e.category_id == c["家賃"].id)
     assert str(c_.id) not in entry.split_rule_json.get("adjustments", {})
+    # 他那 −5,000 跟着剔掉，留下的两人照「A 多担 5,000」分剩下的
+    shares = dict(session.exec(
+        select(EntryShare.member_id, EntryShare.amount_jpy).where(EntryShare.entry_id == entry.id)
+    ).all())
+    assert shares == {a.id: 62_500, b.id: 57_500}
 
 
 def test_carry_does_not_resurrect_a_manually_deleted_row(session: Session, members) -> None:
@@ -425,8 +432,11 @@ def test_an_exact_rule_cannot_be_pruned_and_says_so(session: Session, members) -
     out = carry_same_as_last(session, actor_id=a.id)
     assert out["created"] == []
     assert [f["name"] for f in out["failed"]] == ["家賃"]
-    assert "120000" in out["failed"][0]["reason"] or "120,000" in out["failed"][0]["reason"]
-    assert rows_by_name(session)["家賃"]["amount"] is None, "宁可空着，也不许填一个编出来的数"
+    assert out["failed"][0]["reason"] == "rule_stale"
+    row = rows_by_name(session)["家賃"]
+    assert row["amount"] is None, "宁可空着，也不许填一个编出来的数"
+    # 面板上那行也不该挂着一个点了必失败的「照上期」，而是写明「人变了，要重填」
+    assert row["carry_amount"] is None and row["carry_blocked"] == "rule_stale"
 
 
 def test_deleted_this_period_stays_deleted_across_a_small_cut(session, members) -> None:
@@ -706,3 +716,23 @@ def test_carry_refuses_to_pay_rent_with_a_roommate_who_moved_out(session: Sessio
     out = carry_same_as_last(session, actor_id=a.id)
     assert out["created"] == [], "搬走的人不该又垫了一次房租"
     assert [f["reason"] for f in out["failed"]] == ["payer_left"], out
+
+
+def test_carry_follows_the_remainder_setting_of_today(session: Session, members) -> None:
+    """「余数归谁」是全局设置，不是那一笔自己的安排：上期那笔存着当时的 payer，
+    设置改成 order 之后照上期记的新账得按 order 分，不能一期一期沿用旧的"""
+    from app.services import settings as settings_svc
+
+    a, *_ = members
+    rent = cats(session)["家賃"]
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG,
+                 amount=10_000, payer_id=a.id, category_id=rent.id)
+    cut_statement(session, actor_id=a.id)
+    rent.same_as_last = True
+    session.add(rent)
+    session.commit()
+    settings_svc.set_(session, "remainder_to", "order")
+
+    assert [m["name"] for m in carry_same_as_last(session, actor_id=a.id)["created"]] == ["家賃"]
+    entry = next(e for e in unbilled(session) if e.category_id == rent.id)
+    assert entry.split_rule_json["remainder_to"] == "order"

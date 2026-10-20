@@ -37,6 +37,39 @@ def pick_rule(*candidates: Mapping[str, Any] | None) -> dict[str, Any]:
     return {"mode": "ratio", "equal_weight": 1}
 
 
+def _prune_rule(rule: dict[str, Any] | None, active: set[int]) -> dict[str, Any] | None:
+    """把分类默认规则里**已经不在籍的人**剔掉。
+
+    分类的默认分摊是当年按那时候几个人写死的（房租那条就点名了 adjustments）。
+    有人搬走之后，expand() 会拿「今天在籍的人」当参与人，发现规则里多出一个
+    不认识的 id，直接抛 unknown_member —— 于是那一行固定费永远存不上，
+    「和上期一样」也从此一声不吭地停了。
+
+    剔掉而不是报错：这是一条**为上一期写的**规则，拿它硬套今天的人本来就不对。
+    注意剩下的人分摊会变（adjustments 是「先抠掉再按比例分」），所以调整额一并去掉
+    的那份钱会回到大家头上 —— 这是唯一说得通的默认，规则本身该由用户重新定。
+
+    **它只管「人少了」。**「人多了」是另一回事，在 _stale_for_today 那儿拦下来 ——
+    往这条规则里补一个新人，补多少只有住的人知道。
+
+    放在 core 里是因为记一笔（services/ledger）也要用：没送规则、继承分类或全局默认时，
+    点名了已搬走的人就会被 expand() 整笔拒掉，而前端预览（core/seed.ts）早就把他们剔掉了。
+    名字的下划线是沿用（AUDIT「有歧义的名字」里定过不改）。
+    """
+    if not rule:
+        return rule
+    out = dict(rule)
+    for field in ("weights", "adjustments", "exact"):
+        if isinstance(out.get(field), dict):
+            out[field] = {k: v for k, v in out[field].items() if int(k) in active}
+            if not out[field]:
+                out.pop(field)
+    # weights 全被剔光时退回「所有在籍成员同权」，别留一条空规则
+    if out.get("mode", "ratio") == "ratio" and "weights" not in out:
+        out.setdefault("equal_weight", 1)
+    return out
+
+
 #: 规则里那些数字的上界。和 ledger.MAX_AMOUNT 同一个数 —— 在这里写死而不是 import，
 #: 是因为 core/ 不该反过来依赖 services/（现在的依赖方向是 services → core）
 MAX_RULE_VALUE = 1_000_000_000_000

@@ -209,6 +209,24 @@ def test_member_who_left_is_not_in_new_entries(session, members) -> None:
     assert sum(s.values()) == 10_000
 
 
+def test_inherited_rule_naming_someone_who_left_still_records(session, members) -> None:
+    """分类默认规则是 C 还在时写的（点名了他）。C 搬走之后不碰分摊直接记：
+    把 C 剔掉照记，别整笔 400 —— 前端预览早就把他剔掉了。送来的规则点名 C 照旧拒收"""
+    a, b, c = members
+    c.left_on = dt.date(2026, 8, 31)
+    session.add(c)
+    session.commit()
+    rule = {"mode": "ratio", "equal_weight": 1, "adjustments": {str(a.id): 1_000, str(c.id): -1_000}}
+
+    e = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                     amount=10_000, payer_id=a.id, category_rule=rule)
+    assert shares_of(session, e.id) == {a.id: 5_500, b.id: 4_500}
+
+    with pytest.raises(ValueError, match="unknown_member|不在参与人"):
+        create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP,
+                     amount=10_000, payer_id=a.id, rule=rule)
+
+
 def test_audit_log_written(session, members) -> None:
     from app.models import AuditLog
     a, *_ = members
