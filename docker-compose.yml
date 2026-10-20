@@ -20,6 +20,13 @@ services:
     user: "${NAGAYA_UID:-0}:${NAGAYA_GID:-0}"
     ports:
       - "${NAGAYA_PORT:-8000}:8000"
+    # 日志按大小轮转。json-file 默认不轮转，而健康检查每 30 秒就记一行访问日志，
+    # 放着不管半年能涨到几百 MB
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       # 前面套了 HTTPS 反代（Caddy、cloudflared……）时，在同目录 .env 里写
       # FORWARDED_ALLOW_IPS=127.0.0.1,::1,<反代的 IP 或网段>（见 README「HTTPS」）。

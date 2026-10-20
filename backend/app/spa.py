@@ -115,16 +115,27 @@ def mount(app: FastAPI) -> None:
         if full_path in ("index.html", "/index.html"):
             return _index()
 
-        candidate = (DIST / full_path).resolve()
+        root = DIST.resolve()
+        try:
+            candidate = (DIST / full_path).resolve()
+            found = bool(full_path) and candidate.is_file()
+        except (OSError, ValueError):
+            # 路径里带 NUL（/%00）、或者某一段超过文件系统的上限（255 字节）：
+            # 不可能是产物里的文件。原来这两种未登录就能打出 500，每次留一整段 traceback
+            candidate, found = None, False
         # 库文件、备份半成品、WAL **永远不从这儿发出去**。前端产物里本来没有这些，
         # 有就只可能是备份目录被指进了前端目录 —— 那样整本账（含密码哈希）
         # 未登录就能下载。设置那边也拦了，这里是第二道
-        if candidate.name.endswith((".db", ".part", ".sqlite", "-wal", "-shm", "-journal")):
+        if candidate is not None and candidate.name.endswith(
+            (".db", ".part", ".sqlite", "-wal", "-shm", "-journal")
+        ):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "no such file")
         # resolve 之后再比对根目录，挡住 ../ 穿越
-        if full_path and candidate.is_file() and candidate.is_relative_to(DIST.resolve()):
-            cache = IMMUTABLE if full_path.startswith("assets/") else REVALIDATE
-            return FileResponse(candidate, headers={"Cache-Control": cache})
+        if found and candidate.is_relative_to(root):
+            # 按解析后的**真实位置**判断是不是带哈希的产物：按原样的路径判断的话，
+            # 裸发的 /assets/../index.html 拿到的是 index.html 配一年不变的缓存
+            hashed = candidate.relative_to(root).parts[0] == "assets"
+            return FileResponse(candidate, headers={"Cache-Control": IMMUTABLE if hashed else REVALIDATE})
 
         if "." in full_path.rsplit("/", 1)[-1]:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "no such file")

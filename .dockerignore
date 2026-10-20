@@ -12,6 +12,7 @@ backend/.venv
 backend/data
 backend/backups
 backend/.pytest_cache
+backend/tests
 **/*.db
 **/*.db-wal
 **/*.db-shm

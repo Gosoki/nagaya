@@ -33,6 +33,33 @@ def test_throttle_is_per_name_so_nobody_can_lock_out_a_roommate(client: TestClie
     assert r.status_code == 200
 
 
+def test_spraying_junk_names_cannot_evict_a_lockout(client: TestClient, auth, monkeypatch) -> None:
+    """节流表满了要清的时候，**还锁着的那条不许清**：原来换 1001 个名字各错一次，
+    被锁住的 (这台机器, a) 就被当成「最久没动静」的挤掉，又白拿 5 次"""
+    from app.routers import auth as auth_router
+
+    monkeypatch.setattr(auth_router, "MAX_TRACKED", 3)
+    for _ in range(6):
+        r = client.post("/api/auth/login", json={"name": "a", "password": "wrong"})
+    assert r.status_code == 429
+    for i in range(5):
+        client.post("/api/auth/login", json={"name": f"junk{i}", "password": "wrong"})
+    assert client.post("/api/auth/login", json={"name": "a", "password": "wrong"}).status_code == 429
+
+
+def test_old_password_check_is_throttled_too(client: TestClient, auth, members: list[Member]) -> None:
+    """改密码要先报旧密码。不节流的话，拿到 token 的人能对着这里无限猜，猜中就把本人锁在门外"""
+    url = f"/api/members/{members[0].id}"
+    for _ in range(5):
+        r = client.patch(url, json={"password": "newpass99", "old_password": "guess"}, headers=auth)
+        assert r.status_code == 403
+    r = client.patch(url, json={"password": "newpass99", "old_password": "guess"}, headers=auth)
+    assert r.status_code == 429 and r.json()["code"] == "too_many_logins"
+    # 等待期间连对的旧密码也不验
+    r = client.patch(url, json={"password": "newpass99", "old_password": "pw123456"}, headers=auth)
+    assert r.status_code == 429
+
+
 def test_success_resets_the_counter(client: TestClient, auth) -> None:
     for _ in range(4):
         client.post("/api/auth/login", json={"name": "a", "password": "wrong"})

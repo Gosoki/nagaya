@@ -89,10 +89,11 @@ bash deploy.sh --docker         # 用 Docker：NAS、或者任何装了 Docker �
 | 备份放哪 | 直接装时第一次问（建议外接盘、NAS 共享目录）；搬过来的账本里记着的目录在这台机器上用不了时也问 |
 | 第一个账号 | 账本里一个人都没有时。密码在它自己那儿输两遍 |
 
-`NAGAYA_YES=1 bash deploy.sh` 什么都不问、全用默认；`PORT=9001 bash deploy.sh` 预设端口。
+`sudo NAGAYA_YES=1 bash deploy.sh` 什么都不问、全用默认；`sudo PORT=9001 bash deploy.sh` 预设端口
+（变量写在 `sudo` **后面**：写在前面会被 sudo 清掉。Docker 那条不用 sudo，`PORT=9001 bash deploy.sh --docker`）。
 
-**直接装**做的事：装 [uv](https://github.com/astral-sh/uv)（自带独立的 Python 3.12，不碰系统的）→ 装后端依赖 →
-系统里没有够新的 Node 才装一份（放在项目的 `.tools/` 里，校验过哈希）→ 打包前端 →
+**直接装**做的事：系统里没有够新的 Node 才装一份（放在项目的 `.tools/` 里，校验过哈希）→ 打包前端 →
+装 [uv](https://github.com/astral-sh/uv)（自带独立的 Python 3.12，不碰系统的）→ 装后端依赖 →
 写 `/etc/systemd/system/nagaya.service` 并启动 → 真去打一次接口确认是它在应答。
 日志 `journalctl -u nagaya -f`，重启 `systemctl restart nagaya`。
 
@@ -202,6 +203,7 @@ cd backend
 .venv/bin/python -m tools.restore                         # 用最新那份
 .venv/bin/python -m tools.restore nagaya-20260922-133226.db
 .venv/bin/python -m tools.restore --dir=/Volumes/USB/backups --yes   # 备份不在默认目录 / 不问直接做
+.venv/bin/python -m tools.restore "$PWD/data/before-migrate-0001-20261021-120000.db"   # 退回开机升级前的快照（写全路径）
 ```
 
 Docker 部署的：服务停了 `exec` 就进不去，用一次性容器跑（`--dir` 写容器里的路径）：

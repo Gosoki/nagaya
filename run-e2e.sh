@@ -50,6 +50,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# 十秒内没起来就别跑了：照跑的话 48 条全红在「连不上」上，真正的原因在服务日志里
+if ! curl -sf "$NAGAYA_URL/api/health" > /dev/null; then
+  echo "❌ 测试服务没起来，最近的日志："
+  tail -20 /tmp/nagaya-e2e.log
+  exit 1
+fi
+
 echo "→ 跑 E2E"
 cd "$ROOT/frontend"
 npx playwright test "$@"

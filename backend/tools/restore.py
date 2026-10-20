@@ -19,8 +19,10 @@
 
 from __future__ import annotations
 
+import atexit
 import datetime as dt
 import json
+import os
 import shutil
 import sqlite3
 import sys
@@ -71,10 +73,12 @@ def _pick(name: str | None, argv: list[str]) -> Path:
     folder = _dir(argv)
     files = sorted(p for p in folder.iterdir() if backup_svc.NAME_RE.match(p.name)) \
         if folder.is_dir() else []
-    if not files:
-        sys.exit(f"备份目录里一份都没有：{folder}")
     if name is None:
+        if not files:
+            sys.exit(f"备份目录里一份都没有：{folder}")
         return files[-1]
+    # 点名的那份不要求备份目录里有别的：拿开机升级前的快照（data/before-migrate-*.db）
+    # 恢复时，备份目录多半正是空的。给的是绝对路径时 folder / name 就是它自己
     hit = folder / name
     if not hit.exists():
         sys.exit(f"没有这一份：{hit}\n现有的：\n  " + "\n  ".join(p.name for p in files))
@@ -89,6 +93,8 @@ def _upgraded_copy(src: Path) -> Path:
     **升的是拷贝**：出了任何事，备份原件一个字节都没动。
     """
     tmp = Path(tempfile.mkdtemp(prefix="nagaya-restore-")) / src.name
+    # 那是一整份账本的明文。中途任何一条路退出（升不上、行数不对、没确认停服务）都得清掉
+    atexit.register(shutil.rmtree, tmp.parent, True)
     shutil.copy2(src, tmp)
     migrate.upgrade(tmp, snapshot=False)
     # 升级时开的是 WAL，写进去的东西可能还躺在拷贝的 -wal 里，而接下来只拷主文件 ——
@@ -156,7 +162,16 @@ def main(argv: list[str]) -> None:
         if "--yes" not in argv and input("停好了？输 yes 继续：").strip().lower() != "yes":
             sys.exit("没动任何东西。")
 
-    # ② 现有的挪走，不删 —— 万一恢复错了那份，原来的还在
+    # ② 先在账本旁边拷好、落盘，**再**动现有的：拷到一半盘满或者 Ctrl-C，原来那本一点没动。
+    # 原来是先把原件挪走、再直接往正式名字上拷 —— 半截的 nagaya.db 留在原地，
+    # 服务一起来就是 malformed，原件躲在 replaced-* 里要人自己去找。盘满恰恰是出事那几天最可能的
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    part = DB_PATH.with_name(DB_PATH.name + ".restore.part")
+    shutil.copy2(ready, part)
+    with open(part, "rb+") as f:
+        os.fsync(f.fileno())
+
+    # ③ 现有的挪走，不删 —— 万一恢复错了那份，原来的还在
     if DB_PATH.exists():
         # 目录名按**这次恢复的时刻**取，不按备份的时刻。
         # 按备份取的话，同一份连着恢复两次（以为刚才没成功、或者忘了停服务想重来）
@@ -175,14 +190,12 @@ def main(argv: list[str]) -> None:
                 shutil.move(str(old), aside / old.name)
         print(f"原来的账本挪到了：{aside}")
     else:
-        # ③ 库不在但 -wal 还在的话，旧 WAL 照样会盖上来
+        # 库不在但 -wal 还在的话，旧 WAL 照样会盖上来
         for suffix in SIDECARS:
             Path(str(DB_PATH) + suffix).unlink(missing_ok=True)
 
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    # 放上去的是**升过的那份拷贝**：验过的就是装上的，开机不用再升一遍
-    shutil.copy2(ready, DB_PATH)
-    shutil.rmtree(ready.parent, ignore_errors=True)
+    # 放上去的是**升过的那份拷贝**：验过的就是装上的，开机不用再升一遍。改名是原子的
+    os.replace(part, DB_PATH)
     print(f"恢复完成：{DB_PATH}")
     # **设置表也一起恢复了**，包括备份目录它自己。恢复一份「目录还指着旧移动盘」
     # 时代的备份，备份目录会跟着回滚 —— 而这恰好是刚出完事、最不该再丢一次备份的时候

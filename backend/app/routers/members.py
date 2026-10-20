@@ -4,7 +4,7 @@ import asyncio
 import datetime as dt
 import io
 
-from fastapi import APIRouter, Depends, File, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Request, Response, UploadFile, status
 from sqlmodel import Session, select
 
 from app.auth import MIN_PASSWORD_LEN, current_member, hash_password, verify_password
@@ -12,7 +12,7 @@ from app.db import get_session
 from app.errors import AppError, not_found, reject_nulls
 from app.images import open_image
 from app.models import Member, free_color
-from app.routers.auth import to_member_out
+from app.routers.auth import claim_try, forget, to_member_out
 from app.schemas import MemberIn, MemberOut
 from app.services import audit
 
@@ -84,6 +84,7 @@ def _check_dates(joined: dt.date, left: dt.date | None) -> None:
 def update_member(
     member_id: int,
     body: MemberIn,
+    request: Request,
     session: Session = Depends(get_session),
     me: Member = Depends(current_member),
 ):
@@ -108,10 +109,15 @@ def update_member(
         )
     if body.password is not None and len(body.password) < MIN_PASSWORD_LEN:
         raise AppError("password_too_short", "password too short", min=MIN_PASSWORD_LEN)
-    if body.password is not None:
-        # 已经设过密码的，得先报出旧的。手机搁桌上没锁屏，别人顺手就能改掉
-        if member.password_hash and not verify_password(body.old_password or "", member.password_hash):
+    if body.password is not None and member.password_hash:
+        # 已经设过密码的，得先报出旧的。手机搁桌上没锁屏，别人顺手就能改掉。
+        # **和登录一样节流**：不节流的话，拿到 token 的人（局域网 http 下它是明文）
+        # 可以对着这里无限猜旧密码，猜中就改掉、把本人锁在门外
+        key = (request.client.host if request.client else "?", f"pw:{member.id}")
+        claim_try(key)
+        if not verify_password(body.old_password or "", member.password_hash):
             raise AppError("wrong_password", "current password does not match", status=403)
+        forget(key)
 
     # exclude_unset 而不是 exclude_none：PATCH 的语义是「我发了什么就改什么」。
     # 用 exclude_none 的话 left_on 一旦填错就再也清不掉 —— null 会被当成「没发」，

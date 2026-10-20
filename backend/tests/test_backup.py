@@ -451,3 +451,13 @@ def test_restoring_twice_keeps_both_copies_of_the_old_ledger(tmp_path: Path) -> 
         counts.append(list(con.execute("select count(*) from entry where amount_jpy=7777"))[0][0])
         con.close()
     assert 3 in counts, "只存在于活账本里的那 3 笔被抹掉了 —— 后悔药没了"
+
+
+def test_a_lookalike_name_with_an_impossible_date_is_ignored(session: Session, bk: Path) -> None:
+    """名字形状对、日期不存在（13 月 99 日）：不算备份产出的，不许让自动备份和备份页跟着 500"""
+    backup_svc.run(session)
+    (bk / "nagaya-20261399-000000.db").write_bytes(b"not ours")
+    backup_svc.status(session)
+    for _ in range(4):                       # 留 3 份：多备几次让轮转真的跑起来
+        backup_svc.run(session)
+    assert (bk / "nagaya-20261399-000000.db").exists(), "不是自己产出的，轮转也不许删"

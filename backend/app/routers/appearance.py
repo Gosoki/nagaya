@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import time
 
@@ -103,6 +104,28 @@ def delete_icon(
     return {"version": 0}
 
 
+#: 缩好的小图，只记**当前这份母版**的（按内容指纹认，换了图标自动作废）。几十 KB
+_small: dict[tuple[str, int], bytes] = {}
+
+
+def _resized(master: bytes, size: int) -> bytes:
+    """母版缩到 size。原来每次请求都解码、缩放、压一遍（一次 20ms 上下，NAS 上慢几倍），
+    而这个端点不要求登录，谁都能拿它反复刷 —— 512 那张早就原样给了，这几张小的同理"""
+    key = (hashlib.sha1(master).hexdigest(), size)
+    if key not in _small:
+        from PIL import Image
+
+        img = Image.open(io.BytesIO(master)).resize((size, size), Image.Resampling.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, "PNG", optimize=True)
+        # list() 先拍一份键：这个端点在线程池里并发跑，边遍历边被别的请求写入会抛错
+        for k in list(_small):
+            if k[0] != key[0]:
+                _small.pop(k, None)
+        _small[key] = buf.getvalue()
+    return _small[key]
+
+
 @router.get("/icon/{size}.png")
 def get_icon(
     size: int,
@@ -122,12 +145,7 @@ def get_icon(
         # 而这个端点不要求登录，谁都能拿它反复刷
         content = row.png
     else:
-        from PIL import Image
-
-        img = Image.open(io.BytesIO(row.png)).resize((size, size), Image.Resampling.LANCZOS)
-        buf = io.BytesIO()
-        img.save(buf, "PNG", optimize=True)
-        content = buf.getvalue()
+        content = _resized(row.png, size)
     return Response(
         content=content,
         media_type="image/png",

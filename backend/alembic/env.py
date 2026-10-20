@@ -9,7 +9,9 @@ from alembic import context
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_backend = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _backend not in sys.path:   # 开机升级、恢复工具每升一次都会重新执行这个文件
+    sys.path.insert(0, _backend)
 
 from sqlmodel import SQLModel  # noqa: E402
 

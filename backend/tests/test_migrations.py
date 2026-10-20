@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect
 from sqlmodel import SQLModel
 
 from app import migrate
@@ -133,3 +133,22 @@ def test_a_failing_upgrade_does_not_pile_up_snapshots(tmp_path: Path, monkeypatc
     with pytest.raises(migrate.SchemaDrift, match="ffff"):
         migrate.upgrade(newer)
     assert not list(newer.parent.glob("before-migrate-*"))
+
+
+def test_a_failed_upgrade_leaves_nothing_half_built(tmp_path: Path, monkeypatch) -> None:
+    """升级在一个事务里：迁移建了表之后失败，那张表也得一起退回去。
+
+    pysqlite 默认不把 CREATE / ALTER 包进事务 —— 原来回滚之后半截的表还在，
+    下次开机就是「table already exists」，从此起不来
+    """
+    def half_then_fail(cfg, _rev) -> None:  # noqa: ANN001
+        cfg.attributes["connection"].exec_driver_sql("CREATE TABLE half_built (id INTEGER)")
+        raise RuntimeError("迁移中途失败")
+
+    monkeypatch.setattr(migrate.command, "upgrade", half_then_fail)
+    db = tmp_path / "x.db"
+    with pytest.raises(RuntimeError):
+        migrate.upgrade(db, snapshot=False)
+    engine = create_engine(f"sqlite:///{db}")
+    assert "half_built" not in inspect(engine).get_table_names()
+    engine.dispose()

@@ -93,3 +93,11 @@ def test_app_name_with_backslash_keeps_index_alive(client, monkeypatch) -> None:
     r = client.get("/")
     assert r.status_code == 200
     assert "<title>a\\1b\\d</title>" in r.text
+
+
+def test_unreadable_paths_are_not_500(client) -> None:
+    """路径里带 NUL、或者一段超过文件名上限：原来 resolve()/is_file() 直接抛，
+    未登录就能打出 500。没后缀的照样当前端路由回首页，有后缀的 404"""
+    assert client.get("/%00").status_code in (200, 404)
+    assert client.get("/" + "a" * 300).status_code == 200
+    assert client.get("/" + "a" * 300 + ".js").status_code == 404

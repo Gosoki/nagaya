@@ -11,7 +11,8 @@
 #
 # 第一次部署（还没有账本、或者账本里一个人都没有）时中途会问几句：端口、要不要把旧机器的
 # 账本搬过来、备份放哪（只有直接装才问）、第一个账号。问不了人（不是终端、或者
-# NAGAYA_YES=1）时全用默认；`PORT=9001 bash deploy.sh` 预设端口。
+# NAGAYA_YES=1）时全用默认；`sudo PORT=9001 bash deploy.sh` 预设端口（变量写在 sudo 后面，
+# 写在前面会被 sudo 清掉；--docker 不用 sudo）。
 #
 # 幂等：任何一步失败立刻停下并说清楚，修完重跑就行，不会留半成品。
 # 升级：`git pull && bash deploy.sh`（Docker 就加 --docker）—— 不问问题、不碰账本；
@@ -324,7 +325,7 @@ check_port
 # 被别的程序占着的话，服务起来就是一直崩溃重启 —— 在这儿就说清楚
 if command -v ss >/dev/null && ss -ltnH "( sport = :$PORT )" 2>/dev/null | grep -q . \
    && ! systemctl is-active --quiet "$SVC"; then
-  die "端口 $PORT 已经被别的程序占了（ss -ltnp 看是谁），换一个：PORT=xxxx bash deploy.sh"
+  die "端口 $PORT 已经被别的程序占了（ss -ltnp 看是谁），换一个：sudo PORT=xxxx bash deploy.sh"
 fi
 say "✔ 端口：${PORT}"
 
@@ -416,7 +417,7 @@ fi
 # 装钉死的那一组（requirements.lock）：requirements.txt 只写下限，新机器上会装到不兼容的新版
 uv pip install --python .venv/bin/python -q -r requirements.lock
 PY="$BACKEND/.venv/bin/python"
-"$PY" -c "import fastapi, uvicorn, sqlmodel, alembic, PIL, jwt, bcrypt, multipart" \
+"$PY" -c "import fastapi, uvicorn, sqlmodel, alembic, PIL, jwt, bcrypt, python_multipart" \
   || die "后端依赖没装全"
 say "✔ 后端依赖 OK（$("$PY" -V)）"
 

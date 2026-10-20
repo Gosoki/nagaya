@@ -14,6 +14,9 @@ D18 定的是「录真账之前切 Alembic」，这就是那一步。之前一�
   * **升的时候关掉外键**：整表重建要先删旧表再改名，外键开着的话，
     删一张被引用的表会连带清掉引用它的行，或者直接失败（Alembic 文档的原话）；
   * **升完核对**：库里的列和模型对不上就拒绝启动。比「起来了，查到那一列才 500」好。
+
+升级本身在**一个事务**里（见 _engine）：中途失败、或者升完外键对不上，整个退回升之前，
+库还是能用旧代码打开的那一份。
 """
 
 from __future__ import annotations
@@ -26,7 +29,7 @@ from alembic import command
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, event, inspect
 from sqlalchemy.pool import NullPool
 from sqlmodel import SQLModel
 
@@ -51,12 +54,41 @@ def head() -> str:
     return ScriptDirectory.from_config(_config()).get_current_head() or ""
 
 
+def _engine(path: Path):  # noqa: ANN202
+    """升级专用的连接：**建表、改表也进事务**。
+
+    pysqlite 默认要到第一条增删改才真发 BEGIN，前面的 CREATE / ALTER 各自就提交了 ——
+    实测一个迁移先建两张表、插一行、再失败，回滚之后那两张表还在库里。下次开机就是
+    「table already exists」，从此起不来。这里按 SQLAlchemy 文档给 pysqlite 的做法：
+    关掉驱动自己的事务管理，由 begin 那一刻显式发 BEGIN。SQLite 本身支持事务性 DDL。
+
+    代价：PRAGMA foreign_keys 和 VACUUM INTO 在事务里不起作用 / 不让跑，
+    那两句走 _raw，不经过这里的 BEGIN
+    """
+    engine = create_engine(f"sqlite:///{path}", poolclass=NullPool)
+
+    @event.listens_for(engine, "connect")
+    def _no_driver_tx(dbapi_conn, _record) -> None:  # noqa: ANN001
+        dbapi_conn.isolation_level = None
+
+    @event.listens_for(engine, "begin")
+    def _begin(conn) -> None:  # noqa: ANN001
+        conn.exec_driver_sql("BEGIN")
+
+    return engine
+
+
+def _raw(conn, sql: str, *params) -> None:  # noqa: ANN001
+    """不开事务直接执行（_engine 关掉了驱动的事务管理，这里就是 autocommit）"""
+    conn.connection.driver_connection.execute(sql, params)
+
+
 def upgrade(path: Path, *, snapshot: bool = True) -> str | None:
     """把 `path` 这个库升到最新。返回升之前拍的快照路径（没拍就是 None）。
 
     `snapshot=False` 给恢复工具用：它升的是一份临时拷贝，出事了原件还在。
     """
-    engine = create_engine(f"sqlite:///{path}", poolclass=NullPool)
+    engine = _engine(path)
     try:
         with engine.connect() as conn:
             current = MigrationContext.configure(conn).get_current_revision()
@@ -74,14 +106,14 @@ def upgrade(path: Path, *, snapshot: bool = True) -> str | None:
             if current != head() and tables and snapshot:
                 shot = _snapshot(conn, path, current)
             # PRAGMA foreign_keys 在事务里改不了，得在 begin 之前
-            conn.exec_driver_sql("PRAGMA foreign_keys=OFF")
-            conn.commit()
+            _raw(conn, "PRAGMA foreign_keys=OFF")
             with conn.begin():
                 command.upgrade(_config(conn), "head")
-            bad = conn.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
-            conn.rollback()
-            if bad:
-                raise SchemaDrift(f"升完之后有 {len(bad)} 行外键对不上，例如 {bad[:3]}")
+                # 在同一个事务里核：对不上就抛，连同上面的升级一起退回去。
+                # 原来是提交之后才核 —— 版本号已经升了，之后每次开机都拒绝启动
+                bad = conn.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
+                if bad:
+                    raise SchemaDrift(f"升完之后有 {len(bad)} 行外键对不上，例如 {bad[:3]}")
         missing = drift(engine)
         if missing:
             raise SchemaDrift(
@@ -141,8 +173,7 @@ def _snapshot(conn, path: Path, current: str) -> str:  # noqa: ANN001
     part = shot.with_name(shot.name + ".part")
     part.unlink(missing_ok=True)
     try:
-        conn.exec_driver_sql("VACUUM INTO ?", (str(part),))
-        conn.rollback()
+        _raw(conn, "VACUUM INTO ?", str(part))   # VACUUM 不许在事务里跑
     except BaseException:
         part.unlink(missing_ok=True)
         raise

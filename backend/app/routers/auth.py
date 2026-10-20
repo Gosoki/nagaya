@@ -53,8 +53,32 @@ def _note_fail(key: tuple[str, str], now: float) -> None:
             if now - t > MAX_WAIT:
                 del _fails[k]
         if len(_fails) > MAX_TRACKED:
-            for k, _ in sorted(_fails.items(), key=lambda kv: kv[1][1])[: len(_fails) - MAX_TRACKED]:
+            # **还锁着的不清。** 被锁住的那条刷新不了时间戳，按「最久没动静」它永远排第一 ——
+            # 原来换 1001 个名字各错一次就能把它挤掉，白拿 5 次机会，等于节流形同虚设。
+            # 锁最长 MAX_WAIT，到点自然能清；表因此能多长，受攻击者自己验密码的速度限着
+            idle = [kv for kv in _fails.items() if _wait_left(kv[0], now) == 0]
+            for k, _ in sorted(idle, key=lambda kv: kv[1][1])[: len(_fails) - MAX_TRACKED]:
                 del _fails[k]
+
+
+def claim_try(key: tuple[str, str]) -> None:
+    """要验一次密码之前调：还在等就 429；不在等就**先记成一次失败**（验对了再 forget）。
+
+    「查还能不能试 → 记一次失败」在一把锁里一步做完：同一时刻最多放 FREE_TRIES 个进去。
+    在验密码**之前**就挡：挡在之后的话，攻击者照样拿到了「这次对不对」
+    """
+    now = time.monotonic()
+    with _lock:
+        wait = _wait_left(key, now)
+        if wait:
+            raise AppError("too_many_logins", f"retry in {wait}s", status=429, seconds=wait)
+        _note_fail(key, now)
+
+
+def forget(key: tuple[str, str]) -> None:
+    """验对了：这一路的失败记录清掉"""
+    with _lock:
+        _fails.pop(key, None)
 
 
 def to_member_out(m: Member, viewer: int | None = None) -> MemberOut:
@@ -82,21 +106,13 @@ def to_member_out(m: Member, viewer: int | None = None) -> MemberOut:
 @router.post("/login", response_model=LoginOut)
 def login(body: LoginIn, request: Request, session: Session = Depends(get_session)) -> LoginOut:
     key = (request.client.host if request.client else "?", body.name.strip().lower())
-    now = time.monotonic()
-    with _lock:
-        wait = _wait_left(key, now)
-        if wait:
-            # 在验密码**之前**就挡：挡在之后的话，攻击者照样拿到了「这次对不对」
-            raise AppError("too_many_logins", f"retry in {wait}s", status=429, seconds=wait)
-        # **先记成失败再去验**：验对了再撤掉。这样同一时刻最多放 FREE_TRIES 个进去
-        _note_fail(key, now)
+    claim_try(key)
     member = authenticate(session, body.name, body.password)
     if member is None:
         # 同样不配码：登录页是按 e.status === 401 显示「用户名或密码不对」的
         # （别的状态码要原样说出来 —— 断网时说成密码错会让人一遍遍改密码）
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "用户名或密码不对")
-    with _lock:
-        _fails.pop(key, None)
+    forget(key)
     return LoginOut(token=make_token(member), member=to_member_out(member))
 
 

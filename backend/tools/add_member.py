@@ -49,7 +49,8 @@ def main(argv: list[str]) -> None:
             return
 
         if "--reset" in argv:
-            name = next((a for a in argv[1:] if not a.startswith("-")), "")
+            # 登录名写在 --reset 前后都认（原来只跳过第一个参数，`kan --reset` 就找不到人）
+            name = next((a for a in argv if not a.startswith("-")), "")
             who = next((m for m in rows if m.name == name), None)
             if who is None:
                 sys.exit(f"没有叫 {name!r} 的成员。--list 看看都有谁")

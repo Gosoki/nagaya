@@ -36,10 +36,17 @@ def _load_secret() -> str:
         return env
     path = Path(DB_PATH).parent / ".secret"
     if path.exists():
-        return path.read_text(encoding="utf-8").strip()
+        value = path.read_text(encoding="utf-8").strip()
+        # 空文件（上次写到一半断了电、盘满）当成没有：拿空串当密钥的话每次登录都是 500。
+        # 重新生成不丢任何东西 —— 空密钥从来没签出过 token
+        if value:
+            return value
     value = secrets.token_urlsafe(48)
-    path.write_text(value, encoding="utf-8")
-    path.chmod(0o600)
+    # 先写旁边、收紧权限、再改名：正式名字上永远是完整的一份，也从不带着宽权限出现
+    part = path.with_name(".secret.part")
+    part.write_text(value, encoding="utf-8")
+    part.chmod(0o600)
+    os.replace(part, path)
     return value
 
 

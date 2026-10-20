@@ -47,6 +47,18 @@ NAME_FMT = "nagaya-%Y%m%d-%H%M%S.db"
 NAME_RE = re.compile(r"^nagaya-\d{8}-\d{6}\.db$")
 PART_SUFFIX = ".part"
 
+
+def _is_ours(name: str) -> bool:
+    """备份自己产出的名字：形状对，**日期也得是真日期**。只看形状的话
+    nagaya-20261399-000000.db 也算 —— 后面解析它的那一步一抛，自动备份从此停摆、备份页 500"""
+    if not NAME_RE.match(name):
+        return False
+    try:
+        dt.datetime.strptime(name, NAME_FMT)
+    except ValueError:
+        return False
+    return True
+
 #: backup_path 填相对路径时相对谁：backend/。和 .gitignore 里那行
 #: `backend/backups/` 对得上。
 #: **锚在包自己身上，不锚在 DB_PATH 上** —— 后者会随 NAGAYA_DB 指到哪儿而漂：
@@ -155,7 +167,7 @@ def _sweep_parts(directory: Path) -> None:
     """扫掉上一轮被 kill 掉留下的半截文件。
 
     只扫**足够旧**的：另一个进程可能正在写它自己那一个（名字带秒，撞不上，
-    但这一条让「cron 和手点同时发生」也不会互相拆台）。
+    但这一条让「每小时那次自动备份和手点同时发生」也不会互相拆台）。
     """
     now = dt.datetime.now().timestamp()
     for p in directory.glob(f"nagaya-*{PART_SUFFIX}"):
@@ -267,7 +279,7 @@ def _prune(directory: Path, keep: int, protect: Path) -> list[str]:
     """
     if keep <= 0:
         return []
-    files = sorted(p for p in directory.iterdir() if NAME_RE.match(p.name))
+    files = sorted(p for p in directory.iterdir() if _is_ours(p.name))
     removed: list[str] = []
     for p in files[:-keep]:
         if p == protect:
@@ -350,7 +362,7 @@ def run(session: Session) -> dict[str, Any]:
 # ---------------------------------------------------------------- 状态
 
 def _newest(directory: Path) -> Path | None:
-    files = sorted(p for p in directory.iterdir() if NAME_RE.match(p.name))
+    files = sorted(p for p in directory.iterdir() if _is_ours(p.name))
     return files[-1] if files else None
 
 def _safe_path(session: Session) -> str:
@@ -377,7 +389,7 @@ def status(session: Session) -> dict[str, Any]:
         out["error"] = e.code
         return out
 
-    files = sorted(p for p in directory.iterdir() if NAME_RE.match(p.name))
+    files = sorted(p for p in directory.iterdir() if _is_ours(p.name))
     out["count"] = len(files)
     newest = files[-1] if files else None
     if newest is not None:
@@ -425,7 +437,8 @@ def status(session: Session) -> dict[str, Any]:
     return out
 
 def run_if_due(session: Session) -> dict[str, Any] | None:
-    """离上一份够久了才做。起进程时调它，cron 那条线不走这里（cron 自己就是时钟）。"""
+    """离上一份够久了才做。进程里那个每小时醒一次的任务调它（main._daily_backup）；
+    设置页的「立即备份」不走这里，直接 run()。"""
     every = int(settings_svc.get(session, "backup_every_hours") or 0)
     if every <= 0:
         return None

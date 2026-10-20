@@ -33,6 +33,17 @@ from app.routers import appearance, auth, backup, bill, categories, entries, mem
 from app.services.ledger import LedgerError
 
 log = logging.getLogger("nagaya")
+# uvicorn 只给它自己那几个 logger 配了输出，root 停在 WARNING：不在这儿配的话，
+# 「备份完成」「账本里还没有人」这些 INFO 一行都到不了 journalctl / docker logs，
+# warning 也只是裸着一句、没有级别。格式借 uvicorn 的，和它那几行长得一样
+if not log.handlers:
+    from uvicorn.logging import DefaultFormatter
+
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(DefaultFormatter("%(levelprefix)s %(message)s"))
+    log.addHandler(_handler)
+    log.setLevel(logging.INFO)
+    log.propagate = False
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -52,9 +63,9 @@ _BACKUP_TICK = 3600
 async def _daily_backup() -> None:
     """每天一份备份，跑在进程里。
 
-    **为什么不挂 cron / systemd timer**：部署形态还没定（SPEC D8 写的是「部署放 M3
-    再定」），而这个功能的起因正是「面板承诺了一个不存在的备份」—— 一个还要用户
-    另外配一遍才生效的方案，在他配完之前仍然没有备份。这个 app 是单端口单进程
+    **为什么不挂 cron / systemd timer**：部署有三条路（systemd、Docker、Mac 上直接 run.sh），
+    而这个功能的起因正是「面板承诺了一个不存在的备份」—— 一个还要用户另外配一遍
+    才生效的方案，在他配完之前仍然没有备份。这个 app 是单端口单进程
     （README 部署那一行），进程内跑一个任务不会出现多实例互相打架。
 
     判据是「离上一份多久了」而不是「睡够 24 小时没有」：合盖睡眠、半夜重启、
