@@ -285,8 +285,8 @@ cd frontend && npm run dev          # localhost:9000，/api 代理到 8000，改
 ### 测试
 
 ```bash
-cd backend  && .venv/bin/python -m pytest   # 242 条：算法 / 账本 / 账单 / API / 边界输入 / 随机操作序列 / 备份恢复 / 迁移
-cd frontend && npm test                     # 185 条：分摊引擎（对后端 fixture）+ 若干守卫（对比度、缓存竞态……）
+cd backend  && .venv/bin/python -m pytest   # 252 条：算法 / 账本 / 账单 / API / 边界输入 / 随机操作序列 / 备份恢复 / 迁移
+cd frontend && npm test                     # 186 条：分摊引擎（对后端 fixture）+ 若干守卫（对比度、缓存竞态……）
 ./run-e2e.sh                                # 48 条：375px 手机视口，真浏览器（WebKit）
 ```
 
