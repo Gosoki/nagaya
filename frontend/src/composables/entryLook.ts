@@ -21,7 +21,7 @@ export function useEntryLook() {
   const categoryOf = (e: Entry) => (e.category_id === null ? undefined : meta.categoryById[e.category_id])
   const nameOf = (id: number) => meta.byId[id]?.display_name ?? String(id)
   /** 帮谁买的（不是帮买就是 null）。帮买在记一笔那屏是转账页里的开关，所以颜色跟转账走 */
-  const helpedOf = (e: Entry) => helpBuyFor(e)
+  const helpedOf = (e: Entry) => helpBuyFor(e, categoryOf(e)?.monthly === true)
   // 收入、转账没有分类，得有自己的图标色，否则跟「分类丢了」长得一模一样
   const colorOf = (e: Entry) =>
     helpedOf(e) !== null
@@ -47,5 +47,5 @@ export function useEntryLook() {
     return helped === null ? '' : t('entry.helpBy', { payer: nameOf(e.payer_id), name: nameOf(helped) })
   }
 
-  return { categoryOf, colorOf, iconOf, labelOf, helpedOf, helpCaptionOf }
+  return { categoryOf, colorOf, iconOf, labelOf, helpCaptionOf }
 }

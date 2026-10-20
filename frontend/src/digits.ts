@@ -35,10 +35,11 @@ export function yenOf(text: string): number {
  *
  * 整屏的金额都写成 ¥10,000，照着屏幕打回去是最自然的动作，所以千分位的逗号（和点）
  * 要擦掉；但**别的小数点不当千分位** —— 日元没有小数，「5000.00」原来会被擦成
- * 500,000。整串是「1,234,567 / 1.234.567」这种分组时才擦点
+ * 500,000。整串是「1,234,567 / 1.234.567」这种分组时才擦点。
+ * 货币符号（¥ ￥ 円）也擦掉：照抄屏幕上的「¥10,000」原来被说成「没填金额」
  */
 export function parseTypedYen(text: string): number {
-  const raw = toHalfWidth(text).replace(/[\s．]/g, (c) => (c === '．' ? '.' : ''))
+  const raw = toHalfWidth(text).replace(/[\s．¥￥円]/g, (c) => (c === '．' ? '.' : ''))
   const grouped = /^\d{1,3}([.,]\d{3})+$/.test(raw)
   const plain = /^\d+$/.test(raw.replace(/,/g, ''))
   return grouped || plain ? Number(raw.replace(/[.,]/g, '')) : NaN

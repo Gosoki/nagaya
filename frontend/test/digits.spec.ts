@@ -23,6 +23,9 @@ it('手打金额：千分位擦掉，小数点不当千分位', () => {
   expect(parseTypedYen('１２００')).toBe(1200)
   expect(parseTypedYen(' 1 500 ')).toBe(1500)
   expect(parseTypedYen('10000')).toBe(10000)
+  expect(parseTypedYen('¥10,000')).toBe(10000)
+  expect(parseTypedYen('￥3200')).toBe(3200)
+  expect(parseTypedYen('10,000円')).toBe(10000)
   // 日元没有小数：原来「5000.00」会被擦成 500,000
   expect(parseTypedYen('5000.00')).toBeNaN()
   expect(parseTypedYen('abc')).toBeNaN()

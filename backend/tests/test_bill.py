@@ -737,5 +737,25 @@ def test_not_every_uneven_split_is_a_help_buy(session: Session, members) -> None
                  member_ids=[b.id, c.id], rule={"mode": "ratio", "weights": {str(b.id): 1, str(c.id): 1}})
     create_entry(session, actor_id=b.id, kind=EntryKind.settlement, on=SEP, amount=500,
                  payer_id=b.id, to_member_id=a.id)
+    # 只有付款人自己担：自己买自己用的
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=800, payer_id=a.id,
+                 member_ids=[a.id], rule={"mode": "ratio", "weights": {str(a.id): 1}})
     bill = build_bill(session, None)
     assert bill["help_items"] == [] and bill["help_total"] == 0
+
+
+def test_help_buy_counts_rows_borne_by_nobody_but_not_fixed_costs(session: Session, members) -> None:
+    """在支出页把另外两人点成「不参与」记的（他们那两行是 0）也认作帮买；
+    但挂在固定费上的不认 —— 「Kan 的车位」从 Go 卡上扣，固定费那块已经列着它了"""
+    a, b, c = members
+    parking = Category(name="车位", monthly=True)
+    session.add(parking)
+    session.commit()
+    rule = {"mode": "ratio", "weights": {str(a.id): 0, str(b.id): 1, str(c.id): 0}}
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=2_000, payer_id=a.id,
+                 member_ids=[a.id, b.id, c.id], rule=rule)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=8_000, payer_id=a.id,
+                 category_id=parking.id, member_ids=[a.id, b.id, c.id], rule=rule)
+    bill = build_bill(session, None)
+    assert [(h["for_id"], h["amount"]) for h in bill["help_items"]] == [(b.id, 2_000)]
+    assert bill["help_total"] == 2_000

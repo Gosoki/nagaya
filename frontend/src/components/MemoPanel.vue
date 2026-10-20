@@ -108,7 +108,7 @@
 
 <script setup lang="ts">
 import { useQuasar } from 'quasar'
-import { nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { api, errorText } from 'src/api/client'
@@ -123,7 +123,12 @@ const meta = useMeta()
 const memos = useMemos()
 
 const busy = ref(false)
-const failed = ref(0)
+/**
+ * 没存上的那几格，按「哪一格」记。原来是一个计数、任何一次存成就清零 ——
+ * A 没存上、接着 B 存成了，标题条就说「已自动保存」，A 框里那段字其实没进库
+ */
+const failing = reactive(new Set<string>())
+const failed = computed(() => failing.size)
 const newTitle = ref('')
 const adding = ref(false)
 
@@ -156,14 +161,14 @@ async function sizeAll() {
   root.value?.querySelectorAll('textarea').forEach((el) => size(el as HTMLTextAreaElement))
 }
 
-async function save(run: () => Promise<unknown>): Promise<boolean> {
+async function save(key: string, run: () => Promise<unknown>): Promise<boolean> {
   busy.value = true
   try {
     await run()
-    failed.value = 0
+    failing.delete(key)
     return true
   } catch (e) {
-    failed.value += 1
+    failing.add(key)
     $q.notify({ type: 'negative', message: errorText(e), timeout: 5000 })
     return false
   } finally {
@@ -173,7 +178,7 @@ async function save(run: () => Promise<unknown>): Promise<boolean> {
 
 function saveCategory(c: Category, note: string) {
   if (note === c.note) return
-  void save(async () => {
+  void save(`cat:${c.id}`, async () => {
     const saved = await api.patch<Category>(`/api/categories/${c.id}`, { note })
     meta.categories = meta.categories.map((x) => (x.id === c.id ? saved : x))
   })
@@ -186,12 +191,12 @@ async function saveTitle(m: Memo, el: HTMLInputElement) {
     el.value = m.title
     return
   }
-  if (!(await save(() => memos.update(m.id, { title })))) el.value = m.title
+  if (!(await save(`memo:${m.id}:title`, () => memos.update(m.id, { title })))) el.value = m.title
 }
 
 function saveBody(m: Memo, body: string) {
   if (body === m.body) return
-  void save(() => memos.update(m.id, { body }))
+  void save(`memo:${m.id}:body`, () => memos.update(m.id, { body }))
 }
 
 async function addMemo() {
@@ -210,10 +215,16 @@ async function addMemo() {
 }
 
 function removeMemo(m: Memo) {
+  // 「确定」连点两下 onOk 会跑两遍：第二遍的 DELETE 是 404，标题条从此挂着「没存上」
+  let fired = false
   $q.dialog({ title: t('memo.removeItem'), message: t('memo.removeAsk', { name: m.title }), cancel: true })
     .onOk(() => {
-      void save(async () => {
+      if (fired) return
+      fired = true
+      void save(`memo:${m.id}:del`, async () => {
         await memos.remove(m.id)
+        // 这条都没了，它那几格之前没存上的也就不用再记着
+        for (const k of [...failing]) if (k.startsWith(`memo:${m.id}:`)) failing.delete(k)
         $q.notify({ type: 'positive', message: t('memo.removed', { name: m.title }), timeout: 1500 })
       })
     })

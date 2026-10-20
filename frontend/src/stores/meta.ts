@@ -111,7 +111,14 @@ export const useMeta = defineStore('meta', () => {
     }
   }
 
+  /**
+   * 第几发。切回前台那一发和「删掉这一项」之后那一发交错时，先发的晚回来
+   * 会把刚归档的分类、刚存的备注盖回旧的 —— 只认最后发出的那一发（和 ledger.refresh 同一个办法）
+   */
+  let seq = 0
+
   async function load() {
+    const my = ++seq
     try {
       const [m, c, s] = await Promise.all([
         api.get<Member[]>('/api/members'),
@@ -120,6 +127,7 @@ export const useMeta = defineStore('meta', () => {
         api.get<Category[]>('/api/categories?include_archived=true'),
         api.get<Setting[]>('/api/settings'),
       ])
+      if (my !== seq) return
       const json = JSON.stringify({ m, c, s })
       if (json === last) return
       last = json
@@ -133,7 +141,7 @@ export const useMeta = defineStore('meta', () => {
       }
     } catch (e) {
       // 有缓存就照常开门；一次都没成功过（新装的 PWA 首次就离线）才认输
-      if (!useCached()) throw e
+      if (my === seq && !useCached()) throw e
     }
   }
 

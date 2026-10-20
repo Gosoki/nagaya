@@ -694,11 +694,15 @@ function removeItem(row: Row) {
     row.amount !== null
       ? ` ${t('monthly.removeKeepsEntry', { amount: formatYen(row.amount) })}`
       : ''
+  // 「确定」连点两下 onOk 会跑两遍 —— 第二遍直接丢掉，不然就是两条「已删掉」
+  let fired = false
   $q.dialog({
     title: t('monthly.removeItem'),
     message: t('monthly.removeConfirm', { name: row.name }) + extra,
     cancel: true,
   }).onOk(async () => {
+    if (fired) return
+    fired = true
     try {
       await api.patch(`/api/categories/${row.category_id}`, { archived: true })
       await meta.load()
@@ -712,9 +716,13 @@ function removeItem(row: Row) {
             label: t('common.undo'),
             color: 'white',
             handler: async () => {
-              await api.patch(`/api/categories/${row.category_id}`, { archived: false })
-              await meta.load()
-              await load()
+              try {
+                await api.patch(`/api/categories/${row.category_id}`, { archived: false })
+                await meta.load()
+                await load()
+              } catch (e) {
+                $q.notify({ type: 'negative', message: errorText(e) })
+              }
             },
           },
         ],
@@ -755,7 +763,13 @@ async function setPayer(row: Row, payerId: number) {
       )
       row.version = e.version
       row.payer_id = payerId
+      // 缓存里那一行的 version 跟着改（理由同 saveRow）：面板重新挂载时拿它建行，
+      // 留着旧的话下一次改金额先撞一个 409。付款人不在这份缓存里，是从流水拼上来的
+      const cached = data.value?.rows.find((r) => r.category_id === row.category_id)
+      if (cached) cached.version = e.version
+      bills.monthlyWritten()
       emit('saved')             // 谁垫的变了，账单上的应收应付跟着变
+      void ledger.refresh().catch(() => {})   // 流水那一行的付款人也得换
     }
   } catch (e) {
     $q.notify({ type: 'negative', message: errorText(e), timeout: 5000 })

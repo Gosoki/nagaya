@@ -395,6 +395,7 @@
           icon="task_alt"
           :label="t('bill.cut')"
           :disable="!bill.entry_count"
+          :loading="cutting"
           @click="doCut"
         />
         <!-- 已出的账单：右边这一半写「已出账」。做成静态块不是禁用按钮 ——
@@ -893,8 +894,18 @@ function confirmReceived(tr: BillTransfer, index: number) {
 /** 固定费面板。出账之前要先让它把没存完的存掉 */
 const fixedPanel = ref<InstanceType<typeof MonthlyFixed> | null>(null)
 
+/**
+ * 出账进行中。从点下「出账单」到整条流程走完（或者确认框被取消）都占着：
+ * 连点两下按钮会叠出两个确认框，确认框里连点两下「确定」onOk 会跑两遍 ——
+ * 第二发的「先按上期记上」落在第一张出完之后，后端把它当成新一期，
+ * 又记一笔房租、再出一张只有房租的账单，弹出来的还是那张的转账方案
+ */
+const cutting = ref(false)
+
 /** 出账单：把这一刻之前记的账归到一张单子上。**不锁定任何东西** */
 async function doCut() {
+  if (cutting.value) return
+  cutting.value = true
   // 固定费面板上刚填的那一格可能还没存完（点「出账单」那一下才失焦）。先等它存完 ——
   // 存不上的就别出账：那个数字会在出账之后被当成新的一笔记进**下一张**，
   // 而「先按上期记上」还可能替同一项再记一笔
@@ -902,6 +913,7 @@ async function doCut() {
   const unsaved = fixedPanel.value?.dirtyCount ?? 0
   if (unsaved) {
     $q.notify({ type: 'warning', timeout: 5000, message: t('bill.cutUnsaved', { n: unsaved }) })
+    cutting.value = false
     return
   }
   // 默认勾上＝这张单子把固定费也结了。不勾＝把固定费留在草稿里，只结日常那部分。
@@ -929,7 +941,7 @@ async function doCut() {
   // 开 html 只为换行，每一段都先转义：固定费的名字是用户起的，
   // 带个 `<` 就会被当标签吞掉（见 src/html.ts）
   const hint = hints.map(escapeHtml).join('<br><br>')
-  $q.dialog({
+  const dialog = $q.dialog({
     title: t('bill.cut'),
     message: hint ? `${escapeHtml(t('bill.cutConfirm'))}<br><br>${hint}` : t('bill.cutConfirm'),
     html: Boolean(hint),
@@ -951,7 +963,12 @@ async function doCut() {
           : []),
       ],
     },
-  }).onOk(async (picked: string[]) => {
+  })
+  let fired = false
+  dialog.onCancel(() => { cutting.value = false })
+  dialog.onOk(async (picked: string[]) => {
+    if (fired) return
+    fired = true
     try {
       if (picked.includes('carry')) {
         // 先记上再出账。记不上（断网、后端出错）就整个停下：
@@ -979,11 +996,13 @@ async function doCut() {
       // 当本期草稿画出来，还可点可改
       bills.invalidate()
       bills.tab = 'current'         // 出完账就该看这张新单子；地址不动
-      await bills.ensure('current')
+      // **出成了就是出成了。** 下面这几次重取断了网，不许再冒一条「连不上服务器」——
+      // 结果框就摆在那儿，配上一条红字，人会以为没出成
+      await bills.ensure('current').catch(() => {})
       void bills.loadMonthly('draft').catch(() => {})   // 顺手补热，切回草稿不白闪
       // 记一笔那屏的「日期不许选回已出账范围」靠 ledger.prevCutAt，
       // 出完账不刷新的话它还是出账前的旧值，锁就形同虚设
-      await ledger.refresh()
+      await ledger.refresh().catch(() => {})
     } catch (e) {
       $q.notify({ type: 'negative', message: errorText(e) })
       // 半路失败时服务器那边可能已经动过了（「先按上期记上」记进去了、出账出了、
@@ -991,6 +1010,8 @@ async function doCut() {
       void load().catch(() => {})
       void bills.loadMonthly('draft').catch(() => {})
       void ledger.refresh().catch(() => {})
+    } finally {
+      cutting.value = false
     }
   })
 }

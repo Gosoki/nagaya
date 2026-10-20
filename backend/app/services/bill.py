@@ -203,14 +203,19 @@ def _covers_from(prev: Statement | None, dates: list[dt.date]) -> str | None:
 # ------------------------------------------------------------------ 账单
 
 
-def help_buy_for(kind: EntryKind, payer_id: int, shares: dict[int, int]) -> int | None:
+def help_buy_for(
+    kind: EntryKind, payer_id: int, shares: dict[int, int], *, fixed_cost: bool = False
+) -> int | None:
     """这笔是不是「帮买」：一笔支出，付款人自己一分不担、全算在**一个**别人头上。是就返回那个人。
 
     帮买不是单独一种账（记一笔那屏是转账页里的一个开关），存下去就是一笔普通支出 ——
     余额、转账方案、「已结清」全照支出算，只有显示时要认出来。
+    **固定费不算**（fixed_cost：这笔挂在固定费分类上）：「Kan 的车位」从 Go 的卡上扣，形状一模一样，
+    可它在账单的固定费那块已经列着 —— 再认成帮买，就是同一笔钱说两遍：账单头注「含帮买」、
+    复制出去的文字里多一行没有名目的「Go 替 Kan 买」。
     **前端 src/core/helpBuy.ts 是同一条规则**，改一边要改另一边（各有单测钉着）。
     """
-    if kind != EntryKind.expense:
+    if kind != EntryKind.expense or fixed_cost:
         return None
     bearers = [m for m, v in shares.items() if v]
     return bearers[0] if len(bearers) == 1 and bearers[0] != payer_id else None
@@ -234,6 +239,8 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
     total_expense = total_income = 0
     #: 帮买那几笔。合计照算（口径不变），账单上注一句「含帮买 ¥X」，复制出去的文字里单列
     help_items: list[dict[str, Any]] = []
+    #: 固定费分类（含归档的）：挂在这上面的不认作帮买，理由见 help_buy_for
+    fixed = set(session.exec(select(Category.id).where(Category.monthly == True)))  # noqa: E712
 
     for e in entries:
         if e.kind == EntryKind.settlement:
@@ -246,7 +253,7 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
             owed[m] = owed.get(m, 0) + sh
         if e.kind == EntryKind.expense:
             total_expense += e.amount_jpy
-            helped = help_buy_for(e.kind, e.payer_id, shares.get(e.id, {}))
+            helped = help_buy_for(e.kind, e.payer_id, shares.get(e.id, {}), fixed_cost=e.category_id in fixed)
             if helped is not None:
                 help_items.append(
                     {"entry_id": e.id, "payer_id": e.payer_id, "for_id": helped,

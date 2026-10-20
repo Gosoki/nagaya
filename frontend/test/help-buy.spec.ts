@@ -29,3 +29,7 @@ it('转账、收入都不是', () => {
   expect(helpBuyFor(e('settlement', 1, { '2': 3200 }))).toBeNull()
   expect(helpBuyFor(e('income', 1, { '2': -3200 }))).toBeNull()
 })
+
+it('挂在固定费上的不算：车位从 Go 卡上扣、只算 Kan 的，固定费那块已经列着', () => {
+  expect(helpBuyFor(e('expense', 1, { '2': 8000 }), true)).toBeNull()
+})

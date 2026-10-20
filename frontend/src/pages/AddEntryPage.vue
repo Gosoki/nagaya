@@ -114,13 +114,13 @@
           {{ kind === 'income' ? t('entry.receiver') : t('entry.payer') }}
         </div>
         <q-space />
-        <MemberPicker v-model="payerId" :members="meta.activeMembersSelfFirst" />
+        <MemberPicker v-model="payerId" :members="payerChoices" />
       </div>
 
       <div v-if="kind === 'settlement'" class="row items-center field">
         <div class="col-auto text-grey-7 label">{{ isHelpBuy ? t('entry.helpFor') : t('entry.to') }}</div>
         <q-space />
-        <MemberPicker v-model="toMemberId" :members="meta.activeMembersSelfFirst.filter((m) => m.id !== payerId)" />
+        <MemberPicker v-model="toMemberId" :members="toChoices" />
       </div>
 
       </div>
@@ -168,7 +168,7 @@
             class="q-mt-sm"
             type="text"
             maxlength="40"
-            :label="t('entry.title')"
+            :label="isHelpBuy ? t('entry.helpTitle') : t('entry.title')"
             @keydown.enter="isSubmitEnter($event) && confirmAsk()"
           />
         </q-card-section>
@@ -198,7 +198,7 @@
          也不用再和它叠 1px 防发丝缝 -->
     <Teleport to=".footer-slot">
     <div v-show="!showMemo" class="actions">
-      <div v-if="splitDiff !== 0 && amount > 0" class="diff-line text-negative">
+      <div v-if="kind !== 'settlement' && splitDiff !== 0 && amount > 0" class="diff-line text-negative">
         {{ t('split.notBalanced', { n: formatYen(splitDiff) }) }}
       </div>
       <div class="row">
@@ -261,7 +261,7 @@ import { digitsOf } from 'src/digits'
 import { isSubmitEnter } from 'src/html'
 import { formatYen } from 'src/i18n'
 import { statementLabel } from 'src/statement'
-import type { Entry, EntryKind, EntryPayload } from 'src/api/types'
+import type { Entry, EntryKind, EntryPayload, Member } from 'src/api/types'
 import AmountInput from 'src/components/AmountInput.vue'
 import { useEntryLook } from 'src/composables/entryLook'
 import { helpBuyFor } from 'src/core/helpBuy'
@@ -339,6 +339,24 @@ const kind = computed<EntryKind>({
 const showMemo = computed(() => editingId.value === null && nav.addTab === 'memo')
 /** 这一笔按「帮买」存：转账页、开关开着 */
 const isHelpBuy = computed(() => kind.value === 'settlement' && helpBuy.value)
+
+/**
+ * 选人那两行的候选：在籍的人。**改旧账时当前选着的人搬走了也摆出来** ——
+ * 不摆的话一个都不亮，存下去却还是他，看着像没选上
+ */
+function withCurrent(list: Member[], id: number | null): Member[] {
+  const m = id === null ? undefined : meta.byId[id]
+  return m && !list.some((x) => x.id === id) ? [...list, m] : list
+}
+const payerChoices = computed(() => withCurrent(meta.activeMembersSelfFirst, payerId.value))
+const toChoices = computed(() =>
+  withCurrent(meta.activeMembersSelfFirst.filter((m) => m.id !== payerId.value), toMemberId.value),
+)
+// 付款人换成了「转给谁 / 帮谁买」选着的那个人：下面那行把他藏了，选中值却还留着，
+// 按钮一声不吭地灰掉。清掉，让人重选
+watch(payerId, (id) => {
+  if (id !== null && id === toMemberId.value) toMemberId.value = null
+})
 const kindOptions = computed(() => [
   { label: t('kind.expense'), value: 'expense' },
   { label: t('kind.income'), value: 'income' },
@@ -465,7 +483,9 @@ const dateLabel = computed(() => (date.value === today.value ? t('common.today')
 const readyExceptAmount = computed(
   () =>
     payerId.value !== null &&
-    splitValid.value &&
+    // 分摊面板只在支出 / 收入时挂着。切到转账它就卸了，splitValid 停在支出页最后那个值 ——
+    // 那边点成「谁都不参与」再切过来，这一页没有能改的地方，按钮却一直灰着
+    (kind.value === 'settlement' || splitValid.value) &&
     // 分类不再是硬门槛：没选但写了备注就记「其他」，两个都没有时按保存会弹框问。
     // 收入本来就没有分类（返现、給付金套不上「日用品/伙食」，写备注更清楚）。
     (kind.value !== 'settlement' || (toMemberId.value !== null && toMemberId.value !== payerId.value)),
@@ -486,16 +506,17 @@ watch(askAmount, (v) => {
   if (shown !== v) askAmount.value = shown
 })
 
+/** 记新账还是改旧账，各存各的 */
+function submit() {
+  return editingId.value !== null ? saveEdit() : save()
+}
+
 function onPrimary() {
-  if (editingId.value !== null) {
-    void saveEdit()
-    return
-  }
   if (amount.value > 0) {
-    void save()
+    void submit()
     return
   }
-  // 只差金额：当场补
+  // 只差金额：当场补。改旧账时把金额清空了也走这儿 —— 原来点了毫无反应
   askAmount.value = ''
   askNote.value = title.value
   asking.value = true
@@ -509,7 +530,7 @@ function confirmAsk() {
   asking.value = false
   // 等框收起来再存：save() 里可能还要再弹一个「这笔是什么」，
   // 两个框叠在一起时后面那个的遮罩会吃掉点击
-  void nextTick(() => save())
+  void nextTick(() => submit())
 }
 
 function onAskHide() {
@@ -564,6 +585,8 @@ onMounted(async () => {
 
 /** 正在编辑的那一笔的原样。删除要用它 —— ledger.remove 靠它决定刷哪几份缓存 */
 const loaded = ref<Entry | null>(null)
+/** 挂在固定费分类上（这种不认作帮买，见 core/helpBuy） */
+const isFixedCost = (e: Entry) => e.category_id !== null && meta.categoryById[e.category_id]?.monthly === true
 
 async function loadForEdit(id: number) {
   try {
@@ -571,7 +594,7 @@ async function loadForEdit(id: number) {
     hydrating = true
     loaded.value = e
     // 帮买存下去是支出，打开时回到它记的地方：转账页、开关点亮、「帮谁买」选着那个人
-    const helped = helpBuyFor(e)
+    const helped = helpBuyFor(e, isFixedCost(e))
     editKind.value = helped !== null ? 'settlement' : e.kind
     helpBuy.value = helped !== null
     amount.value = Math.abs(e.amount_jpy)
@@ -592,6 +615,8 @@ async function loadForEdit(id: number) {
     hydrating = false
   } catch (err) {
     hydrating = false
+    // 慢网时还没加载完人就点底栏走了：十秒后超时，别把他从别的页上拽回来
+    if (editingId.value !== id) return
     $q.notify({ type: 'negative', message: errorText(err) })
     goBack()
   }
@@ -736,8 +761,13 @@ function removeEntry() {
   if (editingId.value === null) return
   const id = editingId.value
   const entry = loaded.value
+  // 「确定」连点两下 onOk 会跑两遍：第二遍的 DELETE 是空操作照样成功，于是弹两条「已删掉」、
+  // goBack() 退两步 —— 人被带回更早的那一页，甚至退出 App
+  let fired = false
   $q.dialog({ title: t('common.delete'), message: t('entry.deleteConfirm'), cancel: true }).onOk(
     async () => {
+      if (fired) return
+      fired = true
       try {
         // 走 store 而不是直接 DELETE：**「写完要刷哪几份缓存」只该有一处定义**。
         // 自己打接口的话账单缓存一份都不刷 —— 账目页少了一笔，账单页还挂着它，
@@ -840,6 +870,10 @@ async function ensureCategory(): Promise<boolean> {
  */
 function helpBuyBody(): EntryPayload {
   const who = toMemberId.value!
+  // 改的这笔本来就是「帮这个人买」：规则不发，后端原样沿用。老的帮买多半是在支出页
+  // 把别人点成「不参与」记的（{go:0, kan:1, zen:0}），换成 {kan:1} 一分钱不差、
+  // 形状却变了 —— 原样点一下保存也算改过，已出的账单就此挂上「出账后被改过」
+  const keepRule = loaded.value !== null && helpBuyFor(loaded.value, isFixedCost(loaded.value)) === who
   return {
     kind: 'expense',
     date: date.value,
@@ -848,8 +882,7 @@ function helpBuyBody(): EntryPayload {
     to_member_id: null,
     category_id: editingId.value === null ? null : categoryId.value,
     title: title.value,
-    rule: { mode: 'ratio', weights: { [String(who)]: 1 } },
-    member_ids: [who],
+    ...(keepRule ? {} : { rule: { mode: 'ratio', weights: { [String(who)]: 1 } }, member_ids: [who] }),
   }
 }
 
