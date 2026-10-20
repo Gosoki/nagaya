@@ -17,9 +17,43 @@ import { pendingWrites } from 'src/api/client'
 
 let ready = false
 
+/**
+ * 服务器上现在那份 index.html 的入口脚本，和这一页跑着的是不是同一个。
+ * true ＝ 变了（这一页是旧版）；false ＝ 没变；null ＝ 取不到（多半是断网了）。
+ * 路由那边 chunk 加载失败时也靠它分辨「断网」和「版本旧了」—— 两种报的是同一句错
+ */
+export async function entryChanged(): Promise<boolean | null> {
+  let html: string
+  try {
+    const r = await fetch('/', { cache: 'no-store' })
+    if (!r.ok) return null
+    html = await r.text()
+  } catch {
+    return null
+  }
+  const mine = document.querySelector('script[type="module"][src]')?.getAttribute('src')
+  return !(mine && html.includes(mine))
+}
+
+/** 没有 service worker 时，切回前台最多隔这么久比一次 */
+const PLAIN_CHECK_MS = 60_000
+
 export function watchForUpdate(): void {
   const sw = navigator.serviceWorker
-  if (!sw) return
+  if (!sw) {
+    // 局域网 http 部署（README 默认的用法）不是安全上下文，没有 SW，上面那套一次都不触发：
+    // 从多任务里恢复不算导航，旧 JS 能一直跑到被杀掉，后端接口一变就是 422。
+    // 那就切回前台时自己比一次，真旧了照样等下一次切页再换
+    let last = 0
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible' || ready || Date.now() - last < PLAIN_CHECK_MS) return
+      last = Date.now()
+      void entryChanged().then((changed) => {
+        if (changed) ready = true
+      })
+    })
+    return
+  }
   // 首装那一次接管不算：页面本来就是新的。但**只跳过那一次** —— 原来按「加载时有没有
   // controller」一刀切，首装那场会话之后的更新全被忽略，挂在后台几天都换不到新版
   let seen = Boolean(sw.controller)
@@ -33,16 +67,10 @@ export function watchForUpdate(): void {
       return
     }
     if (ready) return
-    void (async () => {
-      try {
-        const html = await (await fetch('/', { cache: 'no-store' })).text()
-        const mine = document.querySelector('script[type="module"][src]')?.getAttribute('src')
-        if (mine && html.includes(mine)) return  // 入口脚本没变 ＝ 这一页就是新版
-      } catch {
-        /* 取不到就当是旧的，下一次切页时换 */
-      }
-      ready = true
-    })()
+    // 入口脚本没变 ＝ 这一页就是新版；取不到就当是旧的，下一次切页时换
+    void entryChanged().then((changed) => {
+      if (changed !== false) ready = true
+    })
   })
 }
 

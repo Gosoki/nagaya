@@ -1,7 +1,9 @@
+import { Notify } from 'quasar'
 import { createRouter, createWebHistory } from 'vue-router'
 
 import { getToken, setUnauthorizedHandler } from 'src/api/client'
-import { applyUpdateIfReady } from 'src/update'
+import { i18n } from 'src/i18n'
+import { applyUpdateIfReady, entryChanged } from 'src/update'
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -27,6 +29,9 @@ export const router = createRouter({
         { path: 'bill/:statementId?', name: 'bill', component: () => import('src/pages/BillPage.vue') },
       ],
     },
+    // 对不上的地址（手打错了、早就撤掉的旧页面）回首页。后端对所有不带后缀的路径都回 index.html，
+    // 不兜的话这里什么都不渲染 —— 主屏模式下没有地址栏，整页空白、连底栏都没有，只能杀掉重开
+    { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })
 
@@ -43,7 +48,11 @@ router.beforeEach((to) => {
 setUnauthorizedHandler(() => {
   // 已经在登录页（输错密码也是 401）就别再跳：跳一次会把 ?next= 冲掉，
   // 群里贴的账单链接点开、输错一次密码，登录完就回不到那张账单了
-  if (router.currentRoute.value.name !== 'login') void router.push({ name: 'login' })
+  const here = router.currentRoute.value
+  if (here.name === 'login') return
+  // **记着本来在哪**（和上面守卫同一个做法）：token 过期、改密码被踢下线，这条路常走 ——
+  // 人多半正点开群里那张账单，登录完却落在记一笔，那张单子就找不回来了
+  void router.push(here.fullPath === '/' ? { name: 'login' } : { name: 'login', query: { next: here.fullPath } })
 })
 
 /**
@@ -54,19 +63,32 @@ setUnauthorizedHandler(() => {
  * 加个标记防止「刷了还是失败」时无限循环。
  */
 const RELOADED = 'nagaya.reloadedForChunk'
+// 「Unable to preload CSS」是 Vite 先等页面的 CSS 那一步失败时抛的 —— 每个页面都带 CSS，
+// 第一下失败的总是它。原来认不出，于是发版后第一次点页签照样没反应
+const CHUNK_FAILED = /dynamically imported module|Importing a module script failed|Failed to fetch|Unable to preload CSS/i
 router.onError((err) => {
-  const stale = /dynamically imported module|Importing a module script failed|Failed to fetch/i.test(
-    String(err),
-  )
-  if (!stale) return
-  try {
-    if (sessionStorage.getItem(RELOADED)) return    // 已经刷过一次还不行，别再刷
-    sessionStorage.setItem(RELOADED, '1')
-  } catch {
-    // 存不了就没法防「刷了还是失败」的死循环 —— 那就干脆不自动刷
-    return
-  }
-  location.reload()
+  if (!CHUNK_FAILED.test(String(err))) return
+  void (async () => {
+    // **断网和「版本旧了」报的是同一句错**，先问服务器一声：
+    //   取不到 → 断网。别刷新：局域网 http 下没有 SW 兜底，刷出来就是浏览器的断网页，
+    //            屏幕上没存的输入全丢，「断了网照样能存草稿」那条路也就断了。说一句就好
+    //   入口没变 → 偶发失败，再点一下就行，不刷
+    //   入口变了 → 这一页真是旧版，旧 chunk 已经没了，刷
+    const changed = await entryChanged()
+    if (changed === null) {
+      Notify.create({ type: 'negative', message: i18n.global.t('errors.network') })
+      return
+    }
+    if (!changed) return
+    try {
+      if (sessionStorage.getItem(RELOADED)) return    // 已经刷过一次还不行，别再刷
+      sessionStorage.setItem(RELOADED, '1')
+    } catch {
+      // 存不了就没法防「刷了还是失败」的死循环 —— 那就干脆不自动刷
+      return
+    }
+    location.reload()
+  })()
 })
 router.afterEach((to) => {
   try {

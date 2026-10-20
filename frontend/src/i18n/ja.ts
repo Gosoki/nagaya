@@ -4,6 +4,7 @@ export default {
     offlineBoot: 'サーバーに接続できず、ローカルにも控えがありません。',
     staleData: 'オフライン —— 表示中の数字は最新ではない可能性があります',
     save: '保存', undo: '元に戻す', cancel: 'キャンセル', delete: '削除', confirm: 'OK',
+    back: '戻る',
     today: '今日', retry: '再試行',
     currency: '円',
   },
@@ -232,6 +233,7 @@ export default {
     partial: '（直近 500 件のみ）',
     kind: '種別', category: 'カテゴリ', payer: '支払者',
     all: 'すべて', sum: '合計', empty: '該当する明細がありません',
+    clear: '絞り込みを解除',
   },
   draft: {
     rejectedTimes: '{text}（{n} 件）',
@@ -264,6 +266,7 @@ export default {
     entry_deleted: 'この記録は削除済みです。元に戻してから編集してください',
     unknown_category: 'カテゴリが見つかりません。画面を更新してください',
     unknown_mode: 'この分担ルールは使えません。設定で直してください',
+    exact_default: '既定の分担ルールに固定額は使えません（金額は毎回変わるため）',
     unknown_remainder_to: '「端数を誰が負担するか」の値が不正です。設定で直してください',
     duplicate_member: '参加者が重複しています',
     bad_member_key: '分担ルールのメンバー指定が不正です',

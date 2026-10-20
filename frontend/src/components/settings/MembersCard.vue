@@ -162,9 +162,11 @@ function statusOf(m: Member): string {
 
 async function save(m: Member, patch: Record<string, unknown>): Promise<boolean> {
   try {
-    const saved = await api.patch<Member>(`/api/members/${m.id}`, patch)
+    // 改的是自己那一行就走 auth.updateMe：直接写 auth.me 的话本机缓存（冷启动先认的那份）
+    // 还是旧的，在途的 /me 回来也会把刚改的盖回去
+    const saved =
+      auth.me?.id === m.id ? await auth.updateMe(patch) : await api.patch<Member>(`/api/members/${m.id}`, patch)
     meta.members = meta.members.map((x) => (x.id === saved.id ? saved : x))
-    if (auth.me?.id === saved.id) auth.me = saved
     // 在籍名单变了：谁付的、分摊、默认垫付人全跟着它走，整份重取
     await meta.load().catch(() => {})
     return true

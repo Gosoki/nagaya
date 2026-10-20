@@ -5,12 +5,18 @@ import vue from '@vitejs/plugin-vue'
 import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
-/** 打包时刻，印在设置页最底下 —— 手机上装的到底是哪一版，不用再猜 */
+/**
+ * 打包时刻，印在设置页最底下 —— 手机上装的到底是哪一版，不用再猜。
+ *
+ * **写进 index.html 的一个 <meta>，不编进 JS。** 原来是 define 成 __BUILD__：源码一个字不变，
+ * 每次打包也有十几个 chunk 跟着换名（入口 chunk 里写着别的 chunk 的文件名，连成一个环），
+ * 于是每次部署 —— 哪怕只改了后端 —— 每台手机都要重下全部 JS、在下一次切页时整页重载。
+ * index.html 本来就不缓存、不带哈希，放在这儿不牵连任何别的文件
+ */
 const BUILD = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Tokyo' }).slice(0, 16)
 
 export default defineConfig({
   define: {
-    __BUILD__: JSON.stringify(BUILD),
     // vue-i18n 里用不上的几块：老式 API、全局注册的 <i18n-t> 组件、生产环境的调试钩子。
     // 关掉之后框架那一块小 14KB
     __VUE_I18N_LEGACY_API__: false,
@@ -18,6 +24,10 @@ export default defineConfig({
     __INTLIFY_PROD_DEVTOOLS__: false,
   },
   plugins: [
+    {
+      name: 'nagaya-build-stamp',
+      transformIndexHtml: () => [{ tag: 'meta', attrs: { name: 'nagaya-build', content: BUILD }, injectTo: 'head' }],
+    },
     vue({ template: { transformAssetUrls } }),
     quasar({ sassVariables: 'src/quasar-variables.sass' }),
     VitePWA({

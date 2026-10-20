@@ -185,8 +185,8 @@ import type { Setting } from 'src/api/types'
 import { useMeta } from 'src/stores/meta'
 
 const { t, locale } = useI18n()
-/** 打包时刻（日本时间），vite.config.ts 注入 —— 印在这一屏最底下 */
-const build = __BUILD__
+/** 打包时刻（日本时间）。vite.config.ts 写在 index.html 的 <meta> 里 —— 印在这一屏最底下 */
+const build = document.querySelector('meta[name="nagaya-build"]')?.getAttribute('content') ?? ''
 
 /**
  * 版本号连点 5 下：开/关布局诊断条（见 LayoutProbe）。

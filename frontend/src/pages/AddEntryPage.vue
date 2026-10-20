@@ -11,7 +11,7 @@
     <!-- 编辑模式：顶上一条返回 + 这笔在哪张账单上。
          「已出账也能改」这件事必须当场说清楚差额去哪了，否则没人敢按保存 -->
     <div v-if="editingId !== null" class="page-head">
-      <q-btn dense flat round icon="arrow_back" @click="goBack" />
+      <q-btn dense flat round icon="arrow_back" :aria-label="t('common.back')" @click="goBack" />
       <div class="col text-weight-medium">{{ t('entry.editTitle') }}</div>
     </div>
     <!-- 记新账时这条在固定顶栏里（布局画的，见 AddTabs）。改一笔已有的账时

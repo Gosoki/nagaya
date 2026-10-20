@@ -13,6 +13,8 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
+import { isStandalone } from 'src/installGuide'
+
 const text = ref('')
 const safe = ref<HTMLElement | null>(null)
 const t0 = performance.now()
@@ -28,9 +30,7 @@ function box(sel: string): string {
 function sample() {
   const vv = window.visualViewport
   const cs = safe.value ? getComputedStyle(safe.value) : null
-  const standalone =
-    matchMedia('(display-mode: standalone)').matches ||
-    (navigator as Navigator & { standalone?: boolean }).standalone === true
+  const standalone = isStandalone()
   const a = document.activeElement as HTMLElement | null
   text.value = [
     `t=${((performance.now() - t0) / 1000).toFixed(1)}s ${standalone ? 'APP' : 'WEB'}`,

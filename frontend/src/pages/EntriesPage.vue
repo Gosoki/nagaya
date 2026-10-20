@@ -33,6 +33,7 @@
       <q-btn
         v-if="anyFilter"
         dense flat round size="sm" icon="close" color="grey-7"
+        :aria-label="t('filter.clear')"
         @click="clearFilters"
       />
     </div>
