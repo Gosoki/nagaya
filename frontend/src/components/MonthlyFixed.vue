@@ -871,8 +871,14 @@ defineExpose({ flush, dirtyCount })
   text-decoration: underline;
   cursor: pointer;
 }
-/* 「照上期 ¥…」：展开区最上面一颗药丸，点了就记钱 */
-.carry-row { margin-bottom: 12px; }
+/* 「照上期 ¥…」：展开区最上面一颗药丸，**靠右、和行头那个金额框右边对齐** ——
+   点了填的就是那一格。金额框右边离行尾 --nagaya-fee-amount-gap，展开区自己已经有 16px 内边距 */
+.carry-row {
+  display: flex;
+  justify-content: flex-end;
+  padding-right: calc(var(--nagaya-fee-amount-gap) - 16px);
+  margin-bottom: 12px;
+}
 .carry-chip {
   border: none;
   border-radius: var(--nagaya-r-pill);
