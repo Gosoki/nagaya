@@ -164,6 +164,8 @@ export interface MonthlyRow {
   carry_amount?: number | null
   /** 开了「和上期一样」却不能照抄的原因（payer_left / rule_stale），得人自己填 */
   carry_blocked?: string | null
+  /** 上期这一项多少钱。只有开了「和上期一样」的才给，本期填没填都给（展开区那颗按钮一直在） */
+  last_amount?: number | null
 }
 
 export interface MonthlyData {

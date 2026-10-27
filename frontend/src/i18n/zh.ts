@@ -54,6 +54,7 @@ export default {
     settingsTitle: '固定费项目',
     carried: '按上期金额记上了：{list}',
     carryOne: '照上期',
+    carriedAlready: '已照上期 {amount}',
     carryStale: '人变了，要重填',
     sameAsLast: '和上期一样',
     title: '本期固定费',

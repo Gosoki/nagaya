@@ -549,7 +549,11 @@ def test_the_panel_sees_what_carry_would_record_without_recording_it(session: Se
 
     made = carry_same_as_last(session, actor_id=a.id)["created"]
     assert [m["amount"] for m in made] == [120_000]
-    assert rows_by_name(session)["家賃"]["carry_amount"] is None, "记过了，按钮上就不该再有它"
+    after = rows_by_name(session)
+    assert after["家賃"]["carry_amount"] is None, "记过了，出账时就不该再替人记一遍"
+    # 展开区那颗按钮按过了也还在（写「已照上期」），所以上期金额照给；没开开关的照旧一分不给
+    assert after["家賃"]["last_amount"] == 120_000
+    assert after["電気"]["last_amount"] is None
 
 
 def test_carry_only_records_what_the_button_listed(session: Session, members) -> None:

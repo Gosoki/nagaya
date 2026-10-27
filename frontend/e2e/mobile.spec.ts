@@ -1056,13 +1056,13 @@ test('「和上期一样」：只列开了开关的那几项，人点了才记�
   // **看一眼不许记钱**：「照上期 ¥…」在那一行的展开区里，收着的时候看不见、点不到，
   // 展开了才有，人点了才记
   const rentRow = page.locator('.q-expansion-item', { hasText: '房租' })
-  const chip = page.locator('.carry-chip')
-  await expect(chip).toHaveCount(1)
+  const chip = rentRow.locator('.carry-chip')
+  await expect(page.locator('.carry-chip'), '只有开了「和上期一样」的房租有，燃气没开就没有').toHaveCount(1)
   await expect(chip, '收着的时候行头上不该有这颗按钮 —— 一蹭就记钱').toBeHidden()
   expect(await draftOf(rent.id), '打开账单页就记钱的话，看一眼和记账分不开').toBeFalsy()
   await rentRow.locator('.name-line').click()
-  await expect(rentRow.locator('.carry-chip')).toBeVisible()
-  await expect(rentRow.locator('.carry-chip')).toContainText('照上期')
+  await expect(chip).toBeVisible()
+  await expect(chip).toHaveText(/^\s*照上期/)
 
   // 记了就当场报出来 —— 悄悄填上正是那条规矩要防的事
   await chip.click()
@@ -1070,14 +1070,17 @@ test('「和上期一样」：只列开了开关的那几项，人点了才记�
   await expect(page.locator('.q-notification')).toContainText('房租')
   await expect.poll(async () => (await draftOf(rent.id))?.amount_jpy).toBeTruthy()
   expect(await draftOf(gas.id), '没开开关的一分都不许自动记').toBeFalsy()
-  await expect(page.locator('.carry-chip')).toHaveCount(0)
+  // 按过了按钮也还在：写着「已照上期」、点不动 —— 看得见这一期是照上期记的
+  await expect(chip).toContainText('已照上期')
+  await expect(chip).toBeDisabled()
 
-  // **删掉之后不许复活。** 这个月真的没有房租时，用户删掉它 —— 按钮上也不该再出现它
+  // **删掉之后不许自己复活。** 这个月真的没有房租时，用户删掉它：出账时那个勾不再替人记它，
+  // 展开区的按钮还在、写回「照上期」，要人自己点才记
   const carried = await draftOf(rent.id)
   await page.request.delete(`/api/entries/${carried.id}`, { headers })
   await page.reload()
   await expect(page.locator('.wrap')).toBeVisible()
-  await expect(page.locator('.carry-chip')).toHaveCount(0)
+  await expect(chip).toHaveText(/^\s*照上期/)
   await expect.poll(async () => (await draftOf(rent.id))?.amount_jpy).toBeFalsy()
 
   await page.request.patch(`/api/categories/${rent.id}`, { headers, data: { same_as_last: false } })

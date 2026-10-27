@@ -112,11 +112,16 @@
         </template>
 
         <div class="q-px-md q-pb-md">
-          <!-- 「和上期一样」：展开了才有，点了才记（记上的金额当场出现在行头的框里）。
-               这儿地方够，金额直接写在按钮上 -->
-          <div v-if="isCarryReady(row)" class="carry-row">
-            <button class="carry-chip" :disabled="carrying" @click="carry([row])">
-              {{ t('monthly.carryOne') }} {{ formatYen(row.carry_amount ?? 0) }}
+          <!-- 「照上期」：开了「和上期一样」的项，展开了就**一直在**，本期填没填都在 ——
+               还没填的点了就按上期记上；填过、数和上期一样的写「已照上期」（点不动）；
+               数不一样的点了改回上期的数。这儿地方够，金额直接写在按钮上 -->
+          <div v-if="carryShown(row)" class="carry-row">
+            <button class="carry-chip" :disabled="carrying || isAtLast(row)" @click="applyLast(row)">
+              {{
+                isAtLast(row)
+                  ? t('monthly.carriedAlready', { amount: formatYen(row.last_amount ?? 0) })
+                  : `${t('monthly.carryOne')} ${formatYen(row.last_amount ?? 0)}`
+              }}
             </button>
           </div>
           <!-- 谁付的。改它 ＝ 定下「这一项以后都算谁垫的」，同时把本期已录的那笔
@@ -399,6 +404,30 @@ const isCarryReady = (r: Row) =>
 const isCarryBlocked = (r: Row) =>
   !historic.value && Boolean(r.carry_blocked) && r.entry_id === null && !r.dirty && !r.text
 const carrying = ref(false)
+
+/**
+ * 展开区那颗「照上期 ¥…」露不露：开了「和上期一样」、上期有数就一直在 —— 本期填过了也在，
+ * 好让人看得见这一期是不是照上期记的。抄不了的（垫付人搬走了、来了新室友）还没填时不露：
+ * 行头上写着「人变了，要重填」
+ */
+const carryShown = (r: Row) =>
+  !historic.value && Boolean(r.last_amount) && !(r.entry_id === null && isCarryBlocked(r))
+/** 框里的数已经就是上期的数 */
+const isAtLast = (r: Row) => r.text !== '' && valueOf(r) === r.last_amount
+
+/**
+ * 点「照上期」。还没填（也没在填）的走 carry：后端照上期那一笔的垫付人和分摊记一笔，当场报出来。
+ * 填过的、正在填的、本期删掉过的：等于替人把上期的数敲进框里再存 —— 垫付人和分摊都不动
+ */
+function applyLast(row: Row) {
+  if (isCarryReady(row)) {
+    void carry([row])
+    return
+  }
+  row.text = formatPlain(row.last_amount ?? 0)
+  row.dirty = true
+  void saveQueued(row)
+}
 
 /**
  * 把「和上期一样」的那几项按上期金额记进来。**人点了才记。**

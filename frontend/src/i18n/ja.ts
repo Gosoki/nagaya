@@ -54,6 +54,7 @@ export default {
     settingsTitle: '固定費の項目',
     carried: '前期の金額で記帳しました：{list}',
     carryOne: '前期どおり',
+    carriedAlready: '前期どおり記入済み {amount}',
     carryStale: 'メンバー変更・要入力',
     sameAsLast: '前期と同じ',
     title: '今期の固定費',

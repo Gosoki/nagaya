@@ -110,6 +110,10 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
                 "entry_count": dup.get(c.id, 0),
                 #: 按「和上期一样」点一下会记多少（只有草稿、开了开关、本期还没处理过的才有）
                 "carry_amount": ready.get(c.id),
+                #: 上期这一项多少钱。**只给开了「和上期一样」的**（没开的一分都不许漏过来，D21）。
+                #: 本期填没填都给：展开那一行时「照上期 ¥…」一直在 —— 填过了就显示
+                #: 「已照上期」，改过了就能一键改回上期的数
+                "last_amount": prev.amount_jpy if prev is not None and c.same_as_last and prev.amount_jpy else None,
                 #: 开了开关却记不了的原因（payer_left / rule_stale），要人自己填
                 "carry_blocked": blocked.get(c.id),
             }
