@@ -9,8 +9,8 @@
   1. **不填就是 0，而且照样能出账。**
      这一屏不摆「上期是多少」当参考 —— 参考值就在输入框那个位置，
      长得跟亲手填的没两样，某个月忘了改就带着上月的电费把账单发出去了。
-     每期真的不变的项（房租这种）去设置里开「和上期一样」：那一行上有个
-     「照上期」，**人点一下**才记成黑字实数（出账对话框里也有一个勾）。
+     每期真的不变的项（房租这种）去设置里开「和上期一样」：展开那一行，里面有个
+     「照上期 ¥…」，**人点一下**才记成黑字实数（出账对话框里也有一个勾）。
      原来是打开账单页就自动记 —— 看一眼和记了几笔钱分不开。
      没开的项空着就空着，按 0 结。
 
@@ -67,19 +67,11 @@
                    否则多出来的那几笔在界面上既打不开也删不掉，钱却实实在在算在账单里 -->
               <!-- 已经录了的行状态位本来就是空的（黑色实数自己说明了「录了」），
                    正好用来说清**这笔算谁垫的** —— 这是这一屏唯一会悄悄出错的地方 -->
-              <!-- 「和上期一样」就放在这一行上，点了才记（记上的金额当场出现在右边的框里，
-                   出账对话框里也写着多少）。字只写「照上期」：带上金额这一行放不下，会被省略号吃掉。
-                   不另起一条横条 —— 那条会把这一块撑高，出账前后两页就不一样高了 -->
-              <button
-                v-if="!stateText(row) && isCarryReady(row)"
-                class="state carry-chip"
-                :disabled="carrying"
-                @click.stop="carry([row])"
-                :aria-label="`${t('monthly.carryOne')} ${formatYen(row.carry_amount ?? 0)}`"
-              >{{ t('monthly.carryOne') }}</button>
+              <!-- 「照上期」不在这一行上，在展开区里（见下面 carry-row）：这一行一点就是记钱，
+                   滚动时拇指一蹭就记上一个月房租。出账对话框里那个「先按上期记上」的勾还在，忘了点也漏不掉 -->
               <!-- 开了开关却照抄不了（垫付人搬走了、来了新室友）：一直写在这儿，填了就消失 -->
               <span
-                v-else-if="!stateText(row) && isCarryBlocked(row)"
+                v-if="!stateText(row) && isCarryBlocked(row)"
                 class="state text-warning"
               >{{ t('monthly.carryStale') }}</span>
               <span
@@ -120,6 +112,13 @@
         </template>
 
         <div class="q-px-md q-pb-md">
+          <!-- 「和上期一样」：展开了才有，点了才记（记上的金额当场出现在行头的框里）。
+               这儿地方够，金额直接写在按钮上 -->
+          <div v-if="isCarryReady(row)" class="carry-row">
+            <button class="carry-chip" :disabled="carrying" @click="carry([row])">
+              {{ t('monthly.carryOne') }} {{ formatYen(row.carry_amount ?? 0) }}
+            </button>
+          </div>
           <!-- 谁付的。改它 ＝ 定下「这一项以后都算谁垫的」，同时把本期已录的那笔
                一并改过来 —— 这两件事在固定费上本来就是一回事 -->
           <div class="payer-row">
@@ -830,7 +829,7 @@ defineExpose({ flush, dirtyCount })
 }
 /* 块尾那一行。已出账那页是同高的空占位，高度写在同一个变量里 */
 /* 上下各让出 8px 的内边距再用负外边距收回来：排版一点不变，但裁剪框变高了 ——
-   里面「照上期」那颗小按钮的点击区才伸得出去（overflow: hidden 会连点击一起裁掉） */
+   里面「本期有 N 笔」那个链接的点击区才伸得出去（overflow: hidden 会连点击一起裁掉） */
 .name-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 8px 0; margin: -8px 0; }
 /* line-height 压到 1：12px 的状态字不许顶大行盒，行高交给 14px 名字的 strut 定 */
 .state { font-size: 12px; line-height: 1; margin-left: 6px; }
@@ -843,13 +842,12 @@ defineExpose({ flush, dirtyCount })
   text-decoration: underline;
   cursor: pointer;
 }
-/* 「照上期 ¥…」：一颗能点的小药丸。纵向内边距不许撑高这一行（行高交给名字的 strut） */
+/* 「照上期 ¥…」：展开区最上面一颗药丸，点了就记钱 */
+.carry-row { margin-bottom: 12px; }
 .carry-chip {
   border: none;
   border-radius: var(--nagaya-r-pill);
-  padding: 4px 8px;
-  margin-top: -4px;
-  margin-bottom: -4px;
+  padding: 6px 12px;
   background: var(--nagaya-accent-bg);
   color: var(--nagaya-accent);
   font-family: inherit;
@@ -857,7 +855,4 @@ defineExpose({ flush, dirtyCount })
   cursor: pointer;
 }
 .carry-chip:disabled { opacity: 0.5; }
-/* 看着只有 24px 高，点击区上下各多 8px —— 这颗按钮点下去是记钱 */
-.carry-chip { position: relative; }
-.carry-chip::after { content: ''; position: absolute; inset: -8px -4px; }
 </style>

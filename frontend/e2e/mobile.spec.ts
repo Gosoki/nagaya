@@ -1053,11 +1053,16 @@ test('「和上期一样」：只列开了开关的那几项，人点了才记�
   expect(await draftOf(rent.id), '出完账草稿该是空的').toBeFalsy()
 
   await page.goto('/bill')
-  // **看一眼不许记钱**：那一行上写着「照上期 ¥…」，人点了才记
+  // **看一眼不许记钱**：「照上期 ¥…」在那一行的展开区里，收着的时候看不见、点不到，
+  // 展开了才有，人点了才记
+  const rentRow = page.locator('.q-expansion-item', { hasText: '房租' })
   const chip = page.locator('.carry-chip')
   await expect(chip).toHaveCount(1)
-  await expect(page.locator('.q-expansion-item', { hasText: '房租' }).locator('.carry-chip')).toContainText('照上期')
+  await expect(chip, '收着的时候行头上不该有这颗按钮 —— 一蹭就记钱').toBeHidden()
   expect(await draftOf(rent.id), '打开账单页就记钱的话，看一眼和记账分不开').toBeFalsy()
+  await rentRow.locator('.name-line').click()
+  await expect(rentRow.locator('.carry-chip')).toBeVisible()
+  await expect(rentRow.locator('.carry-chip')).toContainText('照上期')
 
   // 记了就当场报出来 —— 悄悄填上正是那条规矩要防的事
   await chip.click()
