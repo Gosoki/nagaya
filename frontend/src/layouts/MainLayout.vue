@@ -288,6 +288,8 @@ function trackHeader() {
   // 键盘没起就把 transform 摘干净：桌面/安卓上这段等于不存在
   const y = keyboard > 40 ? Math.round(vv.offsetTop) : 0
   el.style.transform = y ? `translateY(${y}px)` : ''
+  // 提示条在顶栏正下方，跟着一起挪（tokens.css 的 .q-notifications__list--top）
+  document.documentElement.style.setProperty('--nagaya-vv-top', `${y}px`)
 }
 function onViewport() {
   if (vvRaf) return

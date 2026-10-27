@@ -208,14 +208,16 @@ a,
 .q-item { touch-action: manipulation; }
 
 /*
-  提示条的落点。Quasar 默认贴着屏幕最底边，那儿站着底栏（含安全区）和
-  「记入账」那条固定操作条 —— 提示会压在刚点过的按钮上。
-  抬到它上面：--nagaya-footer-h 是量出来的底栏高度（**含各页的操作条**）。
+  提示条的落点：**顶栏正下方**。原来放在底栏上面，可一打字输入法就把它盖住 ——
+  记完一笔键盘多半还开着，「已记下」正好落在键盘底下。
+  --nagaya-header-h 是量出来的顶栏高度（含刘海安全区，MainLayout 写的）；
+  首帧还没量出来时至少让开安全区，别被刘海/灵动岛切掉半截。
+  键盘弹起时 iOS 会把可视区往下滑、钉在顶上的东西跟着滑出屏幕 ——
+  顶栏是靠 MainLayout 平移跟回来的，提示条借同一个数（--nagaya-vv-top）一起跟
 */
-.q-notifications__list--bottom {
-  /* --nagaya-footer-h 量的是底栏**整条**，而各页的固定操作条现在就画在底栏里，
-     所以这一个数就够了 —— 不用再替操作条另外抬一截 */
-  bottom: calc(var(--nagaya-footer-h) + 8px);
+.q-notifications__list--top {
+  top: calc(max(var(--nagaya-header-h), env(safe-area-inset-top)) + 8px);
+  translate: 0 var(--nagaya-vv-top, 0px);
 }
 
 /*

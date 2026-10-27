@@ -25,9 +25,10 @@ const app = createApp(App)
   .use(Quasar, {
     plugins: { Notify, Dialog, Dark },
     lang: quasarLang(detectLang()),
-    // 提示走屏幕下方：顶上那条会被刘海/灵动岛切掉半截，而「记好了」这种话
-    // 看不全等于没提示。具体离底边多高由 CSS 定（要躲开底栏和固定操作条）
-    config: { notify: { position: 'bottom' } },
+    // 提示走屏幕**上方**：下方一打字就被输入法盖住 —— 记完一笔键盘多半还开着，
+    // 「已记下」正好落在键盘底下，跟没提示一样。顶上那条要躲开刘海/灵动岛和顶栏，
+    // 具体离顶边多高由 CSS 定（tokens.css，量出来的顶栏高度）
+    config: { notify: { position: 'top' } },
   })
 
 /**
