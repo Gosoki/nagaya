@@ -204,6 +204,18 @@ def test_renaming_to_a_taken_name_is_409_like_create(client, auth, members) -> N
     assert r.status_code == 409, "重名在 POST 那边是 409，PATCH 不该是 500"
 
 
+def test_anyone_can_switch_someone_to_away(client, auth, members) -> None:
+    """离家模式和入住/搬走日一样是家务动作：A 能替 C 开、能关；成员列表里带着它；不许传 null"""
+    c = members[2]
+    r = client.patch(f"/api/members/{c.id}", json={"away": True}, headers=auth)
+    assert r.status_code == 200 and r.json()["away"] is True
+    listed = {m["id"]: m for m in client.get("/api/members", headers=auth).json()}
+    assert listed[c.id]["away"] is True and listed[members[0].id]["away"] is False
+    assert client.patch(f"/api/members/{c.id}", json={"away": None}, headers=auth).status_code == 400
+    r = client.patch(f"/api/members/{c.id}", json={"away": False}, headers=auth)
+    assert r.json()["away"] is False
+
+
 def test_login_name_and_password_are_self_only(client, auth, members) -> None:
     """**没法自己恢复的动作只能自己做。**
 

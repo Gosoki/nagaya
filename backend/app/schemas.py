@@ -49,6 +49,8 @@ class MemberOut(SQLModel):
     #: 那个端点照样要登录 —— 前端 fetch 下来给 <img>，不开公开的口子
     avatar: Optional[str] = None
     avatar_version: int = 0
+    #: 离家模式（见 models.Member.away）
+    away: bool = False
 
 
 class LoginOut(SQLModel):
@@ -64,6 +66,8 @@ class MemberIn(SQLModel):
     joined_on: Optional[dt.date] = None
     left_on: Optional[dt.date] = None
     lang: Optional[Lang] = None
+    #: 离家模式。和入住/搬走日一样谁都能切：人在老家多半不会自己打开 app 去开
+    away: Optional[bool] = None
     password: Optional[str] = None
     #: 改自己的密码时要先验一遍旧的。手机放桌上被人顺手改掉，自己就进不来了
     old_password: Optional[str] = None

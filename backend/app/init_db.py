@@ -12,7 +12,7 @@ from sqlmodel import Session, select
 
 from app import migrate
 from app.db import DB_PATH, engine
-from app.models import CATEGORY_COLORS, Category
+from app.models import CATEGORY_COLORS, Category, Setting
 from app.services import settings as settings_svc
 from app.services.settings import seed_settings
 
@@ -21,6 +21,10 @@ from app.services.settings import seed_settings
 #: 第四列 monthly＝每月一次的固定项，不在日常记账那屏占按钮，出账单时顺手填。
 #: 颜色从 CATEGORY_COLORS 里挑 —— 分类是图标底色，走亮的那一档
 #: （成员头像走深的那一档，见 models.py 上那段）
+#: 离家模式默认管的那一类，按名字认（只在老库第一次补上这项设置时用一次）。
+#: 默认分类表里叫「伙食」；用户改过名叫「食材」的也认
+AWAY_DEFAULT_NAMES = ("伙食", "食材")
+
 DEFAULT_CATEGORIES = [
     ("房租", "home", CATEGORY_COLORS[0], True),                      # 靛
     ("电费", "bolt", CATEGORY_COLORS[2], True),                      # 琥珀
@@ -40,6 +44,9 @@ def init_db() -> None:
     if shot:
         logging.getLogger("nagaya").warning("表结构升级前的快照：%s", shot)
     with Session(engine) as session:
+        # 离家模式管哪一类：这一项是后加的。老库第一次补上它时，默认指到「伙食」（默认分类表里那个，
+        # 改过名叫「食材」的也认）；以后用户在面板上改成什么、清空了，都不再动
+        fresh_away = session.get(Setting, "away_category_id") is None
         seed_settings(session)
         if not session.exec(select(Category)).first():
             created = [
@@ -55,4 +62,21 @@ def init_db() -> None:
             if settings_svc.get(session, "fallback_category_id") is None:
                 session.refresh(created[-1])
                 settings_svc.set_(session, "fallback_category_id", created[-1].id)
+        default_away_category(session, fresh_away)
+
+
+def default_away_category(session: Session, fresh: bool) -> None:
+    """离家模式管哪一类的默认值：只在这项设置**这次才补上**（fresh）时，指到「伙食」。
+    用户之后在面板上改成别的、或者清空了，开机都不再动"""
+    if not fresh or settings_svc.get(session, "away_category_id") is not None:
+        return
+    food = session.exec(
+        select(Category).where(
+            Category.name.in_(AWAY_DEFAULT_NAMES),
+            Category.monthly == False,  # noqa: E712
+            Category.archived == False,  # noqa: E712
+        ).order_by(Category.display_order, Category.id)
+    ).first()
+    if food is not None:
+        settings_svc.set_(session, "away_category_id", food.id)
 

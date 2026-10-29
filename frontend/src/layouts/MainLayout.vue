@@ -17,6 +17,13 @@
            账单页就是三个人掏手机转账前盯的那一屏；室友刚填了水费、刚点了
            「确认已完成」，这边一无所知，照着旧数字转钱，转错了才发现。
            一条细带子，不挡内容，但一眼看得见 -->
+      <!-- 离家模式：只在**本人**屏幕上挂一条。功能照常用，只是说清楚「新记的伙食默认不算你」 -->
+      <div v-if="auth.me?.away" class="away-bar row items-center no-wrap">
+        <q-icon name="luggage" size="16px" class="q-mr-xs" />
+        <div class="col ellipsis">
+          {{ awayCategory ? t('common.awayBar', { category: awayCategory }) : t('common.awayBarNoCategory') }}
+        </div>
+      </div>
       <div v-if="stale" class="stale-bar row items-center no-wrap">
         <q-icon name="cloud_off" size="16px" class="q-mr-xs" />
         <div class="col ellipsis">{{ t('common.staleData') }}</div>
@@ -117,6 +124,11 @@ import { useNav } from 'src/stores/nav'
 const { t } = useI18n()
 const meta = useMeta()
 const auth = useAuth()
+/** 离家模式管的那一类叫什么（设置 away_category_id）。没设就是空串 */
+const awayCategory = computed(() => {
+  const id = meta.setting<number | null>('away_category_id', null)
+  return id === null ? '' : (meta.categoryById[id]?.name ?? '')
+})
 const bills = useBills()
 const ledger = useLedger()
 const drafts = useDrafts()
@@ -431,6 +443,13 @@ onBeforeUnmount(() => document.removeEventListener('visibilitychange', onVisible
   --nagaya-add-row-h: 50px;
 }
 /* 离线细带。颜色用 warning 一路：这不是错误，是「你看到的可能不是最新的」 */
+.away-bar {
+  min-height: 32px;
+  padding: 4px 12px;
+  background: var(--nagaya-accent-bg);
+  color: var(--nagaya-accent);
+  font-size: 12px;
+}
 .stale-bar {
   min-height: 32px;
   padding: 4px 12px;

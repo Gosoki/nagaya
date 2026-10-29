@@ -73,11 +73,27 @@
                   </div>
                 </q-popup-proxy>
               </q-btn>
+              <!-- 离家模式：回老家、出差这几天，新记的伙食（设置里那一类）默认不算他。
+                   和入住 / 搬走日一样谁都能切 —— 人在老家多半不会自己打开 app 去开。
+                   不改任何已经记下的账，所以不用确认 -->
+              <q-btn
+                v-if="m.is_active"
+                dense flat no-caps size="sm" class="date-btn away-btn"
+                icon="luggage"
+                :color="m.away ? 'warning' : 'grey-6'"
+                :aria-pressed="m.away"
+                :label="m.away ? t('members.away') : t('members.markAway')"
+                @click="save(m, { away: !m.away })"
+              />
             </div>
           </q-item-section>
         </q-item>
       </q-list>
-      <div class="text-caption text-grey-6 q-px-md q-py-sm hint">{{ t('members.hint') }}</div>
+      <div class="text-caption text-grey-6 q-px-md q-py-sm hint">
+        {{ t('members.hint') }}
+        <br />
+        {{ awayCategory ? t('members.awayHint', { category: awayCategory }) : t('members.awayNoCategory') }}
+      </div>
 
       <!-- 加一个人。初始密码明文显示：加的人要把它念给新室友听 -->
       <button v-if="!adding" class="add-row row items-center no-wrap" @click="startAdd">
@@ -159,6 +175,12 @@ const pop = ref<string | null>(null)
 const ymd = (d: string) => d.replace(/^(\d+)-0?(\d+)-0?(\d+)$/, '$1/$2/$3')
 /** q-date 的 options 拿到的是 2026/09/01 这种写法。搬走日不能早于入住日（后端也拦） */
 const slash = (d: string) => d.replace(/-/g, '/')
+
+/** 离家模式管的那一类叫什么（设置 away_category_id）。没设就是空串，提示去设置里定 */
+const awayCategory = computed(() => {
+  const id = meta.setting<number | null>('away_category_id', null)
+  return id === null ? '' : (meta.categoryById[id]?.name ?? '')
+})
 
 /** 行尾那个小标签：只有「今天不算在住」的人才有 */
 function statusOf(m: Member): string {

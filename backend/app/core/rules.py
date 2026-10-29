@@ -173,6 +173,29 @@ def expand(rule: Mapping[str, Any], member_ids: Sequence[int]) -> dict[str, Any]
     return out
 
 
+def skip_members(expanded: dict[str, Any], away: set[int]) -> dict[str, Any]:
+    """在一条**已展开**的比例规则里，把这几个人设成「不参与」：权重 0、调整额去掉。
+
+    离家模式用（见 ledger.create_entry）。只动比例规则；剔完一个参与的人都不剩（全员都离家了）
+    就原样返回 —— 那时谁该担这笔，不该由一个开关替人定。
+    **前端 src/core/away.ts 是同一条规则**，记一笔那屏的预览就是它算的，改一边要改另一边
+    """
+    if expanded.get("mode", "ratio") != "ratio" or not away:
+        return expanded
+    keys = {mkey(m) for m in away}
+    weights = {k: (0 if k in keys else w) for k, w in expanded.get("weights", {}).items()}
+    if not any(weights.values()):
+        return expanded
+    out = dict(expanded)
+    out["weights"] = weights
+    adjustments = {k: v for k, v in (expanded.get("adjustments") or {}).items() if k not in keys}
+    if adjustments:
+        out["adjustments"] = adjustments
+    else:
+        out.pop("adjustments", None)
+    return out
+
+
 def participants(rule: Mapping[str, Any]) -> list[str]:
     """展开后的规则涉及哪些人（含权重 0 的，他们要在账单上显示为 ¥0）。"""
     if rule.get("mode") == "exact":

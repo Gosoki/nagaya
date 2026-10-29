@@ -14,6 +14,8 @@ export interface Member {
   /** 头像的地址（带版本号，图由 src/avatars.ts 取）。没设过就是 null，界面退回那个带首字的色圆 */
   avatar: string | null
   avatar_version: number
+  /** 离家模式：新记「离家时不算的那一类」（设置 away_category_id）默认不算他。人还在籍 */
+  away: boolean
 }
 
 /** 自己加的备忘条目。固定费那几项的备忘写在 Category.note 上 */

@@ -1692,3 +1692,48 @@ test('帮买：转账页里点亮开关，记成只算那个人的支出；再�
   expect(back.kind).toBe('settlement')
   expect(back.to_member_id).toBe(kan)
 })
+
+test('离家模式：成员管理里替人开，新记的伙食默认不算他，他自己屏幕顶上有提示', async ({ page }) => {
+  await login(page)
+  const headers = { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nagaya.token'))}` }
+  const members = async () => (await (await page.request.get('/api/members', { headers })).json()) as { id: number; display_name: string; away: boolean }[]
+  const zen = (await members()).find((m) => m.display_name === 'Zen')!
+  try {
+    // 谁都能替别人开：go 给 Zen 开
+    await page.getByRole('tab', { name: '更多' }).click()
+    await page.getByRole('tab', { name: '设置' }).click()
+    await page.locator('.bill-section').filter({ hasText: '人在住' }).locator('.section-head').click()
+    const row = page.locator('.member-row[data-name="Zen"]')
+    await row.locator('.away-btn').click()
+    await expect(row.locator('.away-btn')).toContainText('离家中')
+    await expect.poll(async () => (await members()).find((m) => m.id === zen.id)!.away).toBe(true)
+
+    // 记一笔伙食：Zen 默认不参与，而且写出来是因为离家
+    await page.getByRole('tab', { name: '记一笔' }).click()
+    await page.locator('input.amount').fill('3000')
+    await page.getByRole('button', { name: '伙食' }).click()
+    await expect(page.locator('.away-hint')).toContainText('Zen')
+    const weights = () => page.locator('.wheel').evaluateAll((els) => els.map((e) => e.getAttribute('aria-valuenow')).join('/'))
+    expect(await weights(), 'Go/Kan/Zen：离家的 Zen 默认是 0').toBe('1/1/0')
+    // 别的分类照旧三人分
+    await page.getByRole('button', { name: '日用' }).click()
+    await expect(page.locator('.away-hint')).toHaveCount(0)
+    expect(await weights()).toBe('1/1/1')
+    await page.getByRole('button', { name: '伙食' }).click()
+
+    await page.getByPlaceholder('备注（选填）').fill('E2E离家伙食')
+    await page.getByRole('button', { name: '记入账' }).click()
+    await expect(page.locator('.q-notification')).toContainText('已记下')
+    const saved = (await (await page.request.get('/api/entries?limit=5', { headers })).json())
+      .find((e: { title: string }) => e.title === 'E2E离家伙食')
+    expect(saved.shares[String(zen.id)], '存下去 Zen 那份也是 0（和屏幕上一样）').toBe(0)
+
+    // Zen 自己的屏幕：顶上挂着离家模式，功能照常
+    await page.evaluate(() => localStorage.clear())
+    await login(page, 'zen')
+    await expect(page.locator('.away-bar')).toContainText('离家模式')
+    await expect(page.getByRole('button', { name: '记入账' })).toBeVisible()
+  } finally {
+    await page.request.patch(`/api/members/${zen.id}`, { headers, data: { away: false } })
+  }
+})

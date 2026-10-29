@@ -370,3 +370,104 @@ def test_the_remainder_follows_member_order_not_how_ids_sort_as_text(session, me
     assert split3([a.id, b.id, 10], 100) == {a.id: 33, b.id: 33, 10: 34}
     # 排序号打平（b 和 12）：按数值 id，2 在 12 前面
     assert split3([b.id, 12], 101) == {b.id: 51, 12: 50}
+
+
+def _away_setup(session, members):
+    """一个「伙食」分类、设成离家模式管的那一类；c 离家。"""
+    a, b, c = members
+    food = Category(name="伙食", monthly=False)
+    other = Category(name="日用", monthly=False)
+    session.add(food)
+    session.add(other)
+    session.commit()
+    session.refresh(food)
+    session.refresh(other)
+    settings_svc.set_(session, "away_category_id", food.id)
+    c.away = True
+    session.add(c)
+    session.commit()
+    return food, other
+
+
+def test_away_member_is_left_out_of_new_food_entries_by_default(session, members) -> None:
+    """离家模式：新记一笔伙食、分摊没动过 → 离家的人默认不参与（份额 0，行还在），别人照旧均分"""
+    a, b, c = members
+    food, _ = _away_setup(session, members)
+    e = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=3_000,
+                     payer_id=a.id, category_id=food.id)
+    assert shares_of(session, e.id) == {a.id: 1_500, b.id: 1_500, c.id: 0}
+
+
+def test_away_only_touches_that_category_and_untouched_splits(session, members) -> None:
+    """别的分类、送了分摊规则（人在面板上点过）、转账、收入：都照旧"""
+    a, b, c = members
+    food, other = _away_setup(session, members)
+    daily = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=3_000,
+                         payer_id=a.id, category_id=other.id)
+    assert shares_of(session, daily.id)[c.id] == 1_000
+    chosen = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=3_000,
+                          payer_id=a.id, category_id=food.id,
+                          rule={"mode": "ratio", "weights": {str(a.id): 1, str(b.id): 1, str(c.id): 1}})
+    assert shares_of(session, chosen.id)[c.id] == 1_000, "人把他点回来了，就照点的记"
+    transfer = create_entry(session, actor_id=c.id, kind=EntryKind.settlement, on=SEP, amount=500,
+                            payer_id=c.id, to_member_id=a.id)
+    assert shares_of(session, transfer.id) == {a.id: 500}
+
+
+def test_away_with_everyone_away_leaves_the_split_alone(session, members) -> None:
+    """全员都离家：剔完没人分，不替人定谁担 —— 照常均分"""
+    a, b, c = members
+    food, _ = _away_setup(session, members)
+    for m in (a, b):
+        m.away = True
+        session.add(m)
+    session.commit()
+    e = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=3_000,
+                     payer_id=a.id, category_id=food.id)
+    assert shares_of(session, e.id) == {a.id: 1_000, b.id: 1_000, c.id: 1_000}
+
+
+def test_away_does_nothing_when_no_category_is_set(session, members) -> None:
+    """设置清空 ＝ 离家模式不剔任何人"""
+    a, b, c = members
+    food, _ = _away_setup(session, members)
+    settings_svc.set_(session, "away_category_id", None)
+    e = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=3_000,
+                     payer_id=a.id, category_id=food.id)
+    assert shares_of(session, e.id)[c.id] == 1_000
+
+
+def test_away_does_not_rewrite_entries_already_recorded(session, members) -> None:
+    """开离家之前记下的伙食一个数不动；改旧账（不送规则）也不套"""
+    a, b, c = members
+    food = Category(name="伙食", monthly=False)
+    session.add(food)
+    session.commit()
+    session.refresh(food)
+    settings_svc.set_(session, "away_category_id", food.id)
+    e = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=3_000,
+                     payer_id=a.id, category_id=food.id)
+    c.away = True
+    session.add(c)
+    session.commit()
+    assert shares_of(session, e.id)[c.id] == 1_000
+    update_entry(session, e, actor_id=a.id, version=e.version, fields={"amount_jpy": 6_000})
+    assert shares_of(session, e.id)[c.id] == 2_000
+
+
+def test_an_existing_ledger_gets_the_away_category_pointed_at_food(session, members) -> None:
+    """离家模式那项设置是后加的：老库第一次补上它时指到「伙食」（固定费、归档的不算）；
+    用户清空之后再开机（fresh=False）不被改回去"""
+    from app.init_db import default_away_category
+
+    rent = Category(name="伙食", monthly=True)          # 同名的固定费不能被挑中
+    food = Category(name="伙食", monthly=False)
+    session.add(rent)
+    session.add(food)
+    session.commit()
+    settings_svc.set_(session, "away_category_id", None)
+    default_away_category(session, fresh=True)
+    assert settings_svc.get(session, "away_category_id") == food.id
+    settings_svc.set_(session, "away_category_id", None)
+    default_away_category(session, fresh=False)
+    assert settings_svc.get(session, "away_category_id") is None

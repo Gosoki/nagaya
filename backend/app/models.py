@@ -125,6 +125,13 @@ class Member(SQLModel, table=True):
         ),
     )
     avatar_version: int = Field(default=0, description="改一次加一，前端拿它做缓存键")
+    away: bool = Field(
+        default=False,
+        description=(
+            "离家模式（回老家、出差）。开着时新记「离家时不算的那一类」（设置 away_category_id，默认伙食）"
+            "默认不算他一份，点头像能加回来；别的分类、固定费、转账照旧。人还在籍 —— 和 left_on 是两回事"
+        ),
+    )
     created_at: dt.datetime = Field(default_factory=now_utc)
 
     def is_active(self, on: dt.date | None = None) -> bool:

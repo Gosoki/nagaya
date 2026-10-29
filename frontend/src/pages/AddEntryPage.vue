@@ -134,10 +134,15 @@
           :amount="signedAmount"
           :members="splitMembers"
           :payer-id="payerId"
-          :seed-rule="ownRule ?? selectedCategoryRule"
+          :seed-rule="seedRule"
           :entry-id="editingId"
           @change="onSplitChange"
         />
+        <!-- 离家模式默认剔了谁，说出来：分摊里他是「不参与」，不写一句的话看着像是谁误点的 -->
+        <div v-if="awayMembers.length" class="away-hint row items-center no-wrap">
+          <q-icon name="luggage" size="14px" class="q-mr-xs" />
+          <span>{{ t('entry.awayHint', { names: awayMembers.map((m) => m.display_name).join('、') }) }}</span>
+        </div>
       </div>
     </div>
 
@@ -265,6 +270,7 @@ import type { Bill, BillTransfer, Entry, EntryKind, EntryPayload, Member } from 
 import AmountInput from 'src/components/AmountInput.vue'
 import { useSavedNotice } from 'src/composables/savedNotice'
 import { payerAbsence, recentTwin, transferDoubt } from 'src/core/entryChecks'
+import { awaySeed } from 'src/core/away'
 import { helpBuyFor } from 'src/core/helpBuy'
 import { sendConfirmingJump } from 'src/core/entryEdit'
 import { jumpFactor } from 'src/core/monthlyRows'
@@ -539,6 +545,27 @@ function confirmAsk() {
 function onAskHide() {
   askAmount.value = ''
 }
+
+/**
+ * 离家模式：这一笔里会被默认剔掉的人。只有**新记的支出**、分类正是设置里那一类（默认伙食）时才算；
+ * 改旧账不套 —— 后端也是这个口径（ledger._away_here），预览和存下去的才一样。
+ * 全员都离家时不剔（awaySeed 原样返回），也就不提示
+ */
+const awayMembers = computed(() => {
+  if (editingId.value !== null || kind.value !== 'expense') return []
+  const cat = meta.setting<number | null>('away_category_id', null)
+  if (cat === null || categoryId.value !== cat) return []
+  const away = splitMembers.value.filter((m) => m.away)
+  return away.length < splitMembers.value.length ? away : []
+})
+/** 交给分摊编辑器的起步规则：这笔自己的 → 分类默认，再按离家模式剔人 */
+const seedRule = computed(() =>
+  awaySeed(
+    ownRule.value ?? selectedCategoryRule.value,
+    splitMembers.value.map((m) => String(m.id)),
+    awayMembers.value.map((m) => String(m.id)),
+  ),
+)
 
 /** 选中分类的默认分摊规则，交给编辑器当初始值 —— 否则预览和实际存下去的不是一回事 */
 const selectedCategoryRule = computed(
@@ -1194,5 +1221,10 @@ function reset() {
   font-size: 12px;
   text-align: center;
   padding-bottom: 4px;
+}
+.away-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--nagaya-ink-3);
 }
 </style>

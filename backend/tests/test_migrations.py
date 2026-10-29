@@ -113,8 +113,9 @@ def test_a_failing_upgrade_does_not_pile_up_snapshots(tmp_path: Path, monkeypatc
     def boom(*_a, **_k) -> None:
         raise RuntimeError("迁移在这本账上失败")
 
-    # 假装代码里多了一个新版本，而它在这本账上跑不过去
-    monkeypatch.setattr(migrate, "head", lambda: "0002")
+    # 假装代码里多了一个新版本，而它在这本账上跑不过去。
+    # 版本号得比**真实的**最新版本还新（真加了 0002 之后，写死 "0002" 就等于没有新版本）
+    monkeypatch.setattr(migrate, "head", lambda: "9999")
     monkeypatch.setattr(migrate.command, "upgrade", boom)
     for _ in range(3):
         with pytest.raises(RuntimeError):
@@ -152,3 +153,4 @@ def test_a_failed_upgrade_leaves_nothing_half_built(tmp_path: Path, monkeypatch)
     engine = create_engine(f"sqlite:///{db}")
     assert "half_built" not in inspect(engine).get_table_names()
     engine.dispose()
+

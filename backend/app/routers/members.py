@@ -144,7 +144,7 @@ def update_member(
     fields = body.model_dump(exclude_unset=True, exclude={"password", "old_password"})
     # 显式传 null 的那几个：数据库上是 NOT NULL，直接 setattr 下去就是 500。
     # left_on 不在里面 —— 它**必须**清得掉，否则填错一次那个人就永远是「已退出」
-    reject_nulls(fields, ("name", "display_name", "color", "display_order", "joined_on", "lang"))
+    reject_nulls(fields, ("name", "display_name", "color", "display_order", "joined_on", "lang", "away"))
     _check_names(fields.get("name"), fields.get("display_name"))
     if "name" in fields:
         clash = session.exec(select(Member).where(Member.name == fields["name"])).first()

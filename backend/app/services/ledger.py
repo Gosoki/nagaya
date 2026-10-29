@@ -12,7 +12,7 @@ from sqlalchemy import func, union_all
 from sqlalchemy import update as sa_update
 from sqlmodel import Session, select
 
-from app.core.rules import _prune_rule, expand, mkey, named_members, participants, pick_rule
+from app.core.rules import _prune_rule, expand, mkey, named_members, participants, pick_rule, skip_members
 from app.core.split import split
 from app.models import (
     Category,
@@ -225,6 +225,19 @@ def _inherit(
     return pick_rule(rule, _prune_rule(category_rule, keep), _prune_rule(global_rule, keep))
 
 
+def _away_here(session: Session, category_id: int | None, ids: Sequence[int]) -> set[int]:
+    """这一笔里开着离家模式的人 —— 只在分类正是设置里那一类（away_category_id，默认伙食）时才算。
+
+    只管**新记、而且没送分摊规则**的那种（分摊面板没动过）：人在分摊里点过了，就照他点的记；
+    改旧账也不套，记下的就是记下的。前端预览是同一个口径（src/core/away.ts），所以屏幕上看到的
+    「他不参与」和存进去的一样
+    """
+    away_cat = settings_svc.get(session, "away_category_id")
+    if away_cat is None or category_id != away_cat or not ids:
+        return set()
+    return set(session.exec(select(Member.id).where(Member.id.in_(list(ids)), Member.away == True)))  # noqa: E712
+
+
 def create_entry(
     session: Session,
     *,
@@ -276,6 +289,8 @@ def create_entry(
             raise LedgerError("no_participants", "这一天没有在籍成员，没法分摊")
         global_rule = settings_svc.get(session, "default_rule")
         expanded = expand(_inherit(rule, category_rule, global_rule, ids), ids)
+        if rule is None and kind == EntryKind.expense:
+            expanded = skip_members(expanded, _away_here(session, category_id, ids))
 
     remainder_to = settings_svc.get(session, "remainder_to")
     if kind != EntryKind.settlement and not expanded.get("remainder_to"):
