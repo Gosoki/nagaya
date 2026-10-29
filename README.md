@@ -166,7 +166,17 @@ cd ../backend
 **Cloudflare Tunnel** 或 **Caddy** 反代都行。仓库里不带这些配置。
 
 反代和后端**在同一台机器**上（`tailscale serve`、本机的 cloudflared / Caddy）什么都不用配：
-后端默认就认 127.0.0.1 转过来的真实来源。反代在**别的机器**上、或者用 Docker 的话，
+后端默认就认 127.0.0.1 转过来的真实来源 —— **前提是反代会带 `X-Forwarded-For`**。上面几个会自动带；
+**nginx 不会**，要在 `location` 里自己写上：
+
+```nginx
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;
+```
+
+不写的话，下面配了 `FORWARDED_ALLOW_IPS` 也没用：后端看到的来源全是 nginx。
+
+反代在**别的机器**上、或者用 Docker 的话，
 要把反代的地址告诉后端，不然后端看到的「来源」全是反代，登录节流就从「按机器」退化成「按名字」——
 外面谁对着你的登录名连错几次，你在新手机上也会被挡一阵：
 
@@ -234,6 +244,19 @@ docker compose start nagaya
 > - 设置表也在备份里，**包括备份目录它自己**。恢复一份老备份之后备份目录会跟着回滚，
 >   脚本会把回滚后的值打出来提醒一句。
 
+### 体检（只读）
+
+```bash
+cd backend
+.venv/bin/python -m tools.checkup                       # 体检正在用的账本
+.venv/bin/python -m tools.checkup --file=backups/nagaya-20261029-120000.db   # 体检某一份备份
+```
+
+先 `VACUUM INTO` 拍一份临时快照再查，**活库一个字节都不碰**，服务开着也能跑。报告分三段：
+「必须修」（账本恒等式不成立：某笔分摊加起来不等于金额、余额合计不为 0……，有一条退出码就是 1）、
+「要人核对」（搬走的人还被算着钱、没有任何审计记录的账……）、「仅供参考」（同盘、逐笔轮转、data/ 里的旧副本……）。
+Docker：`docker compose exec nagaya .venv/bin/python -m tools.checkup`。
+
 ## 改表结构（迁移）
 
 表结构走 Alembic。改完 `backend/app/models.py` 要写一份迁移（`backend/alembic/versions/README.md`
@@ -257,6 +280,14 @@ docker compose start nagaya
 | 兜底分类 | 其他 | 支出没点分类、但写了备注时记到哪 |
 | 固定费间隔天数 | 20 | 距上次出账不足这么多天，出账对话框默认不勾「包括固定费」 |
 | 备份目录 / 间隔（小时）/ 保留份数 | `./backups` / 24 / 30 | 见上面「备份与恢复」 |
+| 固定费量级核对 | 4 | 某项固定费这一期的合计是上一期的 4 倍以上或四分之一以下，保存前问一句（防多打、少打一个 0） |
+| 转账金额核对余量 | 1000 | 记转账时比付款人此刻实欠的多出这么多円以上，先问一句 |
+| 重复转账核对（小时） | 48 | 这么多小时内记过一模一样的转账，先问一句 |
+| 疑似重复（天） | 1 | 未出账的账里同类、同额、日期相差不超过这么多天，账单上标「疑似重复」 |
+| 离群倍数 / 往回看天数 / 最少历史笔数 | 5 / 180 / 10 | 日常支出比同分类近期中位数大得离谱（只看偏大：小件日用品本来就比中位数小很多），账单上标出来 |
+| 提示开「和上期一样」 | 3 | 某项固定费最近这么多期都是同一个数，面板上问一句要不要开 |
+
+上面这几个核对和提示**只问、只标，从不自动改账、不拦出账**；每一项填 0 就关掉（「最少历史笔数」除外：填 0 是不设门槛）。
 
 App 名字和图标在「应用设置」那张卡片里改。`settlement_methods` 是占位，还没有任何地方读它。
 
@@ -265,7 +296,7 @@ App 名字和图标在「应用设置」那张卡片里改。`settlement_methods
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `NAGAYA_DB` | `backend/data/nagaya.db` | 库文件。签名密钥 `.secret` 和升级前的快照放在它旁边 |
-| `NAGAYA_SECRET` | 自动生成 | token 签名密钥。不给就生成一个写进库旁边的 `.secret`（权限 600） |
+| `NAGAYA_SECRET` | 自动生成 | token 签名密钥。不给就生成一个写进库旁边的 `.secret`（权限 600）。自己给的话**至少 32 字节**（`python3 -c 'import secrets;print(secrets.token_urlsafe(48))'`），短了开机会在日志里警告 |
 | `PORT` | `8000` | `run.sh` 监听的端口 |
 | `NAGAYA_CORS` | `localhost:9000,5173` | 前端开发服务器的源，只在开发时用得上 |
 | `NAGAYA_YES` | 空 | `deploy.sh` 设了就什么都不问、全用默认 |
@@ -285,8 +316,8 @@ cd frontend && npm run dev          # localhost:9000，/api 代理到 8000，改
 ### 测试
 
 ```bash
-cd backend  && .venv/bin/python -m pytest   # 252 条：算法 / 账本 / 账单 / API / 边界输入 / 随机操作序列 / 备份恢复 / 迁移
-cd frontend && npm test                     # 186 条：分摊引擎（对后端 fixture）+ 若干守卫（对比度、缓存竞态……）
+cd backend  && .venv/bin/python -m pytest   # 365 条：算法 / 账本 / 账单 / API / 边界输入 / 随机操作序列 / 备份恢复 / 迁移
+cd frontend && npm test                     # 274 条：分摊引擎（对后端 fixture）+ 若干守卫（对比度、缓存竞态……）
 ./run-e2e.sh                                # 48 条：375px 手机视口，真浏览器（WebKit）
 ```
 
