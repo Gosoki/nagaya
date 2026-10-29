@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime as dt
 
+import pytest
 from sqlmodel import Session, select
 
 from app.models import Category, Entry, EntryKind, EntryShare, Member
@@ -243,18 +244,19 @@ def test_carry_skips_items_that_never_had_an_amount(session: Session, members) -
     assert carry_same_as_last(session, actor_id=a.id)["created"] == []
 
 
-def test_carry_uses_the_global_default_payer_when_the_category_has_none(
+def test_carry_copies_last_periods_payer_not_the_global_default(
     session: Session, members
 ) -> None:
-    """分类上没定垫付人时要回退到全局设置，不能算到「谁触发了 carry」头上。
+    """分类上没定垫付人时，照上期**那一笔的垫付人**（第四轮 §B-1）——
+    不是全局「默认垫付人」，也不是点按钮的那个人。
 
-    少了中间这一级的话，房租那 12 万会算到本期第一个点开账单页的人名下 ——
-    两个人各错一整笔房租的钱，而通知里只说「已按上期记入 家賃 ¥120,000」，
-    一个字都不提算谁的。
+    原来这条叫「回退到全局默认垫付人」，可上期付款人和全局设置恰好是同一个人，
+    断言恒成立；代码从来不读全局设置。名字留着的话，迟早有人「修」代码去对齐它，
+    房租那 12 万就换了人垫。三个人在这里故意各不相同。
     """
     from app.services import settings as settings_svc
 
-    a, b, _ = members
+    a, b, c_ = members
     c = cats(session)
     create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG,
                  amount=120_000, payer_id=b.id, category_id=c["家賃"].id)
@@ -263,35 +265,59 @@ def test_carry_uses_the_global_default_payer_when_the_category_has_none(
     c["家賃"].same_as_last = True          # 分类上**故意不设** default_payer_id
     session.add(c["家賃"])
     session.commit()
-    settings_svc.set_(session, "default_payer_id", b.id)
+    settings_svc.set_(session, "default_payer_id", c_.id)
 
     made = carry_same_as_last(session, actor_id=a.id)["created"]
     assert [m["name"] for m in made] == ["家賃"]
     entry = next(e for e in unbilled(session) if e.category_id == c["家賃"].id)
-    assert entry.payer_id == b.id, "垫付人该是全局设置里的那个人，不是点开页面的人"
+    assert entry.payer_id == b.id, "垫付人该是上期那一笔的人，不是全局设置、也不是点按钮的人"
+
+
+def test_carry_prefers_the_category_default_payer(session: Session, members) -> None:
+    """分类上明写了默认垫付人的，它优先于上期那一笔：「从这个月起房租由 Kan 付」
+    只改了分类，照上期就该按 Kan 记。这一级原来没人钉 —— 去掉它全套照样绿"""
+    from app.services import settings as settings_svc
+
+    a, b, c_ = members
+    c = cats(session)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG,
+                 amount=120_000, payer_id=b.id, category_id=c["家賃"].id)
+    cut_statement(session, actor_id=a.id)
+    c["家賃"].same_as_last = True
+    c["家賃"].default_payer_id = c_.id
+    session.add(c["家賃"])
+    session.commit()
+    settings_svc.set_(session, "default_payer_id", a.id)
+
+    carry_same_as_last(session, actor_id=a.id)
+    entry = next(e for e in unbilled(session) if e.category_id == c["家賃"].id)
+    assert entry.payer_id == c_.id
 
 
 def test_carry_survives_a_roommate_moving_out(session: Session, members) -> None:
-    """有人搬走之后，「和上期一样」不许整条静默失效。
+    """有人搬走之后，「和上期一样」不许整条静默失效 —— 也不许替人重分他那一份。
 
-    分类的默认分摊是当年按那时候几个人写死的。有人填了 left_on 之后，
+    原来的坑：分类的默认分摊是当年按那时候几个人写死的，有人填了 left_on 之后，
     expand() 拿「今天在籍的人」当参与人，发现规则里多出个不认识的 id 就抛
-    unknown_member —— 原来这会让**整个循环**炸掉：排在前面的项已经 commit 进草稿，
+    unknown_member，**整个循环**炸掉：排在前面的项已经 commit 进草稿，
     返回值随异常一起丢，接口 400，前端一个空 catch 吞掉。
-    屏幕上那几行还是空框，用户照着空框再填一遍，同一分类当期就有了两笔。
+
+    后来改成剔掉搬走的人（连他的调整额）照记：上期 45,000/40,000/35,000，
+    C 一走默默变成 62,500/57,500，按钮和通知只报「房租 ¥120,000，按上期」——
+    月中搬走的人那期该不该担、调整额怎么改，全被程序替人定了（审计 #2）。
+    现在：上期给他记过钱的项**拦下来、说出来**（rule_stale），本来就不算他（权重 0）的项照抄；
+    人手填一期之后，下一期照抄新的那一笔。
     """
     a, b, c_ = members
     c = cats(session)
-    # 房租这条规则点名了三个人（按房间大小分），电费没有规则。
-    # 上期那一笔就是照它记的 —— 照上期抄的是**那一笔**的规则，不是分类上这条
-    c["家賃"].default_rule_json = {
-        "mode": "ratio", "equal_weight": 1,
-        "adjustments": {str(a.id): 5_000, str(c_.id): -5_000},
-    }
-    for name, amount in [("家賃", 120_000), ("電気", 8_000)]:
-        create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG,
-                     amount=amount, payer_id=a.id, category_id=c[name].id,
-                     category_rule=c[name].default_rule_json)
+    # 房租：三个人都分，C 还少担 5,000。电费：本来就只算 A、B（C 那一行是 0）
+    rent_rule = {"mode": "ratio", "equal_weight": 1,
+                 "adjustments": {str(a.id): 5_000, str(c_.id): -5_000}}
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG, amount=120_000,
+                 payer_id=a.id, category_id=c["家賃"].id, category_rule=rent_rule)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG, amount=8_000,
+                 payer_id=a.id, category_id=c["電気"].id,
+                 rule={"mode": "ratio", "weights": {str(a.id): 1, str(b.id): 1, str(c_.id): 0}})
     cut_statement(session, actor_id=a.id)
 
     c["家賃"].same_as_last = True
@@ -301,20 +327,30 @@ def test_carry_survives_a_roommate_moving_out(session: Session, members) -> None
     session.add(c_)
     session.commit()
 
-    out = carry_same_as_last(session, actor_id=a.id)
-    assert {m["name"] for m in out["created"]} == {"家賃", "電気"}, out
-    assert out["failed"] == []
     rows = rows_by_name(session)
-    assert rows["家賃"]["amount"] == 120_000
-    assert rows["電気"]["amount"] == 8_000
-    # 搬走的人不该再被分摊
-    entry = next(e for e in unbilled(session) if e.category_id == c["家賃"].id)
-    assert str(c_.id) not in entry.split_rule_json.get("adjustments", {})
-    # 他那 −5,000 跟着剔掉，留下的两人照「A 多担 5,000」分剩下的
+    assert rows["家賃"]["carry_amount"] is None and rows["家賃"]["carry_blocked"] == "rule_stale"
+    # 手填的起步分法照旧从上期抄（剔掉 C）—— 拦的只是「不经人手就记」那一下
+    assert rows["家賃"]["rule"]["adjustments"] == {str(a.id): 5_000}
+    assert rows["電気"]["carry_amount"] == 8_000
+
+    out = carry_same_as_last(session, actor_id=a.id)       # 没炸，两项各有交代
+    assert [m["name"] for m in out["created"]] == ["電気"], out
+    assert [(f["name"], f["reason"]) for f in out["failed"]] == [("家賃", "rule_stale")]
+    elec = next(e for e in unbilled(session) if e.category_id == c["電気"].id)
     shares = dict(session.exec(
-        select(EntryShare.member_id, EntryShare.amount_jpy).where(EntryShare.entry_id == entry.id)
+        select(EntryShare.member_id, EntryShare.amount_jpy).where(EntryShare.entry_id == elec.id)
     ).all())
-    assert shares == {a.id: 62_500, b.id: 57_500}
+    assert shares == {a.id: 4_000, b.id: 4_000}, "本来就不算 C 的那一项，剔掉他一分钱不变"
+    assert rows_by_name(session)["家賃"]["amount"] is None, "宁可空着让人填，也不替人重分"
+
+    # 人手填这一期的房租（两个人怎么分由人定），出账；下一期照抄新的那一笔
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=110_000,
+                 payer_id=a.id, category_id=c["家賃"].id,
+                 rule={"mode": "ratio", "weights": {str(a.id): 1, str(b.id): 1}})
+    cut_statement(session, actor_id=a.id)
+    again = carry_same_as_last(session, actor_id=a.id)
+    assert {m["name"]: m["amount"] for m in again["created"]} == {"家賃": 110_000, "電気": 8_000}, again
+    assert again["failed"] == []
 
 
 def test_carry_does_not_resurrect_a_manually_deleted_row(session: Session, members) -> None:
@@ -740,3 +776,557 @@ def test_carry_follows_the_remainder_setting_of_today(session: Session, members)
     assert [m["name"] for m in carry_same_as_last(session, actor_id=a.id)["created"]] == ["家賃"]
     entry = next(e for e in unbilled(session) if e.category_id == rent.id)
     assert entry.split_rule_json["remainder_to"] == "order"
+
+
+# ------------------------------------------------ 上期同一项有好几笔（#6）
+
+
+def _two_rents_last_period(session: Session, members, amounts: tuple[int, int]) -> Category:
+    a, b, _ = members
+    rent = cats(session)["家賃"]
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG, amount=amounts[0],
+                 payer_id=a.id, category_id=rent.id)
+    create_entry(session, actor_id=b.id, kind=EntryKind.expense, on=AUG, amount=amounts[1],
+                 payer_id=b.id, category_id=rent.id)
+    cut_statement(session, actor_id=a.id)
+    return rent
+
+
+@pytest.mark.parametrize("amounts", [(100_000, 20_000), (120_000, 120_000)])
+def test_carry_refuses_to_pick_one_of_several_last_period_entries(
+    session: Session, members, amounts: tuple[int, int]
+) -> None:
+    """上期那张单子上房租有两笔（两台手机同时填、出账时没清掉）：照上期挑哪一笔都是猜 ——
+    按 id 挑的话 ¥120,000 的房租能被抄成 ¥20,000，垫付人也跟着换。也不许替人求和：
+    最常见的是同额重复，求和就是房租翻倍。拦下来，把笔数和合计报给人。"""
+    rent = _two_rents_last_period(session, members, amounts)
+    rent.same_as_last = True
+    session.add(rent)
+    session.commit()
+
+    row = rows_by_name(session)["家賃"]
+    assert row["carry_amount"] is None and row["last_amount"] is None
+    assert row["carry_blocked"] == "last_multi"
+    assert row["carry_blocked_detail"] == {"count": 2, "total": sum(amounts)}
+    assert row["last_payer_id"] is None, "垫付人也是从那一笔抄的 —— 同样是猜"
+    out = carry_same_as_last(session, actor_id=members[0].id)
+    assert out["created"] == []
+    assert out["failed"] == [{"category_id": rent.id, "name": "家賃", "reason": "last_multi",
+                              "detail": {"count": 2, "total": sum(amounts)}}]
+    assert unbilled(session) == []
+
+
+def test_several_entries_on_an_older_bill_do_not_block_an_item_whose_last_bill_had_one(
+    session: Session, members
+) -> None:
+    """「上期那一笔所在的那张」只数那一张。水道上期（S2）只有一笔，S1 上它有两笔，而電気的上期
+    正好是 S1 —— 两项的上期凑在一起查，S1 上水道那两笔不许算到水道头上"""
+    a, *_ = members
+    c = cats(session)
+    water, elec = c["水道"], c["電気"]
+    for cat in (water, elec):
+        cat.same_as_last = True
+        session.add(cat)
+    session.commit()
+    _period(session, a, {water.id: [5_000, 5_000], elec.id: [8_000]})      # S1
+    _period(session, a, {water.id: [5_000]})                                 # S2
+
+    rows = rows_by_name(session)
+    assert rows["水道"]["carry_blocked"] is None and rows["水道"]["carry_amount"] == 5_000
+    out = carry_same_as_last(session, actor_id=a.id)
+    assert {m["name"]: m["amount"] for m in out["created"]} == {"水道": 5_000, "電気": 8_000}
+    assert out["failed"] == []
+
+
+def test_carry_stops_when_only_an_adjustment_charged_the_one_who_left(session: Session, members) -> None:
+    """上期的规则里 C 的权重是 0，可调整额给他记了 5,000（他的车位）。C 搬走了：
+    照抄的话剔掉他连同那 5,000，留下的两个人默默多担 —— 和权重不为 0 时一样，请人手填一期"""
+    a, b, c_ = members
+    rent = cats(session)["家賃"]
+    rent.same_as_last = True
+    session.add(rent)
+    session.commit()
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG, amount=120_000,
+                 payer_id=a.id, category_id=rent.id,
+                 rule={"mode": "ratio", "weights": {str(a.id): 1, str(b.id): 1, str(c_.id): 0},
+                       "adjustments": {str(c_.id): 5_000}})
+    cut_statement(session, actor_id=a.id)
+    c_.left_on = SEP
+    session.add(c_)
+    session.commit()
+
+    assert rows_by_name(session)["家賃"]["carry_blocked"] == "rule_stale"
+    out = carry_same_as_last(session, actor_id=a.id)
+    assert out["created"] == [] and [f["reason"] for f in out["failed"]] == ["rule_stale"]
+
+
+def test_cleaning_up_the_duplicate_brings_carry_back(session: Session, members) -> None:
+    a, *_ = members
+    rent = _two_rents_last_period(session, members, (120_000, 120_000))
+    rent.same_as_last = True
+    session.add(rent)
+    session.commit()
+    extra = session.exec(select(Entry).where(Entry.category_id == rent.id).order_by(Entry.id.desc())).first()
+    delete_entry(session, extra, actor_id=a.id)
+    assert rows_by_name(session)["家賃"]["carry_blocked"] is None
+    assert [m["amount"] for m in carry_same_as_last(session, actor_id=a.id)["created"]] == [120_000]
+
+
+def test_several_last_period_entries_never_leak_into_an_item_without_same_as_last(
+    session: Session, members
+) -> None:
+    """没开「和上期一样」的项：笔数、合计一个字都不给（D21），起步的分摊和垫付人也不从那几笔里挑。"""
+    a, b, c_ = members
+    rent = _two_rents_last_period(session, members, (100_000, 20_000))
+    row = rows_by_name(session)["家賃"]
+    assert row["carry_blocked"] is None and row["carry_blocked_detail"] is None
+    assert row["last_amount"] is None and row["last_payer_id"] is None
+    assert row["rule"] == rent.default_rule_json
+    assert 100_000 not in row.values() and 20_000 not in row.values() and 120_000 not in row.values()
+
+
+# ---------------------------------------------- 照上期记成谁垫的（#18）/ 面板上谁垫的（#23）
+
+
+def test_the_panel_and_carry_say_who_pays(session: Session, members) -> None:
+    """按钮上、通知里只写「房租 ¥120,000」的话，记成了谁垫的没人看得见。
+    面板上已录那一行是谁垫的，也从库里给，不再让前端从账单页的缓存里猜。"""
+    a, b, _ = members
+    c = cats(session)
+    c["家賃"].same_as_last = True
+    c["家賃"].default_payer_id = b.id
+    session.add(c["家賃"])
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG, amount=120_000,
+                 payer_id=a.id, category_id=c["家賃"].id)
+    st = cut_statement(session, actor_id=a.id)
+    elec = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=8_000,
+                        payer_id=a.id, category_id=c["電気"].id)
+
+    rows = rows_by_name(session)
+    assert rows["家賃"]["carry_payer_id"] == b.id, "分类上定了常驻垫付人，照上期记给他"
+    assert rows["家賃"]["payer_id"] is None
+    assert rows["電気"]["payer_id"] == a.id and rows["電気"]["entry_id"] == elec.id
+    assert rows["水道"]["carry_payer_id"] is None
+
+    made = carry_same_as_last(session, actor_id=a.id)["created"]
+    assert made == [{"category_id": c["家賃"].id, "name": "家賃", "amount": 120_000, "payer_id": b.id}]
+    assert rows_by_name(session)["家賃"]["payer_id"] == b.id
+    # 翻已出的账单也有
+    assert [r["payer_id"] for r in monthly_rows(session, st)["rows"]] == [a.id]
+
+
+# ------------------------------------------------- 规则没写到新室友（#14）
+
+
+def test_a_rule_that_names_everyone_but_the_new_roommate_is_marked(session: Session, members) -> None:
+    """分类规则点名写了三个人，第四个人搬进来之后在这一项上按 0 算 —— 只标出来，不替人补权重。"""
+    from app.services import settings as settings_svc
+
+    a, b, c_ = members
+    c = cats(session)
+    c["家賃"].default_rule_json = {"mode": "ratio", "weights": {str(a.id): 1, str(b.id): 1, str(c_.id): 1}}
+    session.add(c["家賃"])
+    d = Member(name="d", display_name="D", display_order=3, joined_on=dt.date(2026, 9, 1))
+    session.add(d)
+    session.commit()
+
+    rows = rows_by_name(session)
+    assert rows["家賃"]["rule_missing_member_ids"] == [d.id]
+    assert rows["電気"]["rule_missing_member_ids"] == [], "没定规则 → 全局均分，谁在籍算谁"
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=120_000,
+                 payer_id=a.id, category_id=c["家賃"].id, category_rule=c["家賃"].default_rule_json)
+    assert rows_by_name(session)["家賃"]["rule_missing_member_ids"] == [], "录过了就不是「起步」的事了"
+
+    # 全局默认要是点了名，没定规则的每一项都一样
+    settings_svc.set_(session, "default_rule", {"mode": "ratio", "weights": {str(a.id): 1, str(b.id): 1}})
+    assert rows_by_name(session)["電気"]["rule_missing_member_ids"] == [c_.id, d.id]
+
+
+# -------------------------------------------------- 两台手机同时出账（#5，照上期那一半）
+
+
+def test_carry_with_a_stale_view_of_the_last_bill_records_nothing(client, auth, session, members) -> None:
+    """B 手里的对话框还是出账前那一份：上期已经被 A 出掉了，再照上期记就是把房租记进**下一期**。"""
+    a, *_ = members
+    rent = cats(session)["家賃"]
+    rent.same_as_last = True
+    session.add(rent)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG, amount=120_000,
+                 payer_id=a.id, category_id=rent.id)
+    first = cut_statement(session, actor_id=a.id)
+
+    seen = client.get("/api/bill", headers=auth).json()["prev_statement_id"]        # 两台手机都看到这张
+    assert seen == first.id
+    body = {"category_ids": [rent.id], "after_statement_id": seen}
+    assert client.post("/api/monthly/carry", headers=auth, json=body).json()["created"]   # A 记上
+    r = client.post(f"/api/statements?after_statement_id={seen}", headers=auth)
+    assert r.status_code == 201                                                     # A 出账
+
+    r = client.post("/api/monthly/carry", headers=auth, json=body)                  # B 才点
+    assert r.status_code == 409 and r.json()["code"] == "bill_changed", r.text
+    assert unbilled(session) == [], "下一期不许多出一笔房租"
+    # 不带这个参数的旧前端照旧（面板上那颗「照上期」也不带）
+    r = client.post("/api/monthly/carry", headers=auth, json={"category_ids": [rent.id]})
+    assert [m["amount"] for m in r.json()["created"]] == [120_000]
+
+
+def _file_ledger(tmp_path):
+    """真文件库：上期出过一张带房租的单子，草稿里有一笔伙食。返回 (engine, 成员 id, 房租 id, 上期那张的 id)。
+    内存库那套 StaticPool 只有一条连接，两台手机交错的读写在它上面演不出来。"""
+    from sqlmodel import SQLModel, create_engine
+
+    from app.services import settings as settings_svc
+    from app.services.settings import seed_settings
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'two-phones.db'}",
+                           connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as s:
+        seed_settings(s)
+        settings_svc.set_(s, "backup_path", str(tmp_path / "backups"))
+        a = Member(name="a", display_name="A", display_order=0, joined_on=dt.date(2026, 1, 1))
+        rent = Category(name="房租", monthly=True, same_as_last=True)
+        food = Category(name="伙食")
+        for row in (a, rent, food):
+            s.add(row)
+        s.commit()
+        aid, rid, fid = a.id, rent.id, food.id
+        create_entry(s, actor_id=aid, kind=EntryKind.expense, on=AUG, amount=120_000,
+                     payer_id=aid, category_id=rid)
+        first = cut_statement(s, actor_id=aid, on=AUG).id
+        create_entry(s, actor_id=aid, kind=EntryKind.expense, on=SEP, amount=3_000,
+                     payer_id=aid, category_id=fid)
+    return engine, aid, rid, first
+
+
+def test_the_draft_hands_out_the_bill_id_it_was_read_against(tmp_path, monkeypatch) -> None:
+    """B 刷新出账框的那一刻，A 的「照上期 + 出账」正好在 B 读完草稿之后提交。
+    「最近一张」原来放在 build_bill 最后才读：B 拿到的是**旧草稿 + 新 id**，
+    弹框照样勾着「先按上期记上：房租」，带着新 id 一路过关 —— 房租记进下一期，
+    再出一张只有房租的单子。先拿 id 再读账目，最坏是旧 id，后面一律 409。"""
+    import app.services.bill as bill_mod
+    from app.services.bill import BillError, build_bill
+
+    engine, aid, rid, seen = _file_ledger(tmp_path)
+    real = bill_mod.unbilled
+    fired: list[bool] = []
+
+    def a_cuts_right_after_b_read_the_draft(session):
+        rows = real(session)
+        if not fired:
+            fired.append(True)
+            with Session(engine) as a:
+                carry_same_as_last(a, actor_id=aid, after_statement_id=seen)
+                cut_statement(a, actor_id=aid, after_statement_id=seen)
+        return rows
+
+    monkeypatch.setattr(bill_mod, "unbilled", a_cuts_right_after_b_read_the_draft)
+    with Session(engine) as s:
+        b = build_bill(s, None)
+    monkeypatch.undo()
+    assert fired and b["entry_count"] == 1, "B 手里是 A 出账之前那份草稿"
+    assert b["prev_statement_id"] == seen, "旧草稿配上新 id，后面的照上期和出账都会放行"
+
+    with Session(engine) as s:                     # B 照着这份对话框点下去
+        with pytest.raises(BillError) as e:
+            carry_same_as_last(s, actor_id=aid, after_statement_id=b["prev_statement_id"])
+        assert e.value.code == "bill_changed"
+        assert [x for x in unbilled(s) if x.category_id == rid] == [], "下一期不许多出一笔房租"
+
+
+def test_a_cut_landing_inside_a_carry_cannot_push_rent_into_the_next_period(tmp_path, monkeypatch) -> None:
+    """B 的「照上期」刚核完 after_statement_id、还没读本期有哪几项，A 的出账就提交了：
+    草稿一下子空了，房租被当成「本期还没记」，记进了**下一期**；B 紧接着的出账 409
+    「这次什么都没动」，可下一期的房租已经在那儿了。照上期和出账共用一把锁才堵得上。
+
+    B 读草稿之前等 A 出完账（最多等 1 秒）：没有共用的锁时 A 直接出完，B 读到空草稿；
+    有锁时 A 被挡在外面，B 等不到、超时接着走，整个跑在 A 出账之前。"""
+    import threading
+
+    import app.services.monthly as monthly_mod
+    from app.services.bill import BillError
+
+    engine, aid, rid, seen = _file_ledger(tmp_path)
+    with Session(engine) as s:
+        carry_same_as_last(s, actor_id=aid, after_statement_id=seen)      # A 先照上期记上房租
+
+    real = monthly_mod.unbilled
+    b_reading, a_cut = threading.Event(), threading.Event()
+
+    def b_waits_for_a_before_reading(session):
+        if threading.current_thread().name == "B":
+            b_reading.set()
+            a_cut.wait(timeout=1)
+        return real(session)
+
+    monkeypatch.setattr(monthly_mod, "unbilled", b_waits_for_a_before_reading)
+    out: dict[str, object] = {}
+
+    def a() -> None:
+        b_reading.wait(timeout=5)
+        with Session(engine) as s:
+            out["A"] = cut_statement(s, actor_id=aid, after_statement_id=seen).id
+        a_cut.set()
+
+    def b() -> None:
+        with Session(engine) as s:
+            try:
+                out["B"] = carry_same_as_last(s, actor_id=aid, after_statement_id=seen)
+            except BillError as e:
+                out["B"] = e.code
+
+    ts = [threading.Thread(target=a, name="A"), threading.Thread(target=b, name="B")]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    monkeypatch.undo()
+
+    assert "A" in out, "A 的出账没出成"
+    assert out["B"] == "bill_changed" or out["B"]["created"] == [], out["B"]
+    with Session(engine) as s:
+        assert [x for x in unbilled(s) if x.category_id == rid] == [], "A 出账之后草稿里又多了一笔房租"
+
+
+# ------------------------------------------------------- 审计里的来历（#46）
+
+
+def test_carry_leaves_where_it_was_copied_from_in_the_audit(session: Session, members) -> None:
+    from app.models import AuditLog
+
+    a, *_ = members
+    rent = cats(session)["家賃"]
+    rent.same_as_last = True
+    session.add(rent)
+    prev = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG, amount=120_000,
+                        payer_id=a.id, category_id=rent.id)
+    cut_statement(session, actor_id=a.id)
+    carry_same_as_last(session, actor_id=a.id)
+    made = next(e for e in unbilled(session) if e.category_id == rent.id)
+    log = session.exec(select(AuditLog).where(AuditLog.target_id == made.id, AuditLog.action == "create")).one()
+    assert log.after_json["via"] == {"kind": "carry", "from_entry": prev.id}
+    assert log.after_json["amount_jpy"] == 120_000, "快照本身的形状不变"
+
+
+# ------------------------------------------ 最近几期一模一样 → 问一句（#51）
+
+
+def _period(session: Session, a: Member, items: dict[int, list[int]], *, monthly: bool = True) -> None:
+    """出一期：items 是 {分类 id: 这期记的几笔}"""
+    filler = session.exec(select(Category).where(Category.name == "日用品")).one()
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG, amount=100,
+                 payer_id=a.id, category_id=filler.id)          # 好让每一期都有东西出
+    for cid, amounts in items.items():
+        for amount in amounts:
+            create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG, amount=amount,
+                         payer_id=a.id, category_id=cid)
+    cut_statement(session, actor_id=a.id, include_monthly=monthly)
+
+
+def test_suggest_same_as_last_after_k_identical_periods_without_saying_how_much(
+    session: Session, members
+) -> None:
+    a, *_ = members
+    c = cats(session)
+    rent, elec, water = c["家賃"], c["電気"], c["水道"]
+    _period(session, a, {rent.id: [120_000], elec.id: [8_000], water.id: [5_000]})
+    _period(session, a, {rent.id: [120_000], elec.id: [8_000], water.id: [5_000, 5_000]})   # 水费那期记了两笔
+    _period(session, a, {}, monthly=False)                                         # 中途一张日常小账，不断链
+    rows = rows_by_name(session)
+    assert rows["家賃"]["suggest_same_as_last"] is False, "才两期，不够 k=3"
+
+    _period(session, a, {rent.id: [120_000], elec.id: [9_100], water.id: [5_000]})
+    rows = rows_by_name(session)
+    assert rows["家賃"]["suggest_same_as_last"] is True
+    assert rows["家賃"]["last_amount"] is None and 120_000 not in rows["家賃"].values(), "只问，不报金额（D21）"
+    assert rows["電気"]["suggest_same_as_last"] is False, "金额变过"
+    assert rows["水道"]["suggest_same_as_last"] is False, "有一期是两笔"
+
+    rent.same_as_last = True
+    session.add(rent)
+    session.commit()
+    assert rows_by_name(session)["家賃"]["suggest_same_as_last"] is False, "已经开了就不问了"
+
+
+def test_suggest_same_as_last_skips_items_that_come_every_other_period(session: Session, members) -> None:
+    """隔月收、每次金额一样的水费不能被挑中：人照提示一开，单月那期出账框就默认勾上
+    「先按上期记上：水费」，每个单月多收一次。按账单数「最近 k 期」，缺一期就不问。"""
+    from app.services import settings as settings_svc
+
+    a, *_ = members
+    c = cats(session)
+    for i in range(6):
+        _period(session, a, {c["水道"].id: [12_000]} if i % 2 == 0 else {c["家賃"].id: [120_000]})
+    assert rows_by_name(session)["水道"]["suggest_same_as_last"] is False
+    settings_svc.set_(session, "same_as_last_hint_k", 0)
+    _period(session, a, {c["家賃"].id: [120_000]})
+    assert rows_by_name(session)["家賃"]["suggest_same_as_last"] is False, "0 ＝ 关"
+
+
+# ------------------------------------------ 隔几期出现一次（#47）
+
+
+def test_rhythm_tells_a_skipped_bimonthly_bill_from_a_forgotten_one(session: Session, members) -> None:
+    """出账时「X 还空着」：隔月收的水费上一期刚收过，这期本来轮空（cuts_since_last < typical_gap）；
+    上一期没收，这期就该有了。中途的日常小账不算一期。历史不够两个间隔的一律不给节奏 ——
+    猜错了就是把真忘了的账画成灰字。"""
+    a, *_ = members
+    c = cats(session)
+    rent, water, elec = c["家賃"], c["水道"], c["電気"]
+    _period(session, a, {rent.id: [120_000], water.id: [12_000], elec.id: [8_000]})
+    _period(session, a, {rent.id: [120_000]})
+    _period(session, a, {}, monthly=False)
+    _period(session, a, {rent.id: [120_000], water.id: [12_000]})
+    _period(session, a, {rent.id: [120_000]})
+    _period(session, a, {rent.id: [120_000], water.id: [12_000]})
+
+    rows = rows_by_name(session)
+    assert (rows["家賃"]["cuts_since_last"], rows["家賃"]["typical_gap"]) == (1, 1)     # 每期都有：该填
+    assert (rows["水道"]["cuts_since_last"], rows["水道"]["typical_gap"]) == (1, 2)     # 刚收过：这期轮空
+    assert (rows["電気"]["cuts_since_last"], rows["電気"]["typical_gap"]) == (5, None)  # 只出现过一次
+    _period(session, a, {rent.id: [120_000]})
+    rows = rows_by_name(session)
+    assert (rows["水道"]["cuts_since_last"], rows["水道"]["typical_gap"]) == (2, 2)     # 隔了一期：该收了
+
+
+def test_rhythm_gives_no_gap_while_the_history_is_short_or_uneven(session: Session, members) -> None:
+    a, *_ = members
+    c = cats(session)
+    water = c["水道"]
+    assert rows_by_name(session)["水道"]["cuts_since_last"] is None, "从来没出现过"
+    _period(session, a, {water.id: [12_000]})
+    _period(session, a, {water.id: [12_000]})
+    assert rows_by_name(session)["水道"]["typical_gap"] is None, "一个间隔不够"
+    _period(session, a, {c["家賃"].id: [1]})
+    _period(session, a, {water.id: [12_000]})                    # 间隔 1、2：不稳
+    assert rows_by_name(session)["水道"]["typical_gap"] is None
+
+
+def test_rhythm_needs_the_last_two_gaps_to_match_the_usual_one(session: Session, members) -> None:
+    """间隔 2、2、1、2：中位数是 2、最后一个间隔也是 2，可倒数第二个是 1 —— 节奏不稳，不给。
+    只看最后一个的话这期会被画成灰字的「还没轮到」，真忘了的那笔就藏起来了"""
+    a, *_ = members
+    c = cats(session)
+    water, rent = c["水道"], c["家賃"]
+    for i in range(8):                                           # 水道出现在第 0、2、4、5、7 期
+        _period(session, a, {rent.id: [120_000], **({water.id: [12_000]} if i in (0, 2, 4, 5, 7) else {})})
+    rows = rows_by_name(session)
+    assert (rows["水道"]["cuts_since_last"], rows["水道"]["typical_gap"]) == (1, None)
+
+
+# ---------------------------------------- 固定费记进了别的分类（#58）
+
+
+def test_a_fixed_cost_recorded_under_another_category_is_pointed_at(session: Session, members) -> None:
+    """「其他」里备注着「電気代」：面板和出账框照样说电费空着，人照着再填一次就重复了。
+    只问「是不是它？」—— 那一行还是空的、照上期照旧在、分类不替人改。"""
+    a, *_ = members
+    c = cats(session)
+    c["電気"].same_as_last = True
+    session.add(c["電気"])
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG, amount=8_700,
+                 payer_id=a.id, category_id=c["電気"].id)
+    cut_statement(session, actor_id=a.id)
+    stray = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=8_700,
+                         payer_id=a.id, category_id=c["日用品"].id, title="９月の電気代")
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=300,
+                 payer_id=a.id, category_id=c["日用品"].id, title="电池")
+
+    rows = rows_by_name(session)
+    assert rows["電気"]["maybe_elsewhere"] == [
+        {"entry_id": stray.id, "amount": 8_700, "category_name": "日用品", "title": "９月の電気代"}
+    ]
+    assert rows["電気"]["amount"] is None and rows["電気"]["carry_amount"] == 8_700, "弱证据不改任何默认"
+    assert rows["水道"]["maybe_elsewhere"] == []
+    session.refresh(stray)
+    assert stray.category_id == c["日用品"].id
+
+    # 已经填了的行也要说（那就是「可能记重了」）
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=8_700,
+                 payer_id=a.id, category_id=c["電気"].id)
+    assert [x["entry_id"] for x in rows_by_name(session)["電気"]["maybe_elsewhere"]] == [stray.id]
+    # 别的固定费那一行底下备注着「電気」（水费单上写着「含電気」）：它在自己那一行，不是记错了分类
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=5_000,
+                 payer_id=a.id, category_id=c["水道"].id, title="水道・電気まとめ")
+    assert [x["entry_id"] for x in rows_by_name(session)["電気"]["maybe_elsewhere"]] == [stray.id]
+
+
+# ------------------------------------------------ 抄的是最近那一期（#33）
+
+
+def test_carry_copies_the_latest_period_not_an_older_one(session: Session, members) -> None:
+    """8 月房租 120,000（A 垫、均分），9 月涨到 125,000（B 垫、A 多担 5,000）。
+    照上期抄的、面板上「上期」给的，都得是 9 月那一笔 —— 金额、垫付人、分摊一起。
+
+    排序方向原来没人钉：改成取最老的，会一直抄涨租之前的旧租金、旧垫付人。
+    两张故意在不同的日子出（固定费的日期出账时被盖成出账日，同一天出的话分不出先后）。"""
+    from app.services.bill import _shares_of
+
+    a, b, c_ = members
+    cat = cats(session)["家賃"]
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG, amount=120_000,
+                 payer_id=a.id, category_id=cat.id)
+    cut_statement(session, actor_id=a.id, on=dt.date(2026, 8, 31))
+    rule = {"mode": "ratio", "weights": {str(a.id): 1, str(b.id): 1, str(c_.id): 1},
+            "adjustments": {str(a.id): 5_000, str(c_.id): -5_000}}
+    sep = create_entry(session, actor_id=b.id, kind=EntryKind.expense, on=SEP, amount=125_000,
+                       payer_id=b.id, category_id=cat.id, rule=rule)
+    cut_statement(session, actor_id=a.id, on=dt.date(2026, 9, 30))
+    cat.same_as_last = True
+    session.add(cat)
+    session.commit()
+
+    row = rows_by_name(session)["家賃"]
+    assert (row["carry_amount"], row["last_amount"], row["last_payer_id"]) == (125_000, 125_000, b.id)
+    made = carry_same_as_last(session, actor_id=a.id)["created"]
+    assert [m["amount"] for m in made] == [125_000]
+    rent = next(e for e in unbilled(session) if e.category_id == cat.id)
+    assert rent.payer_id == b.id
+    assert _shares_of(session, [rent.id])[rent.id] == _shares_of(session, [sep.id])[sep.id]
+
+
+def test_on_the_same_date_the_later_entry_wins(session: Session, members) -> None:
+    """两张在同一天出（日期一样）：按 id 取后记的那一笔。这一层平局规则也要钉"""
+    a, *_ = members
+    cat = cats(session)["家賃"]
+    same_day = dt.date(2026, 9, 30)
+    for amount in (120_000, 125_000):
+        create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=amount,
+                     payer_id=a.id, category_id=cat.id)
+        cut_statement(session, actor_id=a.id, on=same_day)
+    cat.same_as_last = True
+    session.add(cat)
+    session.commit()
+    assert rows_by_name(session)["家賃"]["carry_amount"] == 125_000
+
+
+# ------------------------------------------------ 面板上「这笔算谁垫的」不预填搬走的人（#38）
+
+
+def test_unrecorded_row_skips_last_payer_who_moved_out(session: Session, members) -> None:
+    """上期房租是 C 垫的，C 已经搬走：面板手填的那一行不许预填成 C ——
+    账单会反过来叫留下的人给他转钱（AUDIT 第二轮「我替你定的」#2）。
+    后端没有「垫付人当天在籍」的校验（还挂着），这一道过滤是唯一的闸"""
+    a, b, c_ = members
+    cat = cats(session)["家賃"]
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=AUG, amount=120_000,
+                 payer_id=c_.id, category_id=cat.id)
+    cut_statement(session, actor_id=a.id)
+    c_.left_on = dt.date(2026, 8, 31)
+    session.add(c_)
+    session.commit()
+    assert rows_by_name(session)["家賃"]["last_payer_id"] is None
+
+
+# ------------------------------------------------ 面板合计只算固定费（#79）
+
+
+def test_the_panel_total_counts_only_fixed_costs(session: Session, members) -> None:
+    """面板底下那个合计是「本期固定费」：同一张草稿里的日常开销不许混进去"""
+    a, *_ = members
+    c = cats(session)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=120_000,
+                 payer_id=a.id, category_id=c["家賃"].id)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=3_000,
+                 payer_id=a.id, category_id=c["日用品"].id)
+    assert monthly_rows(session)["total"] == 120_000

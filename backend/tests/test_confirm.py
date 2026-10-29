@@ -91,3 +91,41 @@ def test_pair_not_in_plan_has_nothing_left(client: TestClient, auth, members) ->
     r = client.post("/api/bill/confirm", json=body, headers=auth)
     assert r.status_code == 409
     assert r.json()["detail"]["left"] == 0
+
+
+def test_an_old_bill_cannot_conjure_debt_once_everyone_is_square(
+    client: TestClient, auth, members
+) -> None:
+    """AUDIT §B.4 原样走一遍：A 垫 30,000 → 出 S1（B→A、C→A 各 10,000）；
+    C 垫 60,000 → 出 S2 → 照 S2 全转完。此刻全屋两清，S1 那两行再也不会走钱。
+
+    后端这里是「确认已完成」最后一道闸，两半都要钉住：
+      * 「此刻还该转多少」要和实时方案取小 —— 这一对不在实时方案里就是 0；
+      * 算出来是 0 就拒收，哪怕手机上带来的 expect_left 也是 0。
+    拆掉任意一半，点一下就凭空多出一万块的债（两行都点是 B、C 各 +10,000、A −20,000）。"""
+    a, _, c = members
+    post = lambda body: client.post("/api/entries", headers=auth, json=body)  # noqa: E731
+    assert post({"kind": "expense", "date": SEP, "amount_jpy": 30_000, "payer_id": a.id}).status_code == 201
+    s1 = client.post("/api/statements", headers=auth).json()["id"]
+    s1_plan = client.get(f"/api/statements/{s1}/bill", headers=auth).json()["transfers"]
+    assert sorted(t["amount"] for t in s1_plan) == [10_000, 10_000]
+
+    assert post({"kind": "expense", "date": SEP, "amount_jpy": 60_000, "payer_id": c.id}).status_code == 201
+    s2 = client.post("/api/statements", headers=auth).json()["id"]
+    for t in client.get(f"/api/statements/{s2}/bill", headers=auth).json()["transfers"]:
+        assert post({"kind": "settlement", "date": SEP, "amount_jpy": t["amount"],
+                     "payer_id": t["from_id"], "to_member_id": t["to_id"]}).status_code == 201
+    assert set(client.get("/api/balances", headers=auth).json()["balances"].values()) == {0}, "前提：全屋两清"
+    n = len([e for e in client.get("/api/entries", headers=auth).json() if e["kind"] == "settlement"])
+
+    for t in s1_plan:
+        for expect in (t["amount"], 0):
+            r = client.post("/api/bill/confirm", headers=auth, json={
+                "statement_id": s1, "from_id": t["from_id"], "to_id": t["to_id"],
+                "amount": t["amount"], "expect_left": expect,
+            })
+            assert r.status_code == 409, (t, expect, r.text)
+            assert r.json()["code"] == "transfer_changed" and r.json()["detail"]["left"] == 0
+
+    assert set(client.get("/api/balances", headers=auth).json()["balances"].values()) == {0}
+    assert len([e for e in client.get("/api/entries", headers=auth).json() if e["kind"] == "settlement"]) == n

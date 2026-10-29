@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hmac
+import logging
 import os
 import secrets
 from pathlib import Path
@@ -26,6 +27,10 @@ ALGORITHM = "HS256"
 TOKEN_DAYS = 90
 #: bcrypt 只认前 72 字节，超长密码会被悄悄截断，不如直接拒绝
 MAX_PASSWORD_BYTES = 72
+#: 自己在环境变量里给的签名密钥至少这么长（HS256 推荐的下限）。自动生成的 .secret 是 64 个字符
+MIN_SECRET_BYTES = 32
+
+log = logging.getLogger("nagaya")
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -33,6 +38,14 @@ _bearer = HTTPBearer(auto_error=False)
 def _load_secret() -> str:
     env = os.getenv("NAGAYA_SECRET")
     if env:
+        if len(env.encode()) < MIN_SECRET_BYTES:
+            # 只警告不拒绝启动：拒绝的话，已经这么配着的那台一升级就起不来。
+            # 短密钥的后果是拿到一张 token 就能离线把密钥试出来，再给 token 的主人
+            # 重签一张永不过期的（别人的伪造不了：token 里还有一道按各人密码哈希算的指纹）
+            log.warning(
+                "NAGAYA_SECRET 只有 %d 字节，不到 %d —— 建议删掉这个环境变量，用自动生成的 data/.secret",
+                len(env.encode()), MIN_SECRET_BYTES,
+            )
         return env
     path = Path(DB_PATH).parent / ".secret"
     if path.exists():

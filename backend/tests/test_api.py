@@ -43,7 +43,8 @@ def test_create_entry_returns_shares(client, auth, members):
     assert body["shares"] == {str(a.id): 3334, str(b.id): 3333, str(c.id): 3333}
     assert sum(body["shares"].values()) == 10_000
     assert body["statement_id"] is None      # 还没出账，在当前草稿里
-    assert body["version"] == 1
+    # version 的起点是随机的（models.Entry.version）：只认「是个正整数」，之后每改一次 +1
+    assert isinstance(body["version"], int) and 1 <= body["version"] < 2**31
 
 
 def test_same_client_key_records_only_once(client: TestClient, auth, members) -> None:
@@ -98,7 +99,7 @@ def test_version_conflict(client, auth, members):
                                 "payer_id": a.id}).json()
     ok = client.patch(f"/api/entries/{created['id']}?version={created['version']}", headers=auth,
                       json={"date": SEP, "amount_jpy": 2_000, "payer_id": a.id})
-    assert ok.status_code == 200 and ok.json()["version"] == 2
+    assert ok.status_code == 200 and ok.json()["version"] == created["version"] + 1
 
     stale = client.patch(f"/api/entries/{created['id']}?version={created['version']}", headers=auth,
                          json={"date": SEP, "amount_jpy": 3_000, "payer_id": a.id})
@@ -510,3 +511,316 @@ def test_login_input_is_bounded(client, members) -> None:
 def test_pref_values_with_a_trailing_newline_are_rejected(client, auth) -> None:
     r = client.patch("/api/prefs", headers=auth, json={"scheme": "dark\n"})
     assert r.status_code == 400
+
+
+# ------------------------------------------------ 固定费量级闸（#4）
+
+
+def _fixed_cost(session, name: str = "電気"):
+    from app.models import Category
+
+    cat = Category(name=name, monthly=True)
+    session.add(cat)
+    session.commit()
+    session.refresh(cat)
+    return cat
+
+
+def _post(client, auth, payer_id: int, category_id: int, amount: int, **extra):
+    return client.post("/api/entries", headers=auth, json={
+        "kind": "expense", "date": SEP, "amount_jpy": amount, "payer_id": payer_id,
+        "category_id": category_id, **extra,
+    })
+
+
+def test_a_fixed_cost_far_off_last_period_asks_before_saving(client, auth, session, members) -> None:
+    """多打一个 0、少打一个 0：固定费面板离开输入框就保存，记进去和填对了一模一样。
+    先问一句（409 amount_jump），人点了确定带 confirm_jump 再来。两个方向都问。"""
+    from app.services.bill import cut_statement, unbilled
+
+    a = members[0]
+    elec = _fixed_cost(session)
+    assert _post(client, auth, a.id, elec.id, 8_700).status_code == 201, "没出过账的项没东西可比，不问"
+    cut_statement(session, actor_id=a.id)
+
+    r = _post(client, auth, a.id, elec.id, 87_000)
+    assert r.status_code == 409 and r.json()["code"] == "amount_jump", r.text
+    assert r.json()["detail"] == {"ratio": 10, "direction": "up"}
+    r = _post(client, auth, a.id, elec.id, 870)
+    assert r.status_code == 409 and r.json()["detail"] == {"ratio": 10, "direction": "down"}
+    assert unbilled(session) == [], "问的时候一笔都不许记"
+
+    ok = _post(client, auth, a.id, elec.id, 9_100)
+    assert ok.status_code == 201
+    entry = ok.json()
+    # 改金额也问；只改垫付人（金额没动）不问
+    r = client.patch(f"/api/entries/{entry['id']}?version={entry['version']}", headers=auth,
+                     json={"amount_jpy": 91_000})
+    assert r.status_code == 409 and r.json()["code"] == "amount_jump"
+    # 改的时候本期合计不算这一笔的旧金额（exclude_id）。算进去的话 9,100 + 870 = 9,970，
+    # 够不着上期 8,700 的四分之一，少打一个 0 被放行；正常改成 30,000（约 3.4 倍）反倒要问
+    r = client.patch(f"/api/entries/{entry['id']}?version={entry['version']}", headers=auth,
+                     json={"amount_jpy": 870})
+    assert r.status_code == 409 and r.json()["code"] == "amount_jump", r.text
+    assert r.json()["detail"] == {"ratio": 10, "direction": "down"}
+    r = client.patch(f"/api/entries/{entry['id']}?version={entry['version']}", headers=auth,
+                     json={"amount_jpy": 30_000})
+    assert r.status_code == 200, r.text
+    entry = r.json()
+    r = client.patch(f"/api/entries/{entry['id']}?version={entry['version']}", headers=auth,
+                     json={"amount_jpy": 91_000, "confirm_jump": True})
+    assert r.status_code == 200 and r.json()["amount_jpy"] == 91_000
+    r = client.patch(f"/api/entries/{entry['id']}?version={r.json()['version']}", headers=auth,
+                     json={"payer_id": members[1].id})
+    assert r.status_code == 200, "金额没变不是打错数"
+
+
+def test_the_jump_gate_compares_category_totals_not_single_entries(client, auth, session, members) -> None:
+    """上期电费分两笔记（8,700 + 300）：拿其中一笔比，下期正常的 9,000 会被当成 30 倍。
+    这一期也是合计：先记了 4,500，再记 4,500 是 9,000，不是 4,500。"""
+    import datetime as dt
+
+    from app.models import EntryKind
+    from app.services.bill import cut_statement
+    from app.services.ledger import create_entry
+
+    a = members[0]
+    elec = _fixed_cost(session)
+    for amount in (8_700, 300):
+        create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=dt.date(2026, 9, 10),
+                     amount=amount, payer_id=a.id, category_id=elec.id)
+    cut_statement(session, actor_id=a.id)
+    assert _post(client, auth, a.id, elec.id, 9_000).status_code == 201
+    r = _post(client, auth, a.id, elec.id, 30_000)
+    assert r.status_code == 409 and r.json()["detail"]["ratio"] == 4.3   # 39,000 / 9,000
+
+
+def test_the_jump_gate_leaves_alone_what_it_should(client, auth, session, members) -> None:
+    """日常分类、收入不问；改一张旧账单上的固定费跟**它的**上一期比；设置填 0 就整个关掉。"""
+    from app.models import Category
+    from app.services import settings as settings_svc
+    from app.services.bill import cut_statement
+
+    a = members[0]
+    elec = _fixed_cost(session)
+    daily = Category(name="日用", monthly=False)
+    session.add(daily)
+    session.commit()
+    session.refresh(daily)
+    first = _post(client, auth, a.id, elec.id, 8_700).json()
+    cut_statement(session, actor_id=a.id)
+    second = _post(client, auth, a.id, elec.id, 9_000).json()
+    cut_statement(session, actor_id=a.id)
+
+    assert _post(client, auth, a.id, daily.id, 50).status_code == 201
+    assert _post(client, auth, a.id, daily.id, 500_000).status_code == 201, "日常支出有自己的离群提示，不在这儿拦"
+    r = client.post("/api/entries", headers=auth, json={
+        "kind": "income", "date": SEP, "amount_jpy": -870_000, "payer_id": a.id, "category_id": elec.id})
+    assert r.status_code == 201, "押金退款这种收入不问"
+
+    # 第一张之前没有电费：改它不问。第二张跟第一张比
+    r = client.patch(f"/api/entries/{first['id']}?version={first['version'] + 1}", headers=auth,
+                     json={"amount_jpy": 87_000})
+    assert r.status_code == 200, r.text
+    r = client.patch(f"/api/entries/{second['id']}?version={second['version'] + 1}", headers=auth,
+                     json={"amount_jpy": 870_000})
+    assert r.status_code == 409 and r.json()["detail"]["direction"] == "up"
+
+    settings_svc.set_(session, "fixed_jump_ratio", 0)
+    assert _post(client, auth, a.id, elec.id, 870_000).status_code == 201
+
+
+# ------------------------------------------------ 幂等键撞上一笔已删的账（#43）
+
+
+def test_replaying_a_key_whose_entry_was_deleted_says_so(client: TestClient, auth, members) -> None:
+    """记上过、后来被人删了，草稿又补交一次：原来回 201 和那笔账，前端提示「已记下」，账本里却没有。
+    也不许替人再记一笔 —— 那等于把别人刚删的账悄悄记回去。"""
+    a = members[0]
+    body = {"kind": "expense", "date": SEP, "amount_jpy": 1_200, "payer_id": a.id,
+            "client_key": "k-deleted-0123456"}
+    first = client.post("/api/entries", json=body, headers=auth).json()
+    assert client.delete(f"/api/entries/{first['id']}", headers=auth).status_code == 204
+
+    r = client.post("/api/entries", json=body, headers=auth)
+    assert r.status_code == 409, r.text
+    assert r.json()["code"] == "key_entry_deleted" and r.json()["detail"] == {"entry_id": first["id"]}
+    assert client.get("/api/entries", headers=auth).json() == []
+    assert set(client.get("/api/balances", headers=auth).json()["balances"].values()) == {0}
+
+
+# ------------------------------------------------ 固定费 / 日常是定死的（#39）
+
+
+def test_a_category_cannot_switch_between_fixed_and_daily(client: TestClient, auth, members) -> None:
+    """已出的账单上「本期固定费」「含帮买」都按它现分：翻个面，每张旧账单的这两块就跟着变，
+    而且不挂「出账后被改过」（钱没动）。界面从来不发这一项，接口也不收。"""
+    a, b, _ = members
+    cat = client.post("/api/categories", headers=auth, json={"name": "车位", "monthly": True}).json()
+    client.post("/api/entries", headers=auth, json={
+        "kind": "expense", "date": SEP, "amount_jpy": 8_000, "payer_id": a.id, "category_id": cat["id"],
+        "rule": {"mode": "ratio", "weights": {str(b.id): 1}}, "member_ids": [b.id]})
+    st = client.post("/api/statements", headers=auth).json()
+    before = client.get(f"/api/statements/{st['id']}/bill", headers=auth).json()
+
+    r = client.patch(f"/api/categories/{cat['id']}", headers=auth, json={"monthly": False})
+    assert r.status_code == 409 and r.json()["code"] == "monthly_immutable"
+    assert client.patch(f"/api/categories/{cat['id']}", headers=auth,
+                        json={"monthly": True, "note": "B 的车位"}).status_code == 200, "没变就照常改"
+    after = client.get(f"/api/statements/{st['id']}/bill", headers=auth).json()
+    assert after["help_total"] == before["help_total"] == 0
+    assert after["monthly_ids"] == before["monthly_ids"]
+
+
+# ------------------------------------------------ 继承的规则点名的人全搬走了（#42）
+
+
+def test_an_inherited_rule_whose_people_all_left_is_refused_not_spread(
+    client: TestClient, auth, session, members
+) -> None:
+    """分类规则写的「只算 C」，C 搬走之后不带规则记一笔：原来悄悄退回大家均分，
+    而前端预览对同一条规则是全 0、不让存 —— 两边口径相反。等价的另一种写法本来就是 400。"""
+    import datetime as dt
+
+    a, b, c = members
+    for weights in ({str(c.id): 1}, {str(a.id): 0, str(b.id): 0, str(c.id): 1}):
+        cat = client.post("/api/categories", headers=auth, json={
+            "name": f"C 的东西 {len(weights)}", "default_rule_json": {"mode": "ratio", "weights": weights}}).json()
+        c.left_on = dt.date(2026, 9, 1)
+        session.add(c)
+        session.commit()
+        r = client.post("/api/entries", headers=auth, json={
+            "kind": "expense", "date": SEP, "amount_jpy": 3_000, "payer_id": a.id, "category_id": cat["id"]})
+        assert r.status_code == 400 and r.json()["code"] == "weights_all_zero", (weights, r.text)
+        c.left_on = None
+        session.add(c)
+        session.commit()
+    assert client.get("/api/entries", headers=auth).json() == []
+
+
+# ------------------------------------------------ /api/monthly 每行多出来的字段（契约）
+
+
+def test_monthly_rows_carry_the_new_fields(client: TestClient, auth, session, members) -> None:
+    _fixed_cost(session)
+    row = client.get("/api/monthly", headers=auth).json()["rows"][0]
+    for key in ("payer_id", "carry_payer_id", "carry_blocked", "carry_blocked_detail",
+                "rule_missing_member_ids", "suggest_same_as_last", "maybe_elsewhere",
+                "cuts_since_last", "typical_gap"):
+        assert key in row, key
+    assert row["rule_missing_member_ids"] == [] and row["maybe_elsewhere"] == []
+    assert row["suggest_same_as_last"] is False and row["cuts_since_last"] is None
+
+
+# ------------------------------------------------ 只在前端有的几条校验，后端补上（#57）
+
+
+def test_member_names_are_trimmed_and_bounded_on_the_server_too(client: TestClient, auth, members) -> None:
+    """界面上一直是去空格、不许空、限 20 字再发的；接口原来照单全收：
+    65 字的登录名建得出来却永远登不上（登录那边限 64）、「 ren 」登录时打 ren 是 401、
+    空昵称让这个人在账单上只剩一个没字的色圆。"""
+    me, other, *_ = members
+    new = lambda **kw: client.post("/api/members", headers=auth,  # noqa: E731
+                                   json={"password": "pw123456", **kw})
+    r = new(name="x" * 65)
+    assert r.status_code == 400 and r.json()["code"] == "text_too_long"
+    r = new(name="ren", display_name="长" * 65)
+    assert r.status_code == 400 and r.json()["code"] == "text_too_long"
+    for blank in ("", "   "):
+        r = new(name="ren", display_name=blank)
+        assert r.status_code == 400 and r.json()["code"] == "name_required", repr(blank)
+
+    r = new(name=" ren ", display_name=" Ren ")
+    assert r.status_code == 201, r.text
+    assert r.json()["name"] == "ren" and r.json()["display_name"] == "Ren"
+    assert client.post("/api/auth/login", json={"name": "ren", "password": "pw123456"}).status_code == 200
+    assert new(name="x" * 64).status_code == 201, "64 正好是登录那边的上限，收"
+
+    # PATCH 同理，替别人改昵称也一样（昵称不是只许本人改的那几样）
+    r = client.patch(f"/api/members/{other.id}", headers=auth, json={"display_name": "  "})
+    assert r.status_code == 400 and r.json()["code"] == "name_required"
+    r = client.patch(f"/api/members/{me.id}", headers=auth, json={"name": "y" * 65})
+    assert r.status_code == 400 and r.json()["code"] == "text_too_long", "改成登不上的名字等于把自己锁在门外"
+    r = client.patch(f"/api/members/{me.id}", headers=auth, json={"display_name": " 阿 A "})
+    assert r.status_code == 200 and r.json()["display_name"] == "阿 A"
+
+
+def test_the_fallback_category_must_be_a_daily_one_in_use(client: TestClient, auth, session) -> None:
+    """兜底分类指到固定费：日常支出落进固定费，出账时日期被盖、面板上平白多一笔「另有 N 笔」；
+    指到归档的：记账那屏连这个分类都看不到。界面的下拉本来就只列日常的，接口照着它卡"""
+    from app.models import Category
+
+    rent = Category(name="家賃", monthly=True)
+    gone = Category(name="旧的", archived=True)
+    daily = Category(name="日用品")
+    for c in (rent, gone, daily):
+        session.add(c)
+    session.commit()
+    for c in (rent, gone, daily):
+        session.refresh(c)
+    for bad in (rent.id, gone.id):
+        r = client.put("/api/settings/fallback_category_id", headers=auth, json={"value": bad})
+        assert r.status_code == 400 and r.json()["code"] == "setting_invalid", bad
+    assert client.put("/api/settings/fallback_category_id", headers=auth,
+                      json={"value": daily.id}).status_code == 200
+    assert client.put("/api/settings/fallback_category_id", headers=auth,
+                      json={"value": None}).status_code == 200
+
+
+# ------------------------------------------------ 恢复之后旧编辑页不许改到别人那笔（#71）
+
+
+def test_a_reused_id_does_not_inherit_a_matching_version(client: TestClient, auth, session, members) -> None:
+    """恢复备份之后，新账从「备份里最大的 id + 1」重新编号；恢复前就开着的编辑页拿着同一个 id。
+
+    version 原来一律从 1 起，乐观锁对不出来 —— 那台手机一点保存，别人刚记的那笔
+    （金额、付款人、分摊）整个被换掉。起点是随机数之后，旧页面上那个 version 对不上。
+    这里用「硬删掉最后一笔再记一笔」模拟恢复：SQLite 普通 rowid 表会把同一个 id 发出去。
+    """
+    from sqlalchemy import text
+
+    me, other, *_ = members
+    body = {"date": "2026-09-01", "amount_jpy": 1_111, "payer_id": me.id, "title": "恢复前"}
+    stale = client.post("/api/entries", headers=auth, json=body).json()   # 手机上开着它的编辑页
+    session.execute(text("delete from entry_share where entry_id = :i"), {"i": stale["id"]})
+    session.execute(text("delete from entry where id = :i"), {"i": stale["id"]})
+    session.commit()
+    fresh = client.post("/api/entries", headers=auth,
+                        json={**body, "amount_jpy": 4_444, "payer_id": other.id, "title": "别人刚记的"}).json()
+    assert fresh["id"] == stale["id"], "前提：同一个 id 又被发出去了"
+
+    r = client.patch(f"/api/entries/{fresh['id']}?version={stale['version']}", headers=auth,
+                     json={"amount_jpy": 1_111, "payer_id": me.id, "title": "手机上改的"})
+    assert r.status_code == 409 and r.json()["code"] == "version_conflict"
+    r = client.delete(f"/api/entries/{fresh['id']}?version={stale['version']}", headers=auth)
+    assert r.status_code == 409, "删除走的是同一把锁"
+    kept = client.get(f"/api/entries/{fresh['id']}", headers=auth).json()
+    assert (kept["amount_jpy"], kept["title"]) == (4_444, "别人刚记的")
+
+
+# ------------------------------------------------ 删除也带乐观锁（#37）
+
+
+def test_deleting_with_a_stale_version_is_refused(client: TestClient, auth, members) -> None:
+    """固定费面板清空一格＝删那一笔，带着它读到的 version。室友刚出完账（version 跟着 +1），
+    这边再删的就是刚发进群里那张单子上的账 —— 必须 409，那一笔原样留着。
+
+    PATCH 带 version 早有用例，DELETE 一条都没有：把那道比较拆掉全套照样绿。"""
+    me, *_ = members
+    e = client.post("/api/entries", headers=auth,
+                    json={"date": SEP, "amount_jpy": 120_000, "payer_id": me.id}).json()
+    total = lambda: client.get("/api/balances", headers=auth).json()["balances"]  # noqa: E731
+    st = client.post("/api/statements", headers=auth).json()["id"]
+    now = client.get(f"/api/entries/{e['id']}", headers=auth).json()
+    assert now["version"] == e["version"] + 1 and now["statement_id"] == st
+
+    before = total()
+    r = client.delete(f"/api/entries/{e['id']}?version={e['version']}", headers=auth)
+    assert r.status_code == 409 and r.json()["code"] == "version_conflict"
+    assert client.get(f"/api/entries/{e['id']}", headers=auth).status_code == 200
+    assert client.get(f"/api/statements/{st}/bill", headers=auth).json()["total_expense"] == 120_000
+    assert total() == before
+
+    assert client.delete(f"/api/entries/{e['id']}?version={now['version']}", headers=auth).status_code == 204
+    # 已经删掉的再拿旧 version 删一次：什么都不做（重试不该 409，也不该再记一条审计）
+    assert client.delete(f"/api/entries/{e['id']}?version={e['version']}", headers=auth).status_code == 204

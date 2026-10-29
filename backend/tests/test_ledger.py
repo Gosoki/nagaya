@@ -343,3 +343,30 @@ def test_a_deleted_entry_cannot_be_edited(session: Session, members) -> None:
     with pytest.raises(LedgerError) as caught:
         update_entry(session, e, actor_id=a.id, version=stale_version, fields={"amount_jpy": 9_000})
     assert caught.value.code == "version_conflict"
+
+
+def test_the_remainder_follows_member_order_not_how_ids_sort_as_text(session, members) -> None:
+    """余数归谁（按成员顺序）看的是 (display_order, 数值 id)，和记一笔那屏的预览同一个口径。
+
+    按字符串排的话 "10" < "2"，成员 id 一过两位数，那 1 円就落到预览之外的另一个人头上；
+    干脆不看 display_order 的话，排序号定下的「谁先」不作数。fixture 里排序号和 id
+    恰好同序、id 只到 3，这两种改坏原来都测不出来。"""
+    a, b, _ = members
+    ten = Member(id=10, name="ten", display_name="Ten", display_order=-1, joined_on=dt.date(2026, 1, 1))
+    two_tie = Member(id=12, name="tw", display_name="Tw", display_order=b.display_order,
+                     joined_on=dt.date(2026, 1, 1))
+    session.add_all([ten, two_tie])
+    session.commit()
+    settings_svc.set_(session, "remainder_to", "order")
+    on = dt.date(2026, 9, 10)
+
+    def split3(ids: list[int], amount: int) -> dict[int, int]:
+        e = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=on, amount=amount,
+                         payer_id=a.id, member_ids=ids,
+                         rule={"mode": "ratio", "weights": {str(i): 1 for i in ids}})
+        return shares_of(session, e.id)
+
+    # 排序号最小的是 id 10：它排第一，多出来的 1 円归它
+    assert split3([a.id, b.id, 10], 100) == {a.id: 33, b.id: 33, 10: 34}
+    # 排序号打平（b 和 12）：按数值 id，2 在 12 前面
+    assert split3([b.id, 12], 101) == {b.id: 51, 12: 50}

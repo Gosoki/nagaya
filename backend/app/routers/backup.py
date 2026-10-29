@@ -29,6 +29,17 @@ def backup_status(
     return backup_svc.status(session)
 
 
+@router.get("/alert")
+def backup_alert(
+    session: Session = Depends(get_session), _: Member = Depends(current_member)
+) -> dict[str, str | None]:
+    """平时要不要亮红点。备份的状态原来只在「更多 → 设置 → 备份」最底下那一块看得见，
+    而平时没人会去看 —— 目录没挂上、盘满了，备份能一声不吭地停好几周。
+    前端开 App、切回前台各问一次。哪些算「出问题」见 backup_svc.alert。
+    要登录：/api/health 不带这个（Docker 每 30 秒探一次活，不能每次都去打开备份文件）"""
+    return {"alert": backup_svc.alert(session)}
+
+
 @router.post("")
 def make_backup(
     session: Session = Depends(get_session), _: Member = Depends(current_member)

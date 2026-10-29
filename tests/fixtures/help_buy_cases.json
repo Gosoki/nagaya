@@ -1,0 +1,21 @@
+{
+  "_readme": [
+    "「帮买」的认法：一笔支出，付款人自己一分不担、全算在一个别人头上。是就返回那个人的 id，不是就是 null。",
+    "后端 services/bill.help_buy_for 和前端 src/core/helpBuy.ts 是同一条规则，两边跑的是这同一份用例 ——",
+    "以后加规则（比如再排除某种分类）先加用例：只改一边的话，另一边的测试会红。",
+    "字段：kind（expense / income / settlement）、payer_id、shares（键是字符串的成员 id → 日元）、",
+    "fixed_cost（这笔挂在固定费分类上，省了 ＝ false）、expected（帮谁买的成员 id，或 null）。"
+  ],
+  "cases": [
+    { "name": "Go 付钱、全算 Kan 的 ＝ 替 Kan 买", "kind": "expense", "payer_id": 1, "shares": { "2": 3200 }, "expected": 2 },
+    { "name": "别人是 0 的行也算「只有一个人担」（支出页把另外两人点成不参与记的）", "kind": "expense", "payer_id": 1, "shares": { "1": 0, "2": 3200, "3": 0 }, "expected": 2 },
+    { "name": "付款人在 shares 里是 0 行、只有另一个人担", "kind": "expense", "payer_id": 1, "shares": { "1": 0, "2": 1000 }, "expected": 2 },
+    { "name": "付款人自己也担一份 —— 普通支出", "kind": "expense", "payer_id": 1, "shares": { "1": 500, "2": 500 }, "expected": null },
+    { "name": "全算在两个别人头上 —— 普通支出", "kind": "expense", "payer_id": 1, "shares": { "2": 500, "3": 500 }, "expected": null },
+    { "name": "只有付款人自己担：自己买自己用的，不是帮买", "kind": "expense", "payer_id": 1, "shares": { "1": 1000 }, "expected": null },
+    { "name": "shares 为空 —— 不是", "kind": "expense", "payer_id": 1, "shares": {}, "expected": null },
+    { "name": "转账不是", "kind": "settlement", "payer_id": 1, "shares": { "2": 3200 }, "expected": null },
+    { "name": "收入不是", "kind": "income", "payer_id": 1, "shares": { "2": -3200 }, "expected": null },
+    { "name": "挂在固定费上的不算：车位从 Go 卡上扣、只算 Kan 的，固定费那块已经列着", "kind": "expense", "payer_id": 1, "shares": { "2": 8000 }, "fixed_cost": true, "expected": null }
+  ]
+}

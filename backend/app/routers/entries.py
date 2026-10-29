@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 
 from app.auth import current_member
 from app.db import get_session
-from app.errors import not_found
+from app.errors import AppError, not_found
 from app.models import Category, Entry, EntryShare, Member, RequestKey, Statement
 from app.schemas import EntryIn, EntryOut, EntryPatch
 from app.services import ledger
@@ -120,6 +120,14 @@ def create_entry(
             # 这笔早就记上了（多半是上次响应丢在路上）：原样还给它，不再记一遍
             old = session.get(Entry, seen.entry_id)
             if old is not None:
+                if old.deleted_at is not None:
+                    # 记上过、后来又被人删了。原来照样回 201 和那笔账（EntryOut 不带 deleted_at），
+                    # 草稿补交就提示「已记下」，可账本里根本没有它。也**不能**替人再记一笔 ——
+                    # 那等于把别人刚删的账悄悄记回去。说出来，让人决定丢掉草稿还是重新记
+                    raise AppError(
+                        "key_entry_deleted", "this entry was recorded and later deleted",
+                        status=409, entry_id=old.id,
+                    )
                 return to_entry_out(session, old)
         return to_entry_out(session, _create(session, body, member))
 
@@ -140,6 +148,8 @@ def _create(session: Session, body: EntryIn, member: Member) -> Entry:
         title=body.title,
         note=body.note,
         client_key=body.client_key,
+        # 人手填的金额才过量级闸；看过、点了「确定」的带 confirm_jump 回来
+        jump_check=not body.confirm_jump,
     )
 
 
@@ -154,7 +164,7 @@ def update_entry(
     entry = session.get(Entry, entry_id)
     if entry is None:
         raise not_found("entry")
-    fields = body.model_dump(exclude_unset=True, exclude={"rule", "member_ids"})
+    fields = body.model_dump(exclude_unset=True, exclude={"rule", "member_ids", "confirm_jump"})
     entry = ledger.update_entry(
         session,
         entry,
@@ -164,6 +174,7 @@ def update_entry(
         rule=body.rule,
         category_rule=_category_rule(session, body.category_id),
         member_ids=body.member_ids,
+        jump_check=not body.confirm_jump,
     )
     return to_entry_out(session, entry)
 

@@ -148,23 +148,43 @@ def test_cutting_again_on_an_empty_draft_makes_no_empty_statement(session: Sessi
     assert len(list(session.exec(select(Statement)))) == 1
 
 
-def test_a_losing_concurrent_cut_leaves_nothing_behind(session: Session, members) -> None:
-    """模拟「两个人同时点」：B 先把账目全归走，A 手里那批已经过期了。
+def test_a_losing_concurrent_cut_leaves_nothing_behind(
+    session: Session, members, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """模拟「两个人同时点」：A 读到了草稿那一批，B 抢先把它们全出进了自己那张。
 
-    这里直接把 B 的效果做出来（把 statement_id 抢先改掉），再让 A 走完 cut ——
-    A 的那条带条件 UPDATE 一笔都认领不到，必须整个回滚，不能留下空单。
+    A 手里那批已经过期，走完 cut 时那条带条件的 UPDATE 一笔都认领不到 ——
+    必须整个回滚：不留空单，也不留下它对固定费日期的无条件覆盖（D30）。
+    原来这条用例只是连着出两次账，第二次在「草稿是空的」那一步就退了，
+    和上一条走的是同一条路，真正的那道闸（claimed != len）删掉也照样绿。
+    这里把 A 读到的那份旧列表塞回给它，逼它一路走到认领那一步。
     """
+    from app.services import bill
+
     a, *_ = members
     c = _cat(session)
-    for _ in range(3):
+    rent = _cat(session, "房租")
+    rent.monthly = True
+    session.add(rent)
+    session.commit()
+    fixed = ledger.create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=TODAY,
+                                amount=120_000, payer_id=a.id, category_id=rent.id)
+    for _ in range(2):
         ledger.create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=TODAY,
                             amount=3000, payer_id=a.id, category_id=c.id)
-    b_statement = cut_statement(session, actor_id=a.id)         # B 赢了
+    stale = bill.unbilled(session)                                       # A 读到的那批
+    b_statement = cut_statement(session, actor_id=a.id, on=dt.date(2026, 9, 25))   # B 赢了
+    stamped = session.get(Entry, fixed.id).date
 
-    with pytest.raises(BillError):
-        cut_statement(session, actor_id=a.id)                   # A 才醒过来
+    monkeypatch.setattr(bill, "unbilled", lambda s: list(stale))
+    with pytest.raises(BillError) as e:
+        cut_statement(session, actor_id=a.id, on=dt.date(2026, 9, 30))  # A 才醒过来
+    assert e.value.code == "nothing_to_cut"
+    # 和「草稿本来就是空的」那条共用一个码：靠这句话认出确实走到了认领那一步
+    assert "刚才已经有人出过账了" in str(e.value)
     rows = list(session.exec(select(Statement)))
-    assert [r.id for r in rows] == [b_statement.id]
+    assert [r.id for r in rows] == [b_statement.id], "不许留下空单"
+    assert session.get(Entry, fixed.id).date == stamped == dt.date(2026, 9, 25), "A 盖的日期也要一起退回去"
     assert len(list(session.exec(select(Entry).where(Entry.statement_id == b_statement.id)))) == 3
 
 
@@ -261,23 +281,34 @@ def test_a_huge_adjustment_cannot_explode_everyones_share(session: Session, memb
     """
     a, b, c_ = members
     cat = _cat(session)
-    with pytest.raises((ledger.LedgerError, RuleError)) as e:
+    weights = {str(a.id): 1, str(b.id): 1, str(c_.id): 1}
+    # 规则里的每个数都在范围内（≤ 10^12），只有分下来的那几份超了 —— 只有逐条那道闸拦得住。
+    # 原来这条用 10^15，在规则那一层就被 not_in_range 挡掉，断言又两个码都收：
+    # 删掉逐条那道闸也照样绿
+    with pytest.raises(ledger.LedgerError) as e:
         ledger.create_entry(
             session, actor_id=a.id, kind=EntryKind.expense, on=TODAY, amount=1_000,
             payer_id=a.id, category_id=cat.id,
-            rule={"mode": "ratio", "weights": {str(a.id): 1, str(b.id): 1, str(c_.id): 1},
-                  "adjustments": {str(a.id): 10**15}},
+            rule={"mode": "ratio", "weights": weights,
+                  "adjustments": {str(a.id): 10**12, str(b.id): -10**12}},
         )
-    assert e.value.code in ("share_too_large", "not_in_range")
+    assert e.value.code == "share_too_large"
 
-    # exact 模式同理：合计对得上也不行
-    with pytest.raises((ledger.LedgerError, RuleError)) as e:
+    # 超出范围的规则数字在规则那一层就拦（not_in_range），两种模式都是
+    with pytest.raises(RuleError) as e:
         ledger.create_entry(
-            session, actor_id=a.id, kind=EntryKind.expense, on=TODAY, amount=0 or 1,
+            session, actor_id=a.id, kind=EntryKind.expense, on=TODAY, amount=1_000,
+            payer_id=a.id, category_id=cat.id,
+            rule={"mode": "ratio", "weights": weights, "adjustments": {str(a.id): 10**15}},
+        )
+    assert e.value.code == "not_in_range"
+    with pytest.raises(RuleError) as e:
+        ledger.create_entry(
+            session, actor_id=a.id, kind=EntryKind.expense, on=TODAY, amount=1,
             payer_id=a.id, category_id=cat.id,
             rule={"mode": "exact", "exact": {str(a.id): 10**15, str(b.id): -10**15 + 1}},
         )
-    assert e.value.code in ("share_too_large", "not_in_range")
+    assert e.value.code == "not_in_range"
 
 
 def test_a_broken_rule_is_refused_when_it_is_saved_not_when_it_is_used(

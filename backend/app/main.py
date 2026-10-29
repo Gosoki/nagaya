@@ -86,13 +86,22 @@ async def _daily_backup() -> None:
             # 原因一句话就说清了，不值得每小时甩一整段 traceback；设置页上那一行也会照实说
             if e.code == "backup_empty_source":
                 log.info("账本里还没有人，这回不备份")
+            elif e.code == "ledger_invariant_broken":
+                # 备份做成了、也留着；坏的是账本本身。这不是「这回没备成」那种小事，单独一句 error
+                log.error("账本自检没通过：%s（这份备份照留，这一轮不轮转）", e)
             else:
                 log.warning("自动备份没做成：%s（%s）", e, e.code)
         except Exception:
             log.exception("自动备份失败")
         # 备份不走 HTTP，IdleRelease 看不见它：那次 VACUUM INTO 把整本库读进了连接的页缓存，
-        # 不在这儿还的话要一直攥到第二天有人来。没做成的那次也读过库，一样要还
-        await asyncio.to_thread(release_memory)
+        # 不在这儿还的话要一直攥到第二天有人来。没做成的那次也读过库，一样要还。
+        # **包一层**：放在上面那个 try 外面是为了备份失败时也还，可它自己抛一次
+        # （MemoryError、起不了线程）整个循环就退出了 —— 自动备份从此停摆，task 只在关机时
+        # 才被看一眼，一行日志都不留。和 IdleRelease._release 同一个写法
+        try:
+            await asyncio.to_thread(release_memory)
+        except Exception:
+            log.exception("归还内存失败")
         await asyncio.sleep(_BACKUP_TICK)
 
 

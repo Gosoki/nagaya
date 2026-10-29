@@ -41,7 +41,11 @@ def _sqlite_pragmas(dbapi_connection, connection_record) -> None:
     cur = dbapi_connection.cursor()
     cur.execute("PRAGMA journal_mode=WAL")
     cur.execute("PRAGMA foreign_keys=ON")   # 默认是 OFF，不打开等于没有外键
-    cur.execute("PRAGMA synchronous=NORMAL")
+    # FULL 不是 NORMAL：WAL 下 NORMAL 只在 checkpoint 时落盘，已经回了 201 的账还躺在
+    # 系统的页缓存里 —— 宿主机断电、内核崩溃、虚拟机被硬重启，最近几秒到半分钟记的账
+    # 会悄悄回滚，而手机上早把草稿删了，谁也不知道少了几笔。FULL 每次提交多一次 fsync，
+    # 三个人的写入量感觉不到（进程崩溃、容器重启本来就不丢，丢的只是断电那一种）
+    cur.execute("PRAGMA synchronous=FULL")
     # 两个人同时写时先等一会儿再说。不设的话 SQLite 立刻抛 "database is locked"，
     # 而那对用户来说就是记账随机失败一次，重试又好了 —— 最难查的那种
     cur.execute("PRAGMA busy_timeout=5000")

@@ -18,6 +18,9 @@ from app.services import audit
 
 #: 成员这张表进审计时不带的字段：密码哈希不该躺在日志里，头像是一坨二进制
 _NOT_AUDITED = ("password_hash", "avatar")
+#: 登录名、昵称的长度上限。和登录那边（schemas.LoginIn.name）同一条线 ——
+#: 不取界面上的 20：命令行（tools.add_member）建的名字可以更长
+MAX_NAME = 64
 
 router = APIRouter(prefix="/api/members", tags=["members"])
 
@@ -36,6 +39,7 @@ def create_member(
 ):
     if not body.name:
         raise AppError("name_required", "login name required")
+    _check_names(body.name, body.display_name)
     if session.exec(select(Member).where(Member.name == body.name)).first():
         raise AppError("name_taken", f"login name {body.name} taken", status=409, name=body.name)
 
@@ -65,6 +69,21 @@ def create_member(
     session.commit()
     session.refresh(member)
     return to_member_out(member)
+
+
+def _check_names(name: str | None, display_name: str | None) -> None:
+    """登录名、昵称：去掉两头空格之后（schemas.MemberIn 里去的）不许空、不许超长。None ＝ 这次没给。
+
+    原来只有界面上卡着（20 字、去空格、不许空），接口照单全收：65 字的登录名建得出来，
+    却永远登不上（登录那边限 64）；空昵称让这个人在账单上只剩一个没字的色圆。
+    """
+    for value in (name, display_name):
+        if value is None:
+            continue
+        if not value:
+            raise AppError("name_required", "name required")
+        if len(value) > MAX_NAME:
+            raise AppError("text_too_long", f"name longer than {MAX_NAME}", limit=MAX_NAME)
 
 
 def _check_dates(joined: dt.date, left: dt.date | None) -> None:
@@ -126,9 +145,8 @@ def update_member(
     # 显式传 null 的那几个：数据库上是 NOT NULL，直接 setattr 下去就是 500。
     # left_on 不在里面 —— 它**必须**清得掉，否则填错一次那个人就永远是「已退出」
     reject_nulls(fields, ("name", "display_name", "color", "display_order", "joined_on", "lang"))
+    _check_names(fields.get("name"), fields.get("display_name"))
     if "name" in fields:
-        if not fields["name"]:
-            raise AppError("name_required", "login name required")
         clash = session.exec(select(Member).where(Member.name == fields["name"])).first()
         if clash is not None and clash.id != member_id:
             # 这一条原来会撞穿到数据库的唯一约束，返回 500；POST 那边早就是 409 了

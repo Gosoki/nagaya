@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 from sqlmodel import Session
 
-from app.models import Category, EntryKind, Member
+from app.models import JST, Category, EntryKind, Member
 from app.services import backup as backup_svc
 from app.services import ledger
 from app.services import settings as settings_svc
@@ -124,8 +124,11 @@ def test_an_empty_source_is_refused_and_nothing_is_pruned(
     assert {p.name for p in bk.iterdir()} == before, "旧备份必须一份不少地留着"
 
 
-def test_a_corrupt_artifact_is_reported_not_kept(session: Session, bk: Path) -> None:
-    """备份最坏的失败方式是「文件在、却是坏的」。宁可没有，也不要一份骗人的。"""
+def test_verify_file_rejects_a_non_database(session: Session, bk: Path) -> None:
+    """备份最坏的失败方式是「文件在、却是坏的」。宁可没有，也不要一份骗人的。
+
+    这条只验 verify_file 认得出「根本不是库」（恢复之前、状态页上用它）。
+    run() 里验不过的那份有没有被删掉，见下面那条参数化的。"""
     bk.mkdir(parents=True, exist_ok=True)
     bad = bk / "nagaya-19700101-000000.db"
     bad.write_bytes(b"this is not a database")
@@ -461,3 +464,349 @@ def test_a_lookalike_name_with_an_impossible_date_is_ignored(session: Session, b
     for _ in range(4):                       # 留 3 份：多备几次让轮转真的跑起来
         backup_svc.run(session)
     assert (bk / "nagaya-20261399-000000.db").exists(), "不是自己产出的，轮转也不许删"
+
+
+# ---------------------------------------------------------------- run() 里那几道验（#36）
+
+
+def _tamper_integrity(part: Path) -> None:
+    """只有 integrity_check 看得出的坏：条数、外键、表都对，空闲页链表的头被抹掉了。
+    （改索引根页那种会先被「条数对不上」抓住，钉不住 integrity 这一道）"""
+    con = sqlite3.connect(part)
+    con.execute("create table zz(x)")
+    con.executemany("insert into zz values (?)", [(b"x" * 3000,) for _ in range(20)])
+    con.commit()
+    con.execute("drop table zz")
+    con.commit()
+    con.close()
+    raw = bytearray(part.read_bytes())
+    raw[32:40] = bytes(8)                 # 空闲页链表的起点和页数
+    part.write_bytes(bytes(raw))
+
+
+def _tamper_sql(*sql: str):
+    def go(part: Path) -> None:
+        con = sqlite3.connect(part)
+        con.execute("PRAGMA foreign_keys=OFF")
+        for q in sql:
+            con.execute(q)
+        con.commit()
+        con.close()
+    return go
+
+
+@pytest.mark.parametrize("tamper", [
+    pytest.param(_tamper_integrity, id="integrity"),
+    # update 不是 insert：条数不变，只让外键那一道认得出来
+    pytest.param(_tamper_sql("update entry_share set member_id = 999 "
+                             "where rowid = (select min(rowid) from entry_share)"), id="foreign-key"),
+    pytest.param(_tamper_sql("drop table memo"), id="missing-table"),
+    pytest.param(_tamper_sql("delete from audit_log where rowid = (select max(rowid) from audit_log)"), id="row-count"),
+])
+def test_a_bad_artifact_in_run_is_rejected_and_not_kept(
+    session: Session, bk: Path, monkeypatch: pytest.MonkeyPatch, tamper
+) -> None:
+    """「当场验过才算数」那四道检查，**每一道单独钉住**，而且验不过的那份**一个字节都不留**。
+
+    原来四道各删掉一道、甚至把 run() 里的整个 _verify 调用删掉、或者验不过时不删 .part，
+    全套测试照样全绿 —— 而 README 承诺的是「宁可没有备份，也不要一份骗人的备份」。
+    钩子挂在 VACUUM INTO 之后、验之前唯一的那一步（_fsync_file），在 .part 上动手脚。
+    """
+    real = backup_svc._fsync_file
+
+    def hooked(path: Path) -> None:
+        tamper(path)
+        real(path)
+
+    monkeypatch.setattr(backup_svc, "_fsync_file", hooked)
+    with pytest.raises(backup_svc.BackupError) as e:
+        backup_svc.run(session)
+    assert e.value.code == "backup_corrupt"
+    left = [p.name for p in bk.iterdir()]
+    assert not [n for n in left if backup_svc.NAME_RE.match(n)], f"验不过的那份拿到了正式名字：{left}"
+    assert not [n for n in left if n.endswith(backup_svc.PART_SUFFIX)], f".part 没删：{left}"
+
+
+# ---------------------------------------------------------------- 账本自检（#25）
+
+
+def test_a_broken_ledger_is_backed_up_but_nothing_is_pruned(session: Session, bk: Path) -> None:
+    """账本本身不平（这里绕过 app 改一笔的分摊）：**这份照留，这一轮不轮转**，状态和红点都说出来。
+
+    不这样的话，坏掉之后备份照跑、照轮转，keep 天之内坏之前的好备份全被转掉 ——
+    而那时账单页只是一个查不出原因的 500。账修好之后一切自己恢复，不存任何结论。
+    """
+    from sqlalchemy import text
+
+    good = [backup_svc.run(session)["name"] for _ in range(3)]          # keep=3：已经满了
+    eid = session.execute(text("select entry_id from entry_share order by id limit 1")).scalar()
+    session.execute(text("update entry_share set amount_jpy = amount_jpy + 1 "
+                         "where id = (select min(id) from entry_share)"))
+    session.commit()
+
+    with pytest.raises(backup_svc.BackupError) as e:
+        backup_svc.run(session)
+    assert e.value.code == "ledger_invariant_broken"
+    assert e.value.detail["entries"] == [eid], "要点名是哪一笔"
+    kept = sorted(p.name for p in bk.iterdir() if backup_svc.NAME_RE.match(p.name))
+    assert kept[:3] == good and len(kept) == 4, f"坏账本那份该留着、好的一份都不许转掉：{kept}"
+
+    st = backup_svc.status(session)
+    assert st["error"] == "ledger_invariant_broken" and st["last_ok"] is True, "文件本身是好的"
+    assert backup_svc.alert(session) == "ledger_invariant_broken"
+    settings_svc.set_(session, "backup_every_hours", 24)
+    assert backup_svc.run_if_due(session) is None, "账不平也照原来的节奏备，不是每小时来一份"
+
+    session.execute(text("update entry_share set amount_jpy = amount_jpy - 1 "
+                         "where id = (select min(id) from entry_share)"))
+    session.commit()
+    made = backup_svc.run(session)
+    assert made["pruned"], "账修好之后照常轮转"
+    assert backup_svc.status(session)["error"] is None
+
+
+def test_ledger_problems_names_each_kind_of_break() -> None:
+    """三条恒等式各自认得出自己那种坏：分摊合计 ≠ 金额（含软删的）、余额合计 ≠ 0、转账形状不对"""
+    con = sqlite3.connect(":memory:")
+    con.executescript(
+        "create table entry(id integer primary key, kind text, amount_jpy int, payer_id int,"
+        " to_member_id int, deleted_at text);"
+        "create table entry_share(id integer primary key, entry_id int, member_id int, amount_jpy int);"
+        "insert into entry values (1,'expense',300,1,null,null),(2,'settlement',100,2,1,null),"
+        " (3,'expense',90,1,null,'2026-09-01');"
+        "insert into entry_share(entry_id,member_id,amount_jpy) values (1,1,100),(1,2,100),(1,3,100),(2,1,100),"
+        " (3,1,30),(3,2,30),(3,3,30);"
+    )
+    assert backup_svc.ledger_problems(con) is None
+    con.execute("update entry_share set amount_jpy = 31 where entry_id = 3 and member_id = 3")
+    assert backup_svc.ledger_problems(con) == {"entries": [3], "total": 0}, "软删的那笔也要查"
+    con.execute("update entry_share set amount_jpy = 30 where entry_id = 3 and member_id = 3")
+    con.execute("update entry_share set member_id = 3 where entry_id = 2")
+    assert backup_svc.ledger_problems(con) == {"entries": [2], "total": 0}, "转账记到了别人头上"
+
+
+# ---------------------------------------------------------------- 状态里的另外几样（#74 #27 #28）
+
+
+def _file_ledger(tmp_path: Path):
+    """一个真文件上的库：stale_copies 要问「账本在哪个目录」，内存库答不出来"""
+    from sqlalchemy.pool import NullPool
+    from sqlmodel import SQLModel, create_engine
+
+    data = tmp_path / "data"
+    data.mkdir()
+    engine = create_engine(f"sqlite:///{data}/nagaya.db", poolclass=NullPool)
+    SQLModel.metadata.create_all(engine)
+    s = Session(engine)
+    settings_svc.seed_settings(s)
+    settings_svc.set_(s, "backup_path", str(tmp_path / "bk"))
+    s.add(Member(name="a", display_name="A", joined_on=dt.date(2026, 1, 1)))
+    s.commit()
+    return data, s
+
+
+def test_status_counts_the_old_copies_lying_next_to_the_ledger(tmp_path: Path) -> None:
+    """升级前的快照、恢复时挪走的旧账本：**只数不删**，可得让人看见它们在那儿。"""
+    data, s = _file_ledger(tmp_path)
+    try:
+        assert backup_svc.status(s)["stale_copies"] == {"count": 0, "bytes": 0, "oldest": None}
+        shot = data / "before-migrate-0001-20261001-120000.db"
+        shot.write_bytes(b"x" * 1000)
+        os.utime(shot, (dt.datetime(2026, 10, 1, 12, tzinfo=JST).timestamp(),) * 2)
+        aside = data / "replaced-20261020-000000"
+        aside.mkdir()
+        (aside / "nagaya.db").write_bytes(b"y" * 300)
+        (aside / "nagaya.db-wal").write_bytes(b"z" * 200)
+        (data / "nagaya.db.restore.part").write_bytes(b"not counted")   # 只认那两种前缀
+        got = backup_svc.status(s)["stale_copies"]
+        assert got["count"] == 2 and got["bytes"] == 1500
+        assert got["oldest"].startswith("2026-10-01")
+        assert shot.exists() and aside.exists(), "一个都不许删"
+    finally:
+        s.close()
+
+
+def test_stale_copies_is_unknown_for_an_in_memory_ledger(session: Session, members) -> None:
+    assert backup_svc.status(session)["stale_copies"] is None
+
+
+def test_custom_path_means_someone_pointed_it_elsewhere() -> None:
+    """自己指了目录、却和账本同盘：多半是外接盘 / NAS 没挂上（Linux 挂载点没挂上时就是根盘上
+    一个空目录，「只建最后一级」挡不住）。界面拿 custom_path + same_disk 升警告色。
+    只解析路径，不碰盘 —— 默认目录就是真备份待的地方"""
+    for same in ("./backups", "backups", "./backups/", str(backup_svc.BASE_DIR / "backups")):
+        assert backup_svc._custom_path(same) is False, same
+    assert backup_svc._custom_path("/mnt/nas/nagaya") is True
+
+
+def test_alert_lights_up_only_when_something_is_wrong(
+    client, auth, session: Session, tmp_path: Path
+) -> None:
+    """红点只在真出事时亮：报错了、或者自动备份开着却超过两个间隔没出新的。
+
+    **不亮的**：一份都还没有（刚改完目录）、自动备份是自己关掉的、和账本同盘（默认就同盘）。
+    红点常亮的话，到真出事那天没人当回事。"""
+    get = lambda: client.get("/api/backup/alert", headers=auth).json()["alert"]  # noqa: E731
+    settings_svc.set_(session, "backup_every_hours", 24)
+    assert get() is None, "一份都还没有、也没报错：不是警报"
+
+    made = Path(backup_svc.run(session)["path"])
+    assert get() is None
+    old = (dt.datetime.now() - dt.timedelta(days=5)).timestamp()
+    os.utime(made, (old, old))                 # 名字和 mtime 取小的那个：mtime 一老就算老
+    assert get() == "backup_stale"
+    settings_svc.set_(session, "backup_every_hours", 0)
+    assert get() is None, "自动备份是自己关的，太久没备不算出事"
+
+    settings_svc.set_(session, "backup_path", "/dev/null/nope")
+    assert get() == "backup_dir_missing"
+
+
+def test_a_stuck_backup_target_does_not_starve_the_rest_of_the_app(tmp_path: Path, monkeypatch) -> None:
+    """备份目标卡住了（NAS 掉线、网络盘 hard mount、同步盘占位文件在下载）：红点那个接口
+    每次开 App、切回前台都要探一遍目录。原来探的整段时间都揣着一条库连接，池子一共 5 条，
+    几次开 App 就占满 —— 之后记账、看账单全部等到超时然后 500。
+
+    池子照生产的配（常驻 1、最多再开 4），超时压到 2 秒好让没修的时候快点失败。
+    最新那份「读不动」：verify_file 一直卡到用例放行。"""
+    import threading
+    import time as time_mod
+
+    from fastapi.testclient import TestClient
+    from sqlmodel import SQLModel, create_engine
+
+    from app.auth import hash_password
+    from app.db import get_session
+    from app.main import app as fastapi_app
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'nagaya.db'}", connect_args={"check_same_thread": False},
+                           pool_size=1, max_overflow=4, pool_timeout=2)
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as s:
+        settings_svc.seed_settings(s)
+        settings_svc.set_(s, "backup_path", str(tmp_path / "bk"))
+        s.add(Member(name="a", display_name="A", joined_on=dt.date(2026, 1, 1),
+                     password_hash=hash_password("pw123456")))
+        s.commit()
+        backup_svc.run(s)
+
+    stuck, release = threading.Event(), threading.Event()
+
+    def hangs(path: Path) -> dict[str, int]:
+        stuck.set()
+        release.wait(timeout=15)
+        return {"member": 1}
+
+    def per_request():
+        with Session(engine) as s:
+            yield s
+
+    monkeypatch.setattr(backup_svc, "verify_file", hangs)
+    fastapi_app.dependency_overrides[get_session] = per_request
+    alerts: list[threading.Thread] = []
+    try:
+        client = TestClient(fastapi_app)
+        token = client.post("/api/auth/login", json={"name": "a", "password": "pw123456"}).json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+        codes: list[int] = []
+
+        def open_app() -> None:
+            codes.append(client.get("/api/backup/alert", headers=auth).status_code)
+
+        alerts += [threading.Thread(target=open_app) for _ in range(6)]
+        for t in alerts:
+            t.start()
+        assert stuck.wait(timeout=5)
+        deadline = time_mod.monotonic() + 3
+        while len(codes) < 5 and time_mod.monotonic() < deadline:
+            time_mod.sleep(0.02)
+        assert len(codes) == 5, "已经有一个在探：后来的不排队，当场回上一次的结果"
+        assert engine.pool.checkedout() == 0, "正卡在探目录的那一个也不许揣着库连接"
+        t0 = time_mod.monotonic()
+        r = client.get("/api/members", headers=auth)
+        took = time_mod.monotonic() - t0
+        assert r.status_code == 200 and took < 1, f"{r.status_code}，等了 {took:.1f} 秒：库连接被卡住的红点占光了"
+    finally:
+        release.set()
+        for t in alerts:
+            t.join()
+        fastapi_app.dependency_overrides.clear()
+        engine.dispose()
+    assert codes == [200] * 6
+
+
+# ---------------------------------------------------------------- 恢复：先说清楚、服务开着不动（#29 #30）
+
+
+def test_restore_refuses_while_the_service_still_has_the_ledger_open(tmp_path: Path) -> None:
+    """服务没停就换库：它手里那条连接还指着被挪走的旧文件，之后回了 201 的账全写进 replaced-*，
+    空闲一分钟之后新记的又从备份里最大的 id 往后编号 —— 同一个 id 指两笔不同的账。
+    --yes 也一样拒绝，**什么都不动**。"""
+    import subprocess
+    import sys as _sys
+
+    data, bk, run = _seeded(tmp_path)
+    root = Path(__file__).resolve().parents[1]
+    holder = subprocess.Popen(
+        [_sys.executable, "-c", (
+            "import sys,time;sys.path.insert(0,'.')\n"
+            "from sqlmodel import Session, select\n"
+            "from app.db import engine\n"
+            "from app.models import Member\n"
+            # 真读一张表：服务每处理一个请求都会，连接从此挂着 WAL 的共享锁
+            "s=Session(engine);s.exec(select(Member)).all();s.close()\n"
+            "print('ready',flush=True);time.sleep(30)"
+        )],
+        cwd=root, env={**os.environ, "NAGAYA_DB": str(data / "nagaya.db")},
+        stdout=subprocess.PIPE, text=True,
+    )
+    try:
+        assert holder.stdout.readline().strip() == "ready"
+        before = sorted(p.name for p in data.iterdir())
+        done = run("-m", "tools.restore", f"--dir={bk}", "--yes")
+        assert done.returncode != 0, done.stdout
+        assert "服务还开着" in done.stderr
+        assert sorted(p.name for p in data.iterdir()) == before, "拒绝了就一样都不许动"
+        assert not list(data.glob("replaced-*"))
+    finally:
+        holder.kill()
+        holder.wait()
+
+    # 服务停了（持有连接的进程没了）就照常能恢复
+    assert run("-m", "tools.restore", f"--dir={bk}", "--yes").returncode == 0
+
+
+def test_restore_says_what_it_will_throw_away(tmp_path: Path) -> None:
+    """确认之前把「这一下会丢掉什么」摆出来：备份之后新记的几笔、改过的、删过的。
+
+    **先认是不是同一本账**：另一本账的备份 id 照样从 1 编起，按 id 比出来「会丢 0 笔」
+    是一句假话 —— 那种只说「不是同一本，恢复等于整本换掉」，不给数。"""
+    data, bk, run = _seeded(tmp_path)
+    add = run("-c", (
+        "import sys,datetime as dt;sys.path.insert(0,'.')\n"
+        "from sqlmodel import Session, select\n"
+        "from app.db import engine\n"
+        "from app.models import Member, Category, EntryKind, Entry\n"
+        "from app.services import ledger\n"
+        "s=Session(engine);m=s.exec(select(Member)).first();c=s.exec(select(Category)).first()\n"
+        "[ledger.create_entry(s,actor_id=m.id,kind=EntryKind.expense,on=dt.date(2026,9,22),"
+        "amount=7777,payer_id=m.id,category_id=c.id,title='备份之后') for _ in range(3)]\n"
+        "e=s.get(Entry,40);ledger.delete_entry(s,e,actor_id=m.id)\n"
+        "e=s.get(Entry,41);ledger.update_entry(s,e,actor_id=m.id,version=e.version,fields={'amount_jpy':9999})"
+    ))
+    assert add.returncode == 0, add.stderr
+    done = run("-m", "tools.restore", f"--dir={bk}", "--yes")
+    assert done.returncode == 0, done.stderr
+    out = done.stdout
+    assert "备份之后新记的 3 笔会没有（合计 ¥23,331" in out
+    assert "#45  2026-09-22  ¥7,777  备份之后" in out
+    assert "改过的 1 笔" in out and "删掉 / 撤销删除的 1 笔" in out
+
+    # 另一本账（另起一个种子库）的备份：不许按 id 比出一个「会丢几笔」
+    other = tmp_path / "other"
+    other.mkdir()
+    o_data, o_bk, _ = _seeded(other)
+    done = run("-m", "tools.restore", f"--dir={o_bk}", "--yes")
+    assert done.returncode == 0, done.stderr
+    assert "不是同一本" in done.stdout
+    assert "会没有" not in done.stdout

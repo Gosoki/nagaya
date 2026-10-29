@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import secrets
 from collections.abc import Iterable
 from enum import Enum
 from typing import Any, Optional
@@ -323,7 +324,15 @@ class Entry(SQLModel, table=True):
     created_by: Optional[int] = Field(default=None, foreign_key="member.id")
     created_at: dt.datetime = Field(default_factory=now_utc)
     updated_at: dt.datetime = Field(default_factory=now_utc)
-    version: int = Field(default=1, description="乐观锁：两个人同时改一笔账时挡住覆盖")
+    #: **起点是随机数，不是 1。** 恢复一份备份之后，新记的账从「备份里最大的 id + 1」重新编号
+    #: （SQLite 普通 rowid 表；AUTOINCREMENT 也救不了，sqlite_sequence 跟着备份一起回滚），
+    #: 而恢复前就开着的编辑页手里拿的是同一个 id、同样是 1 的 version —— 乐观锁对不出来，
+    #: 一点保存就把别人刚记的那笔整个改掉。随机起点让两笔不相干的账几乎不可能撞上同一个 version。
+    #: 之后照常 +1；前端原样回传，2^31 以内 JS 也表示得精确
+    version: int = Field(
+        default_factory=lambda: secrets.randbelow(2**31 - 1) + 1,
+        description="乐观锁：两个人同时改一笔账时挡住覆盖",
+    )
     # **不建索引。** 几乎每一行都是 NULL，而 SQLite 把 `IS NULL` 当等值条件，
     # 有这个索引就拿它开路 —— 于是「最近 500 笔」要先把整本账按它扫一遍再排序
     # （5 年规模 9.6ms → 去掉之后走日期索引 0.7ms）。ANALYZE 也救不回来（实测）

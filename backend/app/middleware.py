@@ -26,7 +26,21 @@ def release_memory() -> None:
     三个人的账本一天里绝大多数时候没人在点，可进程手里一直攥着：数据库连接
     （每条带着自己的页缓存、表结构、编译好的语句）、刚才那几个大响应用过的堆。
     Python 释放掉的内存，C 库不一定还给系统 —— 最后那一下 trim 才是真还。
+
+    关连接之前顺手让 SQLite 重估一遍索引（PRAGMA optimize，按需 ANALYZE）。
+    库里没有统计信息时，查询计划会去挑区分度很低的索引（entry.kind 九成九是支出，
+    audit_log.target_table 九成九是 entry），而它们本来有更好的路可走。
+    统计新鲜时这句几乎是空操作；表涨了它会自己再量一次。放在空闲时做：
+    ANALYZE 要拿一下写锁（5 年规模约 13ms），别挤在请求路上。
     """
+    try:
+        # 0x10002 ＝ 看所有表（不只是这条连接查过的），需要时跑 ANALYZE。
+        # 新开的连接一条查询都没跑过，不带 0x10000 的话它什么都不做
+        with engine.connect() as conn:
+            conn.exec_driver_sql("PRAGMA optimize=0x10002")
+    except Exception:
+        # 只是查询计划的事，没做成不影响任何数据，也不该拦着下面把内存还掉
+        log.exception("PRAGMA optimize 没做成")
     engine.dispose()   # 连接全关（正在用的那条用完再关）。下个请求再开一条，毫秒级
     gc.collect()
     try:

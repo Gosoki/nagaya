@@ -30,6 +30,7 @@ from sqlmodel import Session
 
 from app.models import JST
 from app.services import settings as settings_svc
+from app.settings_spec import SETTINGS_SPEC
 
 class BackupError(ValueError):
     """和 LedgerError 同一条线：{code, message, detail}，界面文案留在前端。"""
@@ -87,8 +88,13 @@ def resolve_backup_path(raw: str) -> Path:
         raise ValueError(str(e)) from e
 
 
+def _raw_path(session: Session) -> str:
+    """设置里填的那串备份路径，原样（还没解析）。"""
+    return str(settings_svc.get(session, "backup_path") or "")
+
+
 def backup_dir(session: Session) -> Path:
-    return resolve_backup_path(str(settings_svc.get(session, "backup_path") or ""))
+    return resolve_backup_path(_raw_path(session))
 
 def source_path(session: Session) -> Path | None:
     """源库在哪 —— 问连接自己，不读模块级的 DB_PATH。
@@ -100,9 +106,8 @@ def source_path(session: Session) -> Path | None:
     name = row[2] if row else ""
     return Path(name) if name else None
 
-def _source_bytes(session: Session) -> int:
+def _source_bytes(src: Path | None) -> int:
     """主文件 ＋ WAL。WAL 那半才是大头，只算主文件会把空间需求低估三个数量级。"""
-    src = source_path(session)
     if src is None:
         return 0
     total = 0
@@ -114,18 +119,23 @@ def _source_bytes(session: Session) -> int:
 
 # ---------------------------------------------------------------- 预检
 
-def _prepare_dir(session: Session) -> Path:
+def _prepare_dir(raw: str) -> Path:
     try:
         # 解析也放进来：库里要是已经存了坏路径（NUL 之类，老版本没拦），
         # resolve() 抛的是 ValueError —— 不接住的话设置页的备份状态直接 500
-        directory = backup_dir(session)
+        directory = resolve_backup_path(raw)
     except (OSError, ValueError) as e:
         raise BackupError("backup_dir_missing", f"备份目录用不了（{e}）", path="", parent="") from e
     try:
         existed = directory.is_dir()
         # **只建最后一级**（parents=False）。填成 /Volumes/移动盘/backups 而盘没插时，
         # parents=True 会老老实实在内置盘上把 /Volumes/移动盘 也建出来 ——
-        # 从此备份全写在本机、人却以为在移动盘上。少建一级，这种错当场就报出来
+        # 从此备份全写在本机、人却以为在移动盘上。少建一级，这种错当场就报出来。
+        # **这道防线只管「盘没挂上时上一级目录根本不存在」的情况**（macOS 的 /Volumes/…、
+        # 插盘才建挂载点的那种自动挂载）。Linux 上 fstab / LXC bind / Docker volume 的挂载点
+        # 没挂上时就是根盘上的一个空目录 —— 上一级在，mkdir 照样成功，备份悄悄写进本机。
+        # 那种情况拦不住，只能说出来：status() 里 custom_path 和 same_disk 同时为真，
+        # 设置页那一行升成警告色
         directory.mkdir(exist_ok=True)
         if not existed:
             directory.chmod(0o700)      # 整本账在里面。只管自己建的那个目录，
@@ -154,8 +164,8 @@ def _prepare_dir(session: Session) -> Path:
             pass
     return directory
 
-def _check_space(session: Session, directory: Path) -> None:
-    need = _source_bytes(session) + FREE_MARGIN
+def _check_space(src: Path | None, directory: Path) -> None:
+    need = _source_bytes(src) + FREE_MARGIN
     free = shutil.disk_usage(directory).free
     if free < need:
         raise BackupError(
@@ -251,6 +261,59 @@ def verify_file(path: Path) -> dict[str, int]:
         raise BackupError("backup_corrupt", f"零张表：{path}", path=str(path))
     return counts
 
+
+#: 账本自检的三条恒等式。每一条都是 app 写进去时就成立的整数等式，平时永远查不出东西；
+#: 查出来了就只可能是有人绕过 app 改过库、迁移出了错、或者哪天的回归 —— 而那一刻
+#: 这个项目最强的那条自检（Σ余额≡0）在界面上只表现成一个查不出原因的 500。
+#:   B1 每一笔（含软删的：撤销删除会把它带回来）Σ分摊 ≡ 金额
+#:   B2 没删的账：Σ垫付 − Σ应担 ≡ 0
+#:   B3 转账的分摊只有一行，全额记在转入人头上
+#: tools.checkup 跑的也是这三条（它那边编号是 B1 / B2 / B4，B3 留给了「正负和类型」）
+SHARES_SQL = (
+    "select e.id from entry e left join entry_share s on s.entry_id = e.id "
+    "group by e.id having coalesce(sum(s.amount_jpy), 0) != e.amount_jpy"
+)
+BALANCE_SQL = (
+    "select coalesce(sum(d), 0) from ("
+    " select amount_jpy d from entry where deleted_at is null"
+    " union all select -s.amount_jpy from entry_share s join entry e on e.id = s.entry_id"
+    " where e.deleted_at is null)"
+)
+SETTLEMENT_SQL = (
+    "select e.id from entry e left join entry_share s on s.entry_id = e.id "
+    "where e.kind = 'settlement' group by e.id "
+    "having count(s.id) != 1 or max(s.member_id) is not e.to_member_id "
+    "or max(s.amount_jpy) != e.amount_jpy"
+)
+
+
+def ledger_problems(con: sqlite3.Connection) -> dict[str, Any] | None:
+    """在一份**静止的**库上跑 B1–B3（备份文件、体检的快照）。没毛病返回 None。
+
+    只读、只报不修。放在活库上跑的话三条 SELECT 不在同一个快照上，别人正好记了一笔
+    就会误报一次 —— 所以只在备份文件上跑（它就是那一瞬间的一致快照）。
+    """
+    b1 = [r[0] for r in con.execute(SHARES_SQL)]
+    total = con.execute(BALANCE_SQL).fetchone()[0]
+    b3 = [r[0] for r in con.execute(SETTLEMENT_SQL)]
+    if not b1 and not total and not b3:
+        return None
+    return {"entries": sorted(set(b1) | set(b3)), "total": int(total)}
+
+
+def _ledger_check(path: Path) -> dict[str, Any] | None:
+    """打开一份备份文件跑 ledger_problems。打不开、读不动交给 _verify 去报，这里不重复判"""
+    try:
+        con = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+    except (sqlite3.Error, ValueError):
+        return None
+    try:
+        return ledger_problems(con)
+    except sqlite3.Error:
+        return None
+    finally:
+        con.close()
+
 # ---------------------------------------------------------------- 落盘
 
 def _fsync_file(path: Path) -> None:
@@ -293,8 +356,8 @@ def _prune(directory: Path, keep: int, protect: Path) -> list[str]:
 
 def run(session: Session) -> dict[str, Any]:
     """做一份备份。成功返回文件信息，失败抛 BackupError（一个字节都不会留下）。"""
-    directory = _prepare_dir(session)
-    _check_space(session, directory)
+    directory = _prepare_dir(_raw_path(session))
+    _check_space(source_path(session), directory)
     _sweep_parts(directory)
 
     before = _tables(session)
@@ -335,6 +398,9 @@ def run(session: Session) -> dict[str, Any]:
         os.chmod(part, 0o600)             # 密码哈希和头像都在里面
         _fsync_file(part)
         counts = _verify(part, before, _tables(session))
+        # 文件本身验过了，再验里面的账平不平（B1–B3，5 年规模约 5ms）。.part 是一瞬间的
+        # 一致快照，别人这时候记账也不会让它误报
+        broken = _ledger_check(part)
         # 到这一刻它才配叫备份。同一秒里两个线程各自验过、都想叫这个名字时，
         # 后到的覆盖先到的 —— 两份都是那一瞬间的完整快照，覆盖不丢任何东西
         os.replace(part, final)
@@ -347,6 +413,16 @@ def run(session: Session) -> dict[str, Any]:
         # why 带上原始原因（磁盘 I/O 错、盘满…）。它是**诊断数据不是界面文案** ——
         # 备份失败这一条如果不说原因，用户在面板上只看得到「没做成」，无从下手
         raise BackupError("backup_failed", f"backup failed: {e}", path=str(part), why=str(e)) from e
+
+    if broken:
+        # 账本本身不平：**这份照留**（它忠实记下了坏掉的账本，排查时正要拿它对照），
+        # 但**这一轮不轮转** —— 和空库那一支同一个道理：坏了之后备份照跑，
+        # keep 天之内就把坏之前的好备份全转掉了。只报不修，点名是哪几笔
+        raise BackupError(
+            "ledger_invariant_broken",
+            f"账本自检没通过：账目 {broken['entries'][:20]} 的分摊合计对不上，余额合计 {broken['total']}",
+            name=final.name, entries=broken["entries"][:50], total=broken["total"],
+        )
 
     keep = int(settings_svc.get(session, "backup_keep") or 0)
     pruned = _prune(directory, keep, protect=final)
@@ -365,26 +441,93 @@ def _newest(directory: Path) -> Path | None:
     files = sorted(p for p in directory.iterdir() if _is_ours(p.name))
     return files[-1] if files else None
 
-def _safe_path(session: Session) -> str:
+def _safe_path(raw: str) -> str:
     try:
-        return str(backup_dir(session))
+        return str(resolve_backup_path(raw))
     except (OSError, ValueError):
-        return str(settings_svc.get(session, "backup_path") or "")
+        return raw
+
+
+def _custom_path(raw: str) -> bool:
+    """备份目录是不是人改过的（不是默认那个 ./backups）。
+
+    默认目录和账本同盘是明摆着的、说明里写着的取舍；**自己指了一个目录、结果还和账本同盘**，
+    多半是那块外接盘 / NAS 没挂上，备份悄悄写进了本机（Linux 挂载点没挂上时就是根盘上的
+    一个空目录，_prepare_dir 那道「只建最后一级」挡不住）。界面拿它和 same_disk 一起判
+    """
+    default = SETTINGS_SPEC["backup_path"]["default"]
+    try:
+        return resolve_backup_path(raw) != resolve_backup_path(default)
+    except (OSError, ValueError):
+        return True
+
+
+#: data/ 里会自己攒下来的两种整本账副本：开机升级前拍的快照、恢复时挪走的旧账本
+_STALE_PATTERNS = ("before-migrate-*.db", "replaced-*")
+
+
+def _stale_copies(src: Path | None) -> dict[str, Any] | None:
+    """账本旁边留着几份旧副本、一共多大、最早是哪天。**只数不删**。
+
+    它们故意不自动清（里面可能正是唯一还留着的数据，比如恢复之前多记的那几笔），
+    可也从来没人提起，人就不知道哪些已经可以删了。只 stat、不打开库：
+    这是设置页每次打开都要调的接口。拿不到源库位置、目录读不了，就不说（None），
+    不让整个备份状态跟着报错
+    """
+    if src is None:
+        return None
+    try:
+        found = [p for pattern in _STALE_PATTERNS for p in src.parent.glob(pattern)]
+        size = 0
+        oldest: float | None = None
+        for p in found:
+            # replaced-* 是目录（里面是 nagaya.db 和 -wal / -shm），大小要把里面的加起来
+            files = [f for f in p.rglob("*") if f.is_file()] if p.is_dir() else [p]
+            size += sum(f.stat().st_size for f in files)
+            mtime = p.stat().st_mtime
+            oldest = mtime if oldest is None else min(oldest, mtime)
+    except OSError:
+        return None
+    return {
+        "count": len(found),
+        "bytes": size,
+        "oldest": (
+            dt.datetime.fromtimestamp(oldest, JST).replace(tzinfo=None).isoformat(timespec="seconds")
+            if oldest is not None else None
+        ),
+    }
 
 
 def status(session: Session) -> dict[str, Any]:
     """现在这一刻备份能不能做、上一份是什么时候 —— 全部现场探，不读存下来的结论。"""
-    every = int(settings_svc.get(session, "backup_every_hours") or 0)
+    return _probe(**_status_inputs(session))
+
+
+def _status_inputs(session: Session) -> dict[str, Any]:
+    """status 要从库里拿的那几样。**只读设置、不碰盘**（路径也不解析：resolve() 要 stat，
+    挂死的网络盘上一样卡）—— 拿完连接就能还回池子，探目录那半段（_probe）一个库都不碰"""
+    return {
+        "raw": _raw_path(session),
+        "every": int(settings_svc.get(session, "backup_every_hours") or 0),
+        "keep": int(settings_svc.get(session, "backup_keep") or 0),
+        "src": source_path(session),
+    }
+
+
+def _probe(raw: str, every: int, keep: int, src: Path | None) -> dict[str, Any]:
     out: dict[str, Any] = {
-        "path": _safe_path(session),
+        "path": _safe_path(raw),
         "error": None, "last_at": None, "last_name": None, "last_bytes": None,
-        "count": 0, "keep": int(settings_svc.get(session, "backup_keep") or 0),
+        "count": 0, "keep": keep,
         "last_ok": None, "age_hours": None,
         "every_hours": every, "stale": True, "same_disk": None,
+        "custom_path": _custom_path(raw),
+        # 和备份目录能不能用无关：目录坏了也照样要说
+        "stale_copies": _stale_copies(src),
     }
     try:
-        directory = _prepare_dir(session)
-        _check_space(session, directory)
+        directory = _prepare_dir(raw)
+        _check_space(src, directory)
     except BackupError as e:
         out["error"] = e.code
         return out
@@ -396,11 +539,15 @@ def status(session: Session) -> dict[str, Any]:
         # **真打开看一眼**，不是数一数文件名。位腐、同步盘传了一半、
         # iCloud 把内容抽走只留占位 —— 目录里名字照样对得上，而这一屏
         # 正是那个「承诺了一件自己没检查过的事」的地方。
-        # 只验最新这一份：它就是要恢复的那一份，17ms（5 年规模）。
+        # 只验最新这一份：它就是要恢复的那一份，约 60ms（5 年规模、每月约 150 笔）。
         # 全验 30 份要半秒，而这是个每开一次设置页就调的 GET
         try:
             verify_file(newest)
             out["last_ok"] = True
+            # 文件是好的，里面的账平不平另说。坏账本那一份 run() 故意留着、不轮转，
+            # 这里每次现场再验一遍：账修好、下一份备份做出来，这句自己就消失了
+            if _ledger_check(newest):
+                out["error"] = "ledger_invariant_broken"
         except BackupError:
             out["last_ok"] = False
             # **和 run() 那条路不是一回事，别共用一个码。** 这里验的是目录里
@@ -430,7 +577,6 @@ def status(session: Session) -> dict[str, Any]:
             # 名字超前一天以上：说出来。不说的话备份已经停了而屏幕上一切正常
             out["error"] = out["error"] or "backup_clock_skew"
 
-    src = source_path(session)
     if src is not None and src.exists():
         # 同一块盘上的备份挡不住「盘坏了」。不拦，只说出来 —— 默认就是同一块盘
         out["same_disk"] = os.stat(directory).st_dev == os.stat(src).st_dev
@@ -448,9 +594,49 @@ def run_if_due(session: Session) -> dict[str, Any] | None:
     # 时钟偏差只是一句提醒，不是「备份坏了」：age_hours 已经按 min(名字, mtime)
     # 取了安全的那一头，照它判到没到期就行。原来当成出错，每小时备一份，
     # 30 份保留只盖得住 30 个小时
-    healthy = st["error"] in (None, "backup_clock_skew")
+    # 账本不平也照原来的节奏备：文件本身是好的，只是里面的账有毛病。当成出错的话
+    # 每小时都会多一份，而那段时间又不轮转 —— 一天 24 份整本账堆在盘上
+    healthy = st["error"] in (None, "backup_clock_skew", "ledger_invariant_broken")
     # age 是负的（最新那份的名字和 mtime 都在未来）也算到期：否则自动备份一直停着，
     # 要等真实时间追上那个未来时刻。补做一份之后新文件的时间是对的，节奏自己恢复
     if healthy and st["age_hours"] is not None and 0 <= st["age_hours"] < every:
         return None
     return run(session)
+
+
+#: 同一时刻只许一个 alert 在探目录。拿不到就不排队，直接回上一次探出来的（见 alert）
+_alert_lock = threading.Lock()
+#: 上一次探出来的红点。只在进程内存里，**只给「正有一个在探」时顶一下**，不当结论用
+_alert_last: str | None = None
+
+
+def alert(session: Session) -> str | None:
+    """平时页面上要不要亮一个红点：给一个码，没事就是 None。和 status() 一样现场判，不存结论。
+
+    status 里报出来的错都算（目录用不了、盘满、最新那份打不开、账本不平、时间在未来）；
+    此外自动备份开着、却已经超过两个间隔没出新的 —— backup_stale。
+    **故意不算的**：同盘（默认就是同盘，算了红点就常亮，真出事那天没人当回事）；
+    一份都还没有、也没报错（刚改完目录、每小时那次检查还没轮到）；
+    自动备份是自己关掉的（every_hours=0）时的「太久没备」。
+
+    **读完设置就把 session 关掉，再去探目录。** 这是每次开 App、切回前台都要调的接口，
+    而备份目标最常见的坏法是「卡住」而不是「报错」：NAS 掉线、网络盘 hard mount、
+    同步盘的占位文件正在下载。原来探的整段时间都揣着一条库连接，池子一共 5 条 ——
+    三个人各开一次 App、再切一两次前台，记账、看账单就全部等满 30 秒然后 500。
+    再加 single-flight：已经有一个在探，后来的不再开新线程去排队，回上一次的结果。
+    备份目标卡住时最多挂住一个线程，一条库连接都不占。
+    """
+    global _alert_last
+    inputs = _status_inputs(session)
+    session.close()
+    if not _alert_lock.acquire(blocking=False):
+        return _alert_last
+    try:
+        st = _probe(**inputs)
+        code = st["error"]
+        if code is None and st["every_hours"] > 0 and st["last_at"] is not None and st["stale"]:
+            code = "backup_stale"
+        _alert_last = code
+        return code
+    finally:
+        _alert_lock.release()

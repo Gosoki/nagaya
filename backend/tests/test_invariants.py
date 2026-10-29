@@ -10,6 +10,11 @@
 删、恢复、出账、转账、成员搬走、成员搬回来、**中途备份**。
 
 跑完再逐张检查每张已出账单和当前草稿的 Σclosing ≡ 0 —— 展示层也不许把钱算丢。
+光 Σ 为 0 不够（把已出账单的上期结转多算几张、把删掉的账算进草稿，Σ 照样是 0），
+所以还要逐人对上：草稿的结余 ＝ 账本余额；每张的上期结转 ＝ 上一张的结余；
+每张「此刻」那一列 ＝ 账本余额；以及每一份转账方案套到它那组结余上能清零
+（草稿的、冻结的、此刻的）。出账时随机「不含固定费」，「按原始债权」和「最少转账」
+在序列中途来回切 —— 两种模式冻结下来的方案共存在同一本账里。
 
 备份那一支单独说一句：**每一份中途产出的备份自己也要满足同样两条**。
 备份是在账本一直被写的过程中取的快照，「取的那一刻恰好是半截状态」这件事
@@ -30,6 +35,7 @@ from app.core.split import SplitError
 from app.models import Category, Entry, EntryKind, EntryShare, Member, Statement
 from app.services import backup as backup_svc
 from app.services import ledger
+from app.services import settings as settings_svc
 from app.services.bill import BillError, build_bill, cut_statement
 
 #: 10 条序列 × 100 步，约 6 秒。红了的话报错信息里带着 seed 和 step，原地就能复现
@@ -93,6 +99,45 @@ def _check_backup(path: Path, tag: str) -> None:
         con.close()
 
 
+def _clears(closing: dict[int, int], transfers: list[dict], tag: str) -> None:
+    """照这份方案转完，每个人都该归零：转出的人 +amount，收的人 −amount"""
+    left = dict(closing)
+    for t in transfers:
+        assert t["amount"] > 0, f"{tag}：方案里有不是正数的一笔 {t}"
+        left[t["from_id"]] = left.get(t["from_id"], 0) + t["amount"]
+        left[t["to_id"]] = left.get(t["to_id"], 0) - t["amount"]
+    assert not any(left.values()), f"{tag}：方案 {transfers} 套到结余 {closing} 上剩 {left}"
+
+
+def _per_member(bill: dict, key: str) -> dict[int, int]:
+    """每人那一列。搬走且结清的人不占行，按 0 算 —— 比较时两边都只留非 0 的"""
+    return {r["member_id"]: r[key] for r in bill["members"] if r[key]}
+
+
+def _check_bills(session: Session, tag: str) -> None:
+    """展示层的逐人恒等式（见文件开头）。只在序列末尾跑一次：每张账单一遍 build_bill"""
+    bal = {m: v for m, v in ledger.balances(session).items() if v}
+    sts = list(session.exec(select(Statement).order_by(Statement.cut_at, Statement.id)))
+    prev_closing: dict[int, int] = {}
+    for st in sts:
+        bill = build_bill(session, st)
+        closing = _per_member(bill, "closing")
+        assert sum(closing.values()) == 0, f"{tag}：账单 {st.id} 的 Σclosing ≠ 0"
+        assert _per_member(bill, "opening") == prev_closing, \
+            f"{tag}：账单 {st.id} 的上期结转 ≠ 上一张的结余"
+        assert {m: v for m, v in bill["live_closing"].items() if v} == bal, \
+            f"{tag}：账单 {st.id} 的此刻余额 ≠ 账本余额"
+        snap = st.snapshot_json or {}
+        _clears({r["member_id"]: r["closing"] for r in snap.get("members", [])},
+                snap.get("transfers") or [], f"{tag} 账单 {st.id} 冻结的方案")
+        _clears(bill["live_closing"], bill["live_transfers"], f"{tag} 账单 {st.id} 此刻的方案")
+        prev_closing = closing
+    draft = build_bill(session, None)
+    assert _per_member(draft, "opening") == prev_closing, f"{tag}：草稿的上期结转 ≠ 最近一张的结余"
+    assert _per_member(draft, "closing") == bal, f"{tag}：草稿的结余 ≠ 账本余额"
+    _clears({r["member_id"]: r["closing"] for r in draft["members"]}, draft["transfers"], f"{tag} 草稿的方案")
+
+
 def _setup(session: Session, members: list[Member]) -> tuple[list[int], list[int]]:
     cats = [Category(name=f"c{i}", monthly=(i == 0), display_order=i) for i in range(3)]
     for c in cats:
@@ -108,10 +153,11 @@ def _one_run(session: Session, members: list[Member], seed: int) -> None:
     mid, cid = _setup(session, members)
     seen: list[int] = []
 
+    settings_svc.set_(session, "simplify_debts", rng.random() < 0.5)
     for step in range(STEPS):
         op = rng.choices(
-            ["create", "update", "delete", "restore", "cut", "settle", "leave", "join", "backup"],
-            weights=[34, 22, 10, 6, 8, 14, 3, 3, 8],
+            ["create", "update", "delete", "restore", "cut", "settle", "leave", "join", "backup", "mode"],
+            weights=[34, 22, 10, 6, 8, 14, 3, 3, 8, 2],
         )[0]
         try:
             if op == "create":
@@ -166,7 +212,13 @@ def _one_run(session: Session, members: list[Member], seed: int) -> None:
                 if e is not None and e.deleted_at is not None:
                     ledger.restore_entry(session, e, actor_id=mid[0])
             elif op == "cut":
-                cut_statement(session, actor_id=mid[0])
+                st = cut_statement(session, actor_id=mid[0], include_monthly=rng.random() < 0.7)
+                snap = st.snapshot_json or {}
+                _clears({r["member_id"]: r["closing"] for r in snap.get("members", [])},
+                        snap.get("transfers") or [], f"seed={seed} step={step} 刚出的账单 {st.id}")
+            elif op == "mode":
+                # 「按原始债权」↔「最少转账」：出过的单子各自冻结着出账那一刻那种模式的方案
+                settings_svc.set_(session, "simplify_debts", not settings_svc.get(session, "simplify_debts"))
             elif op == "leave":
                 m = session.get(Member, rng.choice(mid))
                 still_in = sum(1 for i in mid if session.get(Member, i).left_on is None)
@@ -189,12 +241,8 @@ def _one_run(session: Session, members: list[Member], seed: int) -> None:
 
         _check(session, f"seed={seed} step={step} op={op}")
 
-    # 展示层也要守恒：每张账单上「各人结余」加起来必须是 0
-    for st in session.exec(select(Statement)):
-        bill = build_bill(session, st)
-        assert sum(r["closing"] for r in bill["members"]) == 0, f"账单 {st.id} 的 Σclosing ≠ 0"
-    draft = build_bill(session, None)
-    assert sum(r["closing"] for r in draft["members"]) == 0, "草稿账单的 Σclosing ≠ 0"
+    # 展示层也要守恒，而且要逐人对得上（见文件开头）
+    _check_bills(session, f"seed={seed}")
 
 
 def test_invariants_hold_under_random_operations(session: Session, members) -> None:

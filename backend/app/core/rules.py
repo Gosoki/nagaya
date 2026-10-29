@@ -47,10 +47,20 @@ def _prune_rule(rule: dict[str, Any] | None, active: set[int]) -> dict[str, Any]
 
     剔掉而不是报错：这是一条**为上一期写的**规则，拿它硬套今天的人本来就不对。
     注意剩下的人分摊会变（adjustments 是「先抠掉再按比例分」），所以调整额一并去掉
-    的那份钱会回到大家头上 —— 这是唯一说得通的默认，规则本身该由用户重新定。
+    的那份钱会回到大家头上 —— 记一笔继承默认规则时这是唯一说得通的默认，
+    规则本身该由用户重新定。**「照上期」不走这条默认**：上期给搬走的人记过钱
+    （权重、调整额、定额非 0）的，monthly._carry_plan 先拦下来请人重填，
+    走到这里的只剩「点了名但本来就是 0」的人。
 
     **它只管「人少了」。**「人多了」是另一回事，在 _stale_for_today 那儿拦下来 ——
     往这条规则里补一个新人，补多少只有住的人知道。
+
+    **点名的人全搬走了，weights 就留成空的 `{}`，不退回同权。** 原来是退回「所有在籍成员同权」：
+    分类规则写的「只算 Zen」在 Zen 搬走之后悄悄变成大家均分，而前端预览（core/seed.ts）
+    对同一条规则是全 0、不让存 —— 两边口径相反，而且 `{"3": 1}` 退回均分、
+    等价的 `{"1": 0, "2": 0, "3": 1}` 却报错，存不存得下钱看规则碰巧怎么写。
+    留空之后 expand 按 0 补齐，split 报 weights_all_zero（没人参与分摊），和前端一致。
+    本来就没写 weights 的规则（equal_weight、只有调整额的）不受影响。
 
     放在 core 里是因为记一笔（services/ledger）也要用：没送规则、继承分类或全局默认时，
     点名了已搬走的人就会被 expand() 整笔拒掉，而前端预览（core/seed.ts）早就把他们剔掉了。
@@ -62,9 +72,9 @@ def _prune_rule(rule: dict[str, Any] | None, active: set[int]) -> dict[str, Any]
     for field in ("weights", "adjustments", "exact"):
         if isinstance(out.get(field), dict):
             out[field] = {k: v for k, v in out[field].items() if int(k) in active}
-            if not out[field]:
+            if not out[field] and field != "weights":
                 out.pop(field)
-    # weights 全被剔光时退回「所有在籍成员同权」，别留一条空规则
+    # 本来就没写 weights 的（equal_weight、只有调整额的）：照旧是「所有在籍成员同权」
     if out.get("mode", "ratio") == "ratio" and "weights" not in out:
         out.setdefault("equal_weight", 1)
     return out

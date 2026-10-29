@@ -46,8 +46,9 @@ def not_found(what: str) -> AppError:
     return AppError("not_found", f"{what} not found", status=404, what=what)
 
 
-#: 这些错误是「用户输入不对」，不是 500。个别要用 409 让前端知道该刷新。
-CONFLICT_CODES = {"version_conflict", "transfer_changed"}
+#: 这些错误是「用户输入不对」，不是 500。个别要用 409 让前端知道该刷新
+#: （bill_changed：刚有人出过账；amount_jump：不是刷新，是请人确认一次再带标志重发）。
+CONFLICT_CODES = {"version_conflict", "transfer_changed", "bill_changed", "amount_jump"}
 
 
 def error_response(exc: Any) -> JSONResponse:
@@ -58,7 +59,7 @@ def error_response(exc: Any) -> JSONResponse:
     不该依赖业务层。
     """
     # AppError 自己带状态码（404/403/409 都有），别的那几种统一 400，
-    # 只有 version_conflict 要 409 —— 前端靠它知道该刷新再重试
+    # 只有 CONFLICT_CODES 那几个要 409 —— 前端靠它知道该刷新再重试（或者问人一句）
     status_code = getattr(exc, "status", None) or (409 if exc.code in CONFLICT_CODES else 400)
     return JSONResponse(
         status_code=status_code,

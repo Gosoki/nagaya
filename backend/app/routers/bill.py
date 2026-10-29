@@ -71,7 +71,9 @@ def carry_monthly(
     # 要去掉的事。现在的前端永远带着按钮上列出来的那几项
     if body is None or body.category_ids is None:
         return {"created": [], "failed": []}
-    return monthly_svc.carry_same_as_last(session, actor_id=member.id, only=set(body.category_ids))
+    return monthly_svc.carry_same_as_last(
+        session, actor_id=member.id, only=set(body.category_ids), after_statement_id=body.after_statement_id
+    )
 
 
 @router.get("/statements", response_model=list[StatementOut])
@@ -138,6 +140,7 @@ def confirm_transfer(
 @router.post("/statements", response_model=StatementOut, status_code=status.HTTP_201_CREATED)
 def cut_statement(
     include_monthly: bool = True,
+    after_statement_id: int | None = None,
     session: Session = Depends(get_session),
     member: Member = Depends(current_member),
 ):
@@ -145,8 +148,12 @@ def cut_statement(
 
     **不锁定**任何东西 —— 余额全局累计，事后改了也不会算错钱，
     只是下一张账单会把「这张出账后被改过」标出来。
+    after_statement_id：对话框打开时看到的最近一张（草稿账单的 prev_statement_id），
+    已经不是它了就 409 bill_changed（见 bill.cut_statement）。
     """
-    st = bill_svc.cut_statement(session, actor_id=member.id, include_monthly=include_monthly)
+    st = bill_svc.cut_statement(
+        session, actor_id=member.id, include_monthly=include_monthly, after_statement_id=after_statement_id
+    )
     # 金额和结清状态和列表接口同一个算法。原来直接回 ORM 对象，这两项落成默认值：
     # 刚出的 ¥9,000 回来写着 0、「没结清」—— 现在前端只用 id，但这是一颗等着谁来踩的雷
     return StatementOut(

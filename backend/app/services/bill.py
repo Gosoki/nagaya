@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import threading
 from typing import Any
 
@@ -26,7 +27,7 @@ from sqlalchemy import case, func, or_, union_all
 from sqlalchemy import update as sa_update
 from sqlmodel import Session, select
 
-from app.core.settle import Transfer, plan_pairwise, plan_simplified
+from app.core.settle import SettleError, Transfer, plan_pairwise, plan_simplified
 from app.models import (
     AuditLog,
     Category,
@@ -39,8 +40,10 @@ from app.models import (
     jst_date,
     today_jst,
 )
-from app.services import audit, ledger
+from app.services import audit, ledger, review
 from app.services import settings as settings_svc
+
+log = logging.getLogger("nagaya")
 
 
 class BillError(ValueError):
@@ -87,6 +90,19 @@ def _shares_of(session: Session, entry_ids: list[int]) -> dict[int, dict[int, in
     ):
         out.setdefault(eid, {})[mid] = amount
     return out
+
+
+def latest_statement_id(session: Session, exclude: int | None = None) -> int:
+    """最近一张出过的账单的 id，没出过账就是 0。
+
+    「照上期」和「出账」拿它核「手机上看到的还是不是最新那张」（after_statement_id）：
+    两台手机同时出账、都勾着「先按上期记上」，后到的那台会把房租记进**下一期**，
+    再出一张只有房租的账单 —— 房租就收了两遍。
+    """
+    stmt = select(Statement.id)
+    if exclude is not None:
+        stmt = stmt.where(Statement.id != exclude)
+    return session.exec(stmt.order_by(Statement.cut_at.desc()).limit(1)).first() or 0
 
 
 def _earlier_ids(session: Session, statement: Statement | None) -> list[int] | None:
@@ -223,6 +239,11 @@ def help_buy_for(
 
 def build_bill(session: Session, statement: Statement | None = None) -> dict[str, Any]:
     """statement 传 None ＝ 当前这张还没出的草稿账单。"""
+    # **草稿的「最近一张」要在读账目之前拿。** pysqlite 的读不开事务，每条 SELECT 各看各的快照：
+    # 放到最后再读的话，别的手机正好在这中间出完账，拿到的就是「旧草稿 + 新 id」——
+    # 弹框照样勾着「先按上期记上：房租」，带着新 id 一路过关，房租进了下一期，
+    # 再出一张只有房租的单子。先拿就只会是「旧 id + 新草稿」，最坏 409 bill_changed
+    head = latest_statement_id(session) if statement is None else None
     entries = unbilled(session) if statement is None else entries_of(session, statement.id)
     shares = _shares_of(session, [e.id for e in entries])
     members = list(session.exec(select(Member).order_by(Member.display_order, Member.id)))
@@ -296,11 +317,7 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
     if frozen_plan is not None:
         transfers: list[Transfer] = [Transfer(**t) for t in frozen_plan]
     else:
-        transfers = (
-            plan_simplified(closing)
-            if simplify
-            else plan_pairwise(_pair_debts(session, statement))
-        )
+        transfers = _plan(session, closing, statement, simplify)
 
     # 「**此刻**该谁给谁多少」—— 和「未出账」那页看到的是同一份。
     #
@@ -318,11 +335,7 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
         live_closing, live_transfers = closing, transfers
     else:
         live_closing = live_balances or {}
-        live_transfers = (
-            plan_simplified(live_closing)
-            if simplify
-            else plan_pairwise(_pair_debts(session, None))
-        )
+        live_transfers = _plan(session, live_closing, None, simplify)
 
     dates = [e.date for e in entries]
     ref = statement.cut_at if statement else now_utc()
@@ -346,6 +359,9 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
     return {
         "prev_cut_at": prev.cut_at.isoformat() if prev else None,
         "prev_label": prev.label if prev else None,
+        # 草稿：最近一张的 id（没出过账是 0）。出账、「先按上期记上」都带着它回来，
+        # 服务器那边已经不是这张了就 409 bill_changed（见 latest_statement_id）
+        "prev_statement_id": head if statement is None else (prev.id if prev else 0),
         "days_since_prev_cut": gap_days,
         "suggest_monthly": gap_days is None or gap_days >= threshold,
         "statement_id": statement.id if statement else None,
@@ -374,9 +390,80 @@ def build_bill(session: Session, statement: Statement | None = None) -> dict[str
         "edited_after_cut": _edited_after_cut(session, statement, rows, total_expense),
         # 已出的账单上「本期固定费」列哪几项（没记钱的按 ¥0 列）。草稿那页有自己的面板
         "monthly_ids": billed_monthly_ids(session, statement) if statement is not None else None,
+        # 草稿上要人看一眼的几样（参与人和在籍日对不上、疑似重复、离群），只标不改。
+        # 已出的账单不给：D30 改过固定费的日期、冻结的历史，挂上去就是永久的噪音
+        "review": (
+            review.draft_review(session, entries, shares, members, fixed,
+                                {h["entry_id"]: h["for_id"] for h in help_items})
+            if statement is None
+            else None
+        ),
+        # 草稿的「上期结转」和最近那张出账时冻结的结余对不上 —— 那张（或更早的）出账后被改过
+        "opening_drift": _opening_drift(prev, opening) if statement is None else None,
         # 这张单子上的转账记完了没有 —— 「转账按钮都点过了就显示结清」
         **settlement_progress(session, statement),
     }
+
+
+def _plan(
+    session: Session, balances: dict[int, int], statement: Statement | None, simplify: bool
+) -> list[Transfer]:
+    """转账方案。**两种模式都先核 Σ结余 == 0**。
+
+    原来只有「最少转账」会核（plan_simplified 自己抛 unbalanced）：一笔分摊合计对不上
+    金额的坏账，最少转账模式下整个账单页 500，「按原始债权」模式下却照常 200 ——
+    每人结余加起来不是 0、转账方案也加不平，账本悄悄错着，什么都不报。
+    两种模式坏了都该是同一个样子（SettleError 故意是 500，理由见 core/settle.py）。
+
+    抛出去之前把**哪几笔**分摊合计 ≠ 金额写进日志：500 页面上只有一个总数，
+    人得知道去改哪一笔。一笔都没有的话，多半是读的那一瞬间账本是斜的（并发写），
+    不是账坏了 —— 日志里也照实说。只记日志，不修。
+    """
+    try:
+        total = sum(balances.values())
+        if total != 0:
+            raise SettleError("unbalanced", f"余额合计是 {total}，不是 0，账本已经不平了", total=total)
+        return plan_simplified(balances) if simplify else plan_pairwise(_pair_debts(session, statement))
+    except SettleError:
+        log.error("账本不平：分摊合计 ≠ 金额的账目 %s（空 ＝ 账目本身是好的，多半是并发写时读斜了）",
+                  _unbalanced_entries(session))
+        raise
+
+
+def _unbalanced_entries(session: Session) -> list[int]:
+    """分摊合计 ≠ 金额的那几笔（没删的）。一条 SQL：逐笔把 entry_share 加起来跟 amount_jpy 比"""
+    sums = (
+        select(EntryShare.entry_id, func.sum(EntryShare.amount_jpy).label("total"))
+        .group_by(EntryShare.entry_id)
+        .subquery()
+    )
+    return list(
+        session.exec(
+            select(Entry.id)
+            .outerjoin(sums, sums.c.entry_id == Entry.id)
+            .where(Entry.deleted_at.is_(None), func.coalesce(sums.c.total, 0) != Entry.amount_jpy)
+            .order_by(Entry.id)
+        )
+    )
+
+
+def _opening_drift(prev: Statement | None, opening: dict[int, int]) -> dict[str, Any] | None:
+    """草稿的「上期结转」还是不是最近那张出账时冻结的那组结余。
+
+    已出的账单事后被改，钱不会算错（差额进草稿的上期结转），但草稿页上的数字
+    跟着变了却什么都不说 —— 而那是打开 App 默认停的一页。最近那张自己会挂
+    「出账后被改过」（被改的是它，或者更早那张），这里只负责指过去。
+    按数值比、成员取并集缺的按 0：原样保存、改了又改回都不会报；
+    老快照没有每人行时比不了，不瞎报。
+    """
+    if prev is None:
+        return None
+    frozen = {r["member_id"]: r["closing"] for r in (prev.snapshot_json or {}).get("members", [])}
+    if not frozen:
+        return None
+    if any(opening.get(m, 0) != frozen.get(m, 0) for m in frozen.keys() | opening.keys()):
+        return {"statement_id": prev.id, "label": prev.label}
+    return None
 
 
 def billed_monthly_ids(session: Session, statement: Statement) -> list[int]:
@@ -400,6 +487,10 @@ def billed_monthly_ids(session: Session, statement: Statement) -> list[int]:
     return [c.id for c in rows]
 
 
+#: 「这一张结了固定费」：出账时记进快照的 include_monthly 不是 false（老账单没有这个键，当完整出账）
+_INCLUDED_MONTHLY = func.coalesce(func.json_extract(Statement.snapshot_json, "$.include_monthly"), 1) != 0
+
+
 def last_monthly_cut(session: Session, before: dt.datetime | None = None) -> Statement | None:
     """最近一张**结了固定费**的账单 —— 出账时没选「不含固定费」的那种。
 
@@ -409,12 +500,19 @@ def last_monthly_cut(session: Session, before: dt.datetime | None = None) -> Sta
     账单一年十来张，逐张看快照比写 JSON 查询省事也好读。
     """
     # 在 SQL 里挑，LIMIT 1。原来是把每一张连快照整个取出来在 Python 里一张张看
-    stmt = select(Statement).where(
-        func.coalesce(func.json_extract(Statement.snapshot_json, "$.include_monthly"), 1) != 0
-    )
+    stmt = select(Statement).where(_INCLUDED_MONTHLY)
     if before is not None:
         stmt = stmt.where(Statement.cut_at < before)
     return session.exec(stmt.order_by(Statement.cut_at.desc()).limit(1)).first()
+
+
+def monthly_cut_ids(session: Session) -> list[int]:
+    """结了固定费的那些账单，从旧到新。和 last_monthly_cut 同一个判据。
+
+    固定费的「一期」按它们数：中途出的不含固定费的小账不算一期，
+    数进去的话隔月收的水费会被当成「隔了三期」。
+    """
+    return list(session.exec(select(Statement.id).where(_INCLUDED_MONTHLY).order_by(Statement.cut_at)))
 
 
 def _pair_debts(session: Session, statement: Statement | None) -> dict[tuple[int, int], int]:
@@ -496,45 +594,71 @@ def _edited_after_cut(
             Entry.id.in_(select(AuditLog.target_id).where(*after_cut)), Entry.statement_id == statement.id
         )
     ).all()
-    n_touched = _really_changed(session, touched, after_cut) if touched else 0
+    changed = _really_changed(session, touched, after_cut) if touched else []
 
     snapshot = statement.snapshot_json or {}
     frozen_closing = {r["member_id"]: r["closing"] for r in snapshot.get("members", [])}
     live_closing = {r["member_id"]: r["closing"] for r in rows}
-    drifted = any(live_closing.get(mid, 0) != c for mid, c in frozen_closing.items())
+    # **成员取并集、缺的按 0。** 只遍历冻结快照里有的人的话，出账时已经搬走又结清
+    # （所以没占行）的两个人之间一笔旧账被改，这张会多出两行而不标。
+    # 快照里压根没有每人行（出账那一刻自己算快照时就是这样）没法比，不算漂
+    moved = [
+        {"member_id": m, "frozen_closing": frozen_closing.get(m, 0), "live_closing": live_closing.get(m, 0)}
+        for m in dict.fromkeys([*live_closing, *frozen_closing])
+        if live_closing.get(m, 0) != frozen_closing.get(m, 0)
+    ] if frozen_closing else []
+    drifted = bool(moved)
 
-    if not n_touched and not drifted:
+    if not changed and not drifted:
         return None
     return {
-        "count": n_touched,
+        "count": len(changed),
         "frozen_total": snapshot.get("total_expense"),
         # build_bill 手里就有这张的实时合计，不用再把它的账目查一遍
         "live_total": live_total,
         # 这张单子自己一笔没动，是更早那张被改了才漂的
-        "from_earlier": not n_touched and drifted,
+        "from_earlier": not changed and drifted,
+        # 只给件数和合计的话，「只改了分摊」会写成「当初 ¥30,000，现在 ¥30,000」，
+        # 而每个人到底差了多少、改的是哪几笔、谁改的，一样都说不出来
+        "members": moved,
+        "entries": changed,
+        # 是哪几张更早的单子在这张出账之后被改了，害得这张跟着漂。查不出来就是空的 ——
+        # 界面退回笼统那句，不瞎指
+        "sources": _drift_sources(session, statement, after_cut) if drifted else [],
     }
 
 
-def _really_changed(session: Session, touched: list[Entry], after_cut: tuple[Any, ...]) -> int:
-    """出账之后动过的这几笔里，**现在和出账那一刻真不一样**的有几笔。
+def _really_changed(
+    session: Session, touched: list[Entry], after_cut: tuple[Any, ...]
+) -> list[dict[str, Any]]:
+    """出账之后动过的这几笔里，**现在和出账那一刻真不一样**的那几笔（逐笔给出前后金额和谁改的）。
 
     只数「有过改动记录」的话，原样点一次「保存」、删了又点「撤销」、改了又改回来，
     那张已经发进群里的账单都会永远挂着「当初 ¥30,000，现在 ¥30,000」。
     出账那一刻的样子就是出账之后**第一条**审计的 before（restore 那条没有 before：
     出账时它是删掉的状态）。只看出账后被动过的那几笔，平时是 0 笔，不多查。
+    「谁改的」是出账之后动过它的**所有人**（去重），不只是第一个。
     """
     ids = [e.id for e in touched]
     first = (
         select(func.min(AuditLog.id)).where(*after_cut, AuditLog.target_id.in_(ids)).group_by(AuditLog.target_id)
     )
     at_cut = {a.target_id: a.before_json for a in session.exec(select(AuditLog).where(AuditLog.id.in_(first)))}
+    by: dict[int, list[int]] = {}
+    for target_id, member_id in session.exec(
+        select(AuditLog.target_id, AuditLog.member_id)
+        .where(*after_cut, AuditLog.target_id.in_(ids))
+        .order_by(AuditLog.id)
+    ):
+        if member_id is not None and member_id not in by.setdefault(target_id, []):
+            by[target_id].append(member_id)
     shares: dict[int, dict[str, int]] = {i: {} for i in ids}
     for entry_id, member_id, amount in session.exec(
         select(EntryShare.entry_id, EntryShare.member_id, EntryShare.amount_jpy).where(EntryShare.entry_id.in_(ids))
     ):
         shares[entry_id][str(member_id)] = amount
 
-    n = 0
+    out: list[dict[str, Any]] = []
     for e in touched:
         now = audit.entry_snapshot(e, shares[e.id])   # 和审计写进去的 before 同一个形状
         was = at_cut.get(e.id)
@@ -543,8 +667,38 @@ def _really_changed(session: Session, touched: list[Entry], after_cut: tuple[Any
         else:
             # updated_at、version 每动一次都变，不算内容；出账之后才加的列老记录里没有，不比
             same = all(now.get(k) == v for k, v in was.items() if k not in ("updated_at", "version"))
-        n += not same
-    return n
+        if same:
+            continue
+        out.append({
+            "entry_id": e.id,
+            "title": e.title,
+            "category_id": e.category_id,
+            "before_amount": was.get("amount_jpy") if was else None,
+            "after_amount": e.amount_jpy,
+            "deleted": e.deleted_at is not None,
+            "by": by.get(e.id, []),
+        })
+    return out
+
+
+def _drift_sources(session: Session, statement: Statement, after_cut: tuple[Any, ...]) -> list[int]:
+    """这张出账之后，哪几张**更早的**单子上的账真被改了（这张的上期结转因此而变）。
+
+    和 _really_changed 同一个判据，只是拿**这张**的出账时刻当基准：
+    更早那张里某笔在这张出账后改了又改回，不算来源。只在漂了的时候查，平时不查。
+    """
+    earlier = _earlier_ids(session, statement)
+    if not earlier:
+        return []
+    touched = session.exec(
+        select(Entry).where(
+            Entry.id.in_(select(AuditLog.target_id).where(*after_cut)), Entry.statement_id.in_(earlier)
+        )
+    ).all()
+    if not touched:
+        return []
+    home = {e.id: e.statement_id for e in touched}
+    return sorted({home[c["entry_id"]] for c in _really_changed(session, touched, after_cut)})
 
 
 def list_totals(session: Session) -> dict[int, int]:
@@ -605,6 +759,16 @@ def list_settled(session: Session, statements: list[Statement]) -> dict[int, boo
 
 # ------------------------------------------------------------------ 出账
 
+#: 「照上期」（monthly.carry_same_as_last）和出账共用的一把锁，同一时刻只许其中一件在跑。
+#: carry 是「核 after_statement_id → 读本期有哪几项 → 把缺的记上」，中间隔着好几十毫秒；
+#: 只有 carry 自己拿锁的话，别的手机的出账正好在「核完」和「读本期」之间提交，
+#: 草稿一下子空了 —— 房租被当成本期还没记，记进了**下一期**，这边紧接着的出账又 409
+#: 「这次什么都没动」，可下一期的房租已经在那儿了。两件串起来，carry 要么看得见新的那张
+#: （409、一笔不记），要么整个跑在出账之前（记上的房租跟着这次出账走）。
+#: 服务是单端口单进程（见 main.py 的 _daily_backup），一把进程内的锁就够。
+#: RLock：拿着锁的那一步里再调到另一件也不会把自己锁死
+period_lock = threading.RLock()
+
 
 def cut_statement(
     session: Session,
@@ -613,6 +777,7 @@ def cut_statement(
     label: str | None = None,
     include_monthly: bool = True,
     on: dt.date | None = None,
+    after_statement_id: int | None = None,
 ) -> Statement:
     """出账单：把这一刻之前没出账的账目归到一张单子上，并冻结快照。
 
@@ -620,7 +785,27 @@ def cut_statement(
     月中想把日用品先结一轮、又不想等水电煤账单的时候用。
 
     `on` 只给种子/测试用来铺时间线，正常就是今天（JST）。
+
+    `after_statement_id`：手机上看到的最近一张账单（没出过账给 0）。给了就在写事务里核一遍，
+    对不上 ＝ 刚有人出过账，这边拿的是旧对话框，409 bill_changed、什么都不出。
+    不给就不核（旧版前端）。
+
+    整个拿着 period_lock 跑（理由见那把锁）。
     """
+    with period_lock:
+        return _cut(session, actor_id=actor_id, label=label, include_monthly=include_monthly,
+                    on=on, after_statement_id=after_statement_id)
+
+
+def _cut(
+    session: Session,
+    *,
+    actor_id: int | None,
+    label: str | None,
+    include_monthly: bool,
+    on: dt.date | None,
+    after_statement_id: int | None,
+) -> Statement:
     entries = unbilled(session)
     monthly_ids = {
         c.id
@@ -635,8 +820,13 @@ def cut_statement(
     # 固定费不按「哪天填的」记 —— 家賃这种根本没有填入日，它就是这张账单的一项。
     # 出账那一刻统一盖成出账日：账目里一张账单的固定费并成一块，不再散在整个月。
     # 日常开销不动，几号买的日用品是真事。
+    # 盖掉的原日期记进出账那一条审计（不给每笔另写一条 update：那条的时间晚于 cut_at，
+    # 会让每张带固定费的账单都挂上「出账后被改过」）
+    stamped: dict[str, str] = {}
     for e in entries:
         if e.category_id in monthly_ids:
+            if e.date != today:
+                stamped[str(e.id)] = e.date.isoformat()
             e.date = today
             session.add(e)
 
@@ -655,6 +845,19 @@ def cut_statement(
     )
     session.add(statement)
     session.flush()
+    # **出账时刻要在拿到写锁之后再盖。** 上面那个 now_utc() 是锁外取的：正好有人在改一笔草稿，
+    # 他的审计时间晚于这个时刻、却先拿到锁提交了 —— 这张单子一出来就永久挂着
+    # 「出账后被改过 1 处：当初 ¥9,000，现在 ¥9,000」（同时发起时实测 12%）。
+    # 第二个 flush 要显式写：靠后面那条 UPDATE 顺手 autoflush 也写得进去，
+    # 但它后面紧跟 expire_all()，哪天那条改成 Core 写法，没刷出去的时间戳就悄悄丢了
+    statement.cut_at = now_utc()
+    session.flush()
+    if after_statement_id is not None:
+        # 和认领在同一个写事务里核：两边同时点，后到的这一边要等前一边提交完才走到这里
+        latest = latest_statement_id(session, exclude=statement.id)
+        if latest != after_statement_id:
+            session.rollback()
+            raise BillError("bill_changed", "刚有人出过账了，刷新一下再看", latest=latest)
 
     # **归期要做成一条带条件的 UPDATE。** 原来是逐条 `e.statement_id = statement.id`，
     # 而 unbilled() 那次 SELECT 根本不在写事务里（pysqlite 读不开事务）：
@@ -703,7 +906,7 @@ def cut_statement(
     statement.snapshot_json = snapshot
     session.add(statement)
     audit.write(session, actor_id, "cut_statement", "statement", statement.id,
-                None, {"label": statement.label, "entries": len(entries)})
+                None, {"label": statement.label, "entries": len(entries), "stamped": stamped})
     session.commit()
     session.refresh(statement)
     return statement
@@ -712,7 +915,7 @@ def cut_statement(
 # ------------------------------------------------- 「确认已完成」
 
 #: 「算此刻还差多少 → 记账」必须是一步。服务是单进程（README 部署那一行），
-#: 一把进程内的锁就够 —— 和 monthly._carry_lock 同一个做法
+#: 一把进程内的锁就够 —— 和 period_lock 同一个做法
 _confirm_lock = threading.Lock()
 
 
@@ -772,6 +975,13 @@ def confirm_transfer(
             amount=amount,
             payer_id=from_id,
             to_member_id=to_id,
+            # 审计里留一笔「这是在哪张单子上点的确认、当时看到还差多少」，
+            # 否则它和手记的转账长得一模一样
+            audit_via={
+                "kind": "confirm",
+                "statement_id": statement.id if statement else None,
+                "expect_left": expect_left,
+            },
         )
 
 

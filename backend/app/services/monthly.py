@@ -7,7 +7,8 @@
 
 from __future__ import annotations
 
-import threading
+import statistics
+import unicodedata
 from typing import Any
 
 from sqlalchemy import func
@@ -17,7 +18,16 @@ from app.core.rules import _prune_rule, expand
 from app.core.split import split
 from app.models import Category, Entry, EntryKind, Statement, today_jst
 from app.services import ledger
-from app.services.bill import entries_of, last_monthly_cut, unbilled
+from app.services import settings as settings_svc
+from app.services.bill import (
+    BillError,
+    entries_of,
+    last_monthly_cut,
+    latest_statement_id,
+    monthly_cut_ids,
+    period_lock,
+    unbilled,
+)
 
 
 def monthly_rows(session: Session, statement: Statement | None = None) -> dict[str, Any]:
@@ -57,22 +67,35 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
     # 草稿里还没录的行：垫付人和分摊从**上期那一笔**起步，和「和上期一样」同一个口径
     # （SPEC F1：分摊规则默认＝该分类上次用的规则）。原来是分类默认规则 ——
     # 而界面上改房租怎么分只能逐笔改，于是每期手填一次房租，分摊就打回均分一次。
-    # 人变了（有人搬走/搬进来）就不抄：退回分类默认，由人自己重新定
+    # 人变了（有人搬走/搬进来）就不抄：退回分类默认，由人自己重新定。
+    # 上期那张单子上这一项不止一笔的也不抄（_last_multi）：挑哪一笔都是猜
     last = _last_billed(session, [c.id for c in categories]) if statement is None else {}
+    multi = _last_multi(session, last)
     ids = [m.id for m in ledger.active_members(session, today_jst())] if statement is None else []
     active = set(ids)
     # 「和上期一样」这一步现在要人点（面板上那个按钮、出账时那个勾），
-    # 所以得先告诉界面：点下去会记哪几项、多少钱，哪几项记不了
-    ready: dict[int, int] = {}
-    blocked: dict[int, str] = {}
+    # 所以得先告诉界面：点下去会记哪几项、多少钱、算谁垫的，哪几项记不了
+    ready: dict[int, tuple[int, int | None]] = {}
+    blocked: dict[int, dict[str, Any]] = {}
+    # 下面三样只给草稿，都是「提示一句、人来定」：
+    suggest: set[int] = set()                           # 最近几期一模一样 → 问要不要开「和上期一样」
+    elsewhere: dict[int, list[dict[str, Any]]] = {}     # 草稿里记在别的分类下、备注里写着这一项名字的
+    rhythm: dict[int, tuple[int | None, int | None]] = {}   # 隔几期出现一次（出账时「还空着」分两段）
+    # 分类没定规则的行，记的时候用的是全局默认 —— 「没写到谁」也得按它判
+    global_rule = settings_svc.get(session, "default_rule")
     if draft is not None:
         todo, failed = _carry_plan(session, draft)
-        ready = {c.id: prev.amount_jpy for c, prev, _, _ in todo}
-        blocked = {f["category_id"]: f["reason"] for f in failed}
+        ready = {c.id: (prev.amount_jpy, payer) for c, prev, payer, _ in todo}
+        blocked = {f["category_id"]: f for f in failed}
+        cuts = monthly_cut_ids(session)
+        seen = _appearances(session, [c.id for c in categories], cuts)
+        suggest = _suggest_same_as_last(session, categories, cuts, seen)
+        elsewhere = _maybe_elsewhere(session, categories, draft)
+        rhythm = {c.id: _rhythm(cuts, seen.get(c.id, {})) for c in categories}
     rows = []
     for c in categories:
         entry = mine.get(c.id)
-        prev = last.get(c.id)
+        prev = last.get(c.id) if c.id not in multi else None
         seed = c.default_rule_json
         prev_payer = None
         if prev is not None:
@@ -85,6 +108,8 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
         # 而填出来的是**新账目**，落进当前草稿，根本不会进这张单子。
         if statement is not None and entry is None:
             continue
+        carry = ready.get(c.id)
+        stop = blocked.get(c.id) or {}
         rows.append(
             {
                 "category_id": c.id,
@@ -102,6 +127,9 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
                 "entry_id": entry.id if entry else None,
                 "amount": entry.amount_jpy if entry else None,
                 "version": entry.version if entry else None,
+                #: 面板上显示的那一笔是谁垫的。原来前端从账单页的明细缓存里借着猜，
+                #: 缓存旧了或者本期超过 200 笔就是个猜出来的人
+                "payer_id": entry.payer_id if entry else None,
                 "rule": entry.split_rule_json if entry else seed,
                 #: 上期那一笔是谁垫的（还在籍才给）。面板上没录的行按它预填「谁付的」
                 "last_payer_id": prev_payer,
@@ -109,13 +137,31 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
                 #: 本期这个分类一共有几笔。>1 说明面板没显示全，界面上必须提示
                 "entry_count": dup.get(c.id, 0),
                 #: 按「和上期一样」点一下会记多少（只有草稿、开了开关、本期还没处理过的才有）
-                "carry_amount": ready.get(c.id),
+                "carry_amount": carry[0] if carry else None,
+                #: 点下去这一笔算谁垫的 —— 和真去记的是同一份（_carry_plan），前端别自己推
+                "carry_payer_id": carry[1] if carry else None,
                 #: 上期这一项多少钱。**只给开了「和上期一样」的**（没开的一分都不许漏过来，D21）。
                 #: 本期填没填都给：展开那一行时「照上期 ¥…」一直在 —— 填过了就显示
-                #: 「已照上期」，改过了就能一键改回上期的数
+                #: 「已照上期」，改过了就能一键改回上期的数。上期有好几笔的不给（挑哪笔都是猜）
                 "last_amount": prev.amount_jpy if prev is not None and c.same_as_last and prev.amount_jpy else None,
-                #: 开了开关却记不了的原因（payer_left / rule_stale），要人自己填
-                "carry_blocked": blocked.get(c.id),
+                #: 开了开关却记不了的原因（payer_left / rule_stale / last_multi），要人自己填
+                "carry_blocked": stop.get("reason"),
+                #: last_multi 时上期那几笔一共几笔、合计多少（只有开了开关的项才会走到这一步，D21）
+                "carry_blocked_detail": stop.get("detail"),
+                #: 起步的规则点名写了谁分多少、却没写到今天在籍的这几个人 —— 他们在这一项上按 0 算。
+                #: 只标不补：新室友该担多少只有住的人知道
+                "rule_missing_member_ids": (
+                    _missing_members(seed or global_rule, active) if draft is not None and entry is None else []
+                ),
+                #: 最近 same_as_last_hint_k 期这一项每期一笔、金额都一样 —— 问一句要不要开
+                #: 「和上期一样」。**只是个布尔，不带金额**（没开开关的项一分钱都不许漏过来，D21）
+                "suggest_same_as_last": c.id in suggest,
+                #: 草稿里记在别的分类下、备注里写着这一项名字的账（「其他·电费 ¥8,700」）。
+                #: 只是「是不是它？」—— 不算「已填」，不取消照上期，也不替人改分类
+                "maybe_elsewhere": elsewhere.get(c.id, []),
+                #: 出账时「X 还空着」分两段用：见 _rhythm
+                "cuts_since_last": rhythm.get(c.id, (None, None))[0],
+                "typical_gap": rhythm.get(c.id, (None, None))[1],
             }
         )
 
@@ -128,19 +174,21 @@ def monthly_rows(session: Session, statement: Statement | None = None) -> dict[s
     }
 
 
-#: carry 这件事整个进程里一次只许跑一个。
+#: carry 这件事整个进程里一次只许跑一个，**出账也算在里面**（锁是 bill.period_lock，和出账共用）。
 #: 「读一遍本期已经有哪几项 → 把缺的记上」中间隔着好几十毫秒。原来触发它的是
 #: 账单页挂载 —— 群里一句「出账了」，三个人同时点开，两个请求都在对方 commit
 #: 之前读到「本期还没记房租」，于是各记一笔，当期房租翻倍。现在改成人点按钮了，
 #: 可两个人同时点、或者一个人连点照样会撞，锁留着。
 #: 面板一行只显示得下一笔，屏幕上的金额还是对的、合计却是两倍。
-#: 服务是单端口单进程（见 main.py 的 _daily_backup），一把进程内的锁就够；
 #: 不加唯一索引 —— 同一分类手工记两笔是合法的（entry_count 就是为它准备的）
-_carry_lock = threading.Lock()
 
 
 def carry_same_as_last(
-    session: Session, *, actor_id: int | None, only: set[int] | None = None
+    session: Session,
+    *,
+    actor_id: int | None,
+    only: set[int] | None = None,
+    after_statement_id: int | None = None,
 ) -> dict[str, Any]:
     """把「和上期一样」的固定费按上期金额记进当前草稿。
 
@@ -158,8 +206,19 @@ def carry_same_as_last(
     前面那几笔**已经 commit 进草稿了**（create_entry 自己 commit），
     而返回值随异常一起丢掉、接口返 400、前端一个空 catch 吞掉 ——
     屏幕上那几行还是空框，用户照着空框再填一遍，同一分类当期就有了两笔。
+
+    `after_statement_id`：点的那一刻手机上看到的最近一张账单（没出过账给 0）。
+    两台手机同时出账、都勾着「先按上期记上」时，后到的那台点下去的那一刻，
+    上期已经被前一台出掉了 —— 照记就是把房租记进**下一期**，再出一张只有房租的账单。
+    对不上就 409 bill_changed、一笔不记。在锁里核：和「读本期有哪几项 → 记上」是同一步，
+    出账也拿着同一把锁，核完之后不会有人插进来出账。
+    不给就不核（旧版前端、面板上那颗「照上期」）。
     """
-    with _carry_lock:
+    with period_lock:
+        if after_statement_id is not None:
+            latest = latest_statement_id(session)
+            if latest != after_statement_id:
+                raise BillError("bill_changed", "刚有人出过账了，刷新一下再看", latest=latest)
         return _carry(session, actor_id=actor_id, only=only)
 
 
@@ -208,6 +267,7 @@ def _carry_plan(
         dropped = dropped.where(Entry.deleted_at > since.cut_at)
     handled |= {e.category_id for e in session.exec(dropped)}
     last = _last_billed(session, [c.id for c in categories])
+    multi = _last_multi(session, last)
     ids = [m.id for m in ledger.active_members(session, today_jst())]
     active = set(ids)
 
@@ -216,6 +276,11 @@ def _carry_plan(
     for c in categories:
         prev = last.get(c.id)
         if c.id in handled or prev is None or not prev.amount_jpy:
+            continue
+        if c.id in multi:
+            # 上期那张单子上这一项有好几笔：抄哪一笔都是猜，求和又会把同额重复翻倍。
+            # 笔数和合计给出去让人看着填（只有开了开关的项走到这里，D21 不漏）
+            failed.append({"category_id": c.id, "name": c.name, "reason": "last_multi", "detail": multi[c.id]})
             continue
         # **「和上期一样」就是字面意思：金额、分摊、垫付人都照上期那一笔。**
         #
@@ -232,6 +297,14 @@ def _carry_plan(
         if stale is not None:
             # 自动记的钱必须看得见 —— 这一条也包括「这次没敢替你记」
             failed.append({"category_id": c.id, "name": c.name, "reason": stale})
+            continue
+        if _charged_the_departed(rule, active):
+            # **人少了也拦。** 原来是剔掉搬走的人（连他的调整额）照记：上期 45,000/40,000/35,000，
+            # Kan 一走就默默变成 65,000/55,000，按钮和通知只报「房租 ¥120,000，按上期」——
+            # 月中搬走的人那期该不该担、调整额怎么改，全被程序替人定了。和「人多了」同样处理，
+            # 请人手填一期；之后各期照抄新的那一笔。
+            # **不放进 _stale_for_today**：那边一拦，面板手填的起步分法会退回分类默认（monthly_rows）
+            failed.append({"category_id": c.id, "name": c.name, "reason": "rule_stale"})
             continue
         pruned = _carried_rule(rule, active)
         # 剔完人还得分得下去：上期「只算 Zen」而 Zen 搬走了，剔完是谁都不担；exact 的老规则
@@ -285,13 +358,16 @@ def _carry(session: Session, *, actor_id: int | None, only: set[int] | None) -> 
                 payer_id=payer,
                 category_id=c.id,
                 rule=rule,
+                # 审计里留一笔「抄自上期哪一笔」，否则它和手填的长得一模一样
+                audit_via={"kind": "carry", "from_entry": prev.id},
             )
         except (ValueError, KeyError) as e:   # LedgerError / RuleError / SplitError 都是 ValueError
             session.rollback()
             # 只回码（和别处一样，文案归前端）；KeyError 之类没有码的才退回原文
             failed.append({"category_id": c.id, "name": c.name, "reason": getattr(e, "code", str(e))})
             continue
-        made.append({"category_id": c.id, "name": c.name, "amount": entry.amount_jpy})
+        # 付款人也报出来：通知里只写「房租 ¥120,000」的话，记成了谁垫的没人看得见
+        made.append({"category_id": c.id, "name": c.name, "amount": entry.amount_jpy, "payer_id": entry.payer_id})
     return {"created": made, "failed": failed}
 
 
@@ -310,21 +386,54 @@ def _stale_for_today(rule: dict[str, Any] | None, payer: int | None, active: set
 
     两种都该**响一声**让人自己重新定，而不是替他记一笔错的 ——
     这跟这个函数「搬不过来的也要说出来」的既有约定是同一条。
+
+    「人少了」（上期给搬走的人记过钱）在 _carry_plan 里另拦（_charged_the_departed），
+    不在这儿：monthly_rows 拿这个函数判「手填的起步分法能不能从上期那一笔抄」，
+    这里一拦，起步就会退回分类默认 —— 那是另一件事，不该跟着变。
     """
     if payer is not None and payer not in active:
         return "payer_left"
+    if _missing_members(rule, active):
+        return "rule_stale"
+    return None
+
+
+def _missing_members(rule: dict[str, Any] | None, active: set[int]) -> list[int]:
+    """规则**点名**写了谁分多少、却没写到的那几个今天在籍的人 —— expand 会把他们按 0 补齐。
+
+    equal_weight 那种不点名的写法永远是空的（谁在籍就算谁）。照上期（_stale_for_today）
+    和面板上的提示（monthly_rows 的 rule_missing_member_ids）共用这一条，口径不会分叉。
+    """
     rule = rule or {}
     named = rule.get("exact") if rule.get("mode", "ratio") == "exact" else rule.get("weights")
-    if isinstance(named, dict) and named:
-        listed: set[int] = set()
-        for key in named:
+    if not (isinstance(named, dict) and named):
+        return []
+    listed: set[int] = set()
+    for key in named:
+        try:
+            listed.add(int(key))
+        except (TypeError, ValueError):
+            continue
+    return sorted(active - listed)
+
+
+def _charged_the_departed(rule: dict[str, Any] | None, active: set[int]) -> bool:
+    """这条规则有没有给**已经不在籍**的人记过钱：权重、调整额、定额任一项不是 0。
+
+    是 0 的不算 —— 「这一项本来就不算他」（比如只算两个人的车位）照抄不改钱。
+    """
+    for field in ("weights", "adjustments", "exact"):
+        section = (rule or {}).get(field)
+        if not isinstance(section, dict):
+            continue
+        for key, value in section.items():
             try:
-                listed.add(int(key))
+                gone = int(key) not in active
             except (TypeError, ValueError):
                 continue
-        if active - listed:
-            return "rule_stale"
-    return None
+            if gone and value:
+                return True
+    return False
 
 
 def _last_billed(session: Session, category_ids: list[int]) -> dict[int, Entry]:
@@ -356,3 +465,150 @@ def _last_billed(session: Session, category_ids: list[int]) -> dict[int, Entry]:
     )
     rows = session.exec(select(Entry).join(latest, latest.c.id == Entry.id).where(latest.c.rank == 1))
     return {e.category_id: e for e in rows}
+
+
+def _last_multi(session: Session, last: dict[int, Entry]) -> dict[int, dict[str, int]]:
+    """上期那一笔所在的那张账单上，这一项**不止一笔**支出的：{分类: {count, total}}。
+
+    _last_billed 每个分类只挑一笔（日期、id 最新的那笔）。同一张单子上这一项有两笔
+    （两台手机同时填、面板缓存旧了又 POST 一次，出账时没清掉）的话，挑中哪一笔全凭 id：
+    ¥120,000 的房租可能被抄成 ¥20,000，垫付人也跟着换。这种不抄，也不替人求和
+    （同额重复时求和就是房租翻倍）—— 交给人填。
+    **只数那一笔所在的那张**：跨账单数的话，隔月的水费、历史上的每一期都会被数进来。
+    删掉的不数：重复清理掉之后就该恢复照抄。
+    """
+    if not last:
+        return {}
+    out: dict[int, dict[str, int]] = {}
+    for cid, sid, n, total in session.exec(
+        select(Entry.category_id, Entry.statement_id, func.count(), func.sum(Entry.amount_jpy))
+        .where(
+            Entry.category_id.in_(list(last)),
+            Entry.statement_id.in_({e.statement_id for e in last.values()}),
+            Entry.deleted_at.is_(None),
+            Entry.kind == EntryKind.expense,
+        )
+        .group_by(Entry.category_id, Entry.statement_id)
+    ):
+        if n > 1 and last[cid].statement_id == sid:
+            out[cid] = {"count": int(n), "total": int(total)}
+    return out
+
+
+def _appearances(
+    session: Session, category_ids: list[int], cuts: list[int]
+) -> dict[int, dict[int, tuple[int, int, int]]]:
+    """每个固定费分类在每张结了固定费的账单上：几笔支出、最小、最大金额（删掉的不算）。
+
+    「隔几期出现一次」和「最近几期是不是一模一样」都从这一份数，一条 group by。
+    """
+    if not category_ids or not cuts:
+        return {}
+    out: dict[int, dict[int, tuple[int, int, int]]] = {}
+    for cid, sid, n, lo, hi in session.exec(
+        select(
+            Entry.category_id, Entry.statement_id, func.count(),
+            func.min(Entry.amount_jpy), func.max(Entry.amount_jpy),
+        )
+        .where(
+            Entry.category_id.in_(category_ids),
+            Entry.statement_id.in_(cuts),
+            Entry.deleted_at.is_(None),
+            Entry.kind == EntryKind.expense,
+        )
+        .group_by(Entry.category_id, Entry.statement_id)
+    ):
+        out.setdefault(cid, {})[sid] = (int(n), int(lo), int(hi))
+    return out
+
+
+def _suggest_same_as_last(
+    session: Session,
+    categories: list[Category],
+    cuts: list[int],
+    seen: dict[int, dict[int, tuple[int, int, int]]],
+) -> set[int]:
+    """该问一句「要不要开『和上期一样』」的那几项：没开、没归档，最近 k 张结了固定费的账单上
+    **每张都恰好一笔、金额全一样**。
+
+    「最近 k 期」必须按账单数（跳过不含固定费的小账），不能按分类往回找最近 k 笔：
+    那样隔月收、每次金额一样的水费也会被挑中，人照提示一开，
+    单月那期出账框就默认勾上「先按上期记上：水费」—— 每个单月多收一次水费。
+    缺一期、某期有两笔、不满 k 张，都不问。
+    """
+    k = int(settings_svc.get(session, "same_as_last_hint_k") or 0)
+    if k <= 0 or len(cuts) < k:
+        return set()
+    recent = cuts[-k:]
+    out: set[int] = set()
+    for c in categories:
+        if c.same_as_last or c.archived:
+            continue
+        per = seen.get(c.id, {})
+        got = [per.get(sid) for sid in recent]
+        if all(g is not None and g[0] == 1 for g in got) and len({g[1] for g in got}) == 1:  # type: ignore[index]
+            out.add(c.id)
+    return out
+
+
+def _norm(text: str) -> str:
+    """比名字用：全角半角、大小写都抹平（「ＷｉＦｉ」「wifi」算同一个）"""
+    return unicodedata.normalize("NFKC", text).casefold().strip()
+
+
+def _maybe_elsewhere(
+    session: Session, categories: list[Category], draft: list[Entry]
+) -> dict[int, list[dict[str, Any]]]:
+    """草稿里记在**别的分类**下、备注里写着这一项名字的支出（「其他」备注「电费」）。
+
+    固定费记错了分类时，面板和出账框照样说「电费还空着」，人照着再填一次就重复了；
+    而那一笔在「本期其他」里看得见，却和这条提示连不上。分类名是用户自己录的，
+    不需要另一张词表。子串匹配会误报（「ガス」配上「ガスコンロ」），所以只问「是不是它？」——
+    不算已填、不取消照上期、不改分类。
+    """
+    every = list(session.exec(select(Category)))
+    names = {c.id: c.name for c in every}
+    fixed = {c.id for c in every if c.monthly}   # 含归档的
+    pool = [
+        e for e in draft
+        if e.kind == EntryKind.expense and e.category_id not in fixed and _norm(e.title)
+    ]
+    out: dict[int, list[dict[str, Any]]] = {}
+    for c in categories:
+        key = _norm(c.name)
+        if not key:
+            continue
+        hits = [
+            {"entry_id": e.id, "amount": e.amount_jpy,
+             "category_name": names.get(e.category_id) if e.category_id is not None else None,
+             "title": e.title}
+            for e in pool if key in _norm(e.title)
+        ]
+        if hits:
+            out[c.id] = hits
+    return out
+
+
+def _rhythm(cuts: list[int], per: dict[int, Any]) -> tuple[int | None, int | None]:
+    """这一项隔几期出现一次：(cuts_since_last, typical_gap)。
+
+    出账时「X 还空着」有一半是隔月收的水费 —— 这期本来就轮空。界面据此把空着的项
+    分成两段：「按往常这期该有」（警示）和「上期记过、往常隔 N 期一次」（灰字），
+    **一项都不藏**。判据前端只用一条：cuts_since_last < typical_gap 才进灰字。
+
+    * cuts_since_last：从它上一次出现的那一期，数到**这一期（草稿）**隔了几期 ——
+      上一张就有它是 1，上上张才有是 2；从没出现过是 None。
+    * typical_gap：历来隔几期出现一次（间隔的中位数）。**历史不到两个间隔、
+      或者最近两个间隔不都等于它**就给 None —— 猜错的代价是把一笔真忘了的账画成灰字，
+      节奏不稳就照旧当警示。
+    「期」按结了固定费的账单数（monthly_cut_ids），中途的日常小账不算。
+    """
+    idx = [i for i, sid in enumerate(cuts) if sid in per]
+    if not idx:
+        return None, None
+    since = len(cuts) - idx[-1]
+    gaps = [b - a for a, b in zip(idx, idx[1:])]
+    if len(gaps) < 2:
+        return since, None
+    usual = statistics.median_low(gaps)
+    return since, (usual if gaps[-1] == gaps[-2] == usual else None)

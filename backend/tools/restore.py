@@ -34,6 +34,7 @@ from sqlmodel import Session
 
 from app import migrate
 from app.db import DB_PATH, engine
+from app.models import JST
 from app.services import backup as backup_svc
 
 SIDECARS = ("-wal", "-shm")
@@ -109,6 +110,149 @@ def _upgraded_copy(src: Path) -> Path:
     return tmp
 
 
+def _in_use() -> bool:
+    """服务是不是还开着这本账（最近一分钟里有人用过）。
+
+    服务没停就换库，它手里那条连接还指着被挪走的旧文件：之后回了 201 的账全写进
+    replaced-*/ 里，app 里看着像「恢复没生效」，等它空闲一分钟放掉连接，新记的账
+    又从备份里最大的 id 往后编号 —— 同一个 id 在两份库里指两笔不同的账。
+    原来只印一句「先把服务停掉」就接着做了，加了 --yes 更是看都没人看。
+
+    探法：另开一条连接要独占锁，拿不到（BUSY / LOCKED）就是有人开着。
+    **只认这两种错**：库坏了（file is not a database、malformed）正是要恢复的时候，必须放行。
+    探之前先把自己池子里的连接放掉 —— _dir() 读设置时留下的那条会让自己探到自己。
+    服务空闲超过一分钟时探不出来，但那时它手里没有任何句柄，下一个请求开的就是恢复后的库，无害
+    """
+    engine.dispose()
+    try:
+        con = sqlite3.connect(
+            f"{DB_PATH.resolve().as_uri()}?mode=rw", uri=True, timeout=0.5, isolation_level=None
+        )
+    except sqlite3.Error:
+        return False
+    try:
+        con.execute("PRAGMA locking_mode=EXCLUSIVE")
+        con.execute("BEGIN EXCLUSIVE")
+        con.execute("ROLLBACK")
+    except sqlite3.OperationalError as e:
+        # 扩展码的低 8 位才是主码：BUSY_SNAPSHOT 517、LOCKED_SHAREDCACHE 262 都算
+        return (getattr(e, "sqlite_errorcode", 0) & 0xFF) in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
+    except sqlite3.DatabaseError:
+        return False
+    finally:
+        con.close()
+    return False
+
+
+def _refuse_if_in_use() -> None:
+    if _in_use():
+        sys.exit(
+            "服务还开着这本账（最近一分钟里有人用过）。先停服务再来：\n"
+            "  systemctl stop nagaya    或    docker compose stop nagaya\n"
+            "什么都没动。"
+        )
+
+
+def _jst(ts: str | None) -> str:
+    """库里的时刻是 naive UTC 字符串，印成日本时间到分钟"""
+    if not ts:
+        return "—"
+    at = dt.datetime.fromisoformat(ts).replace(tzinfo=dt.timezone.utc).astimezone(JST)
+    return at.strftime("%Y-%m-%d %H:%M")
+
+
+def _ro(path: Path) -> sqlite3.Connection:
+    return sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+
+
+def _facts(con: sqlite3.Connection) -> str:
+    who = ", ".join(r[0] for r in con.execute("select display_name from member order by display_order, id"))
+    n, total = con.execute(
+        "select count(*), coalesce(sum(amount_jpy), 0) from entry where deleted_at is null"
+    ).fetchone()
+    last = con.execute("select max(created_at), max(updated_at) from entry").fetchone()
+    st_n, cut = con.execute("select count(*), max(cut_at) from statement").fetchone()
+    return (f"{n} 笔（合计 ¥{total:,}）· {who}\n"
+            f"      最后记账 {_jst(last[0])}，最后改账 {_jst(last[1])}，账单 {st_n} 张（最近一张 {_jst(cut)}）")
+
+
+#: 比「这笔账改没改过」看的几列。version / updated_at 不算：每动一下都变，说明不了内容变没变。
+#: statement_id 算：备份之后出账归进账单的那几笔，恢复之后会回到草稿里。
+#: split_rule_json 算：只改了分摊的那种，金额一分没动，钱照样换了人担
+_CONTENT = ("kind, date, amount_jpy, payer_id, to_member_id, category_id, title, note, "
+            "statement_id, split_rule_json")
+
+
+def _what_goes(live: sqlite3.Connection, back: sqlite3.Connection) -> list[str]:
+    """恢复之后会退回去的那些事，一行一句。**先确认两边是同一本账**，不是就不数 ——
+    另一本账的备份 id 照样从 1 编起，按 id 比出来的「会丢 0 笔」是一句假话。"""
+    bm = dict(back.execute("select id, created_at from member"))
+    lm = dict(live.execute("select id, created_at from member"))
+    be = dict(back.execute("select id, created_at from entry"))
+    le = dict(live.execute("select id, created_at from entry"))
+    if any(lm.get(i) != c for i, c in bm.items()) or any(le.get(i) != c for i, c in be.items()):
+        return [
+            "**这份备份和现在的账本不是同一本**（成员或账目的建档时刻对不上）——",
+            "恢复等于把整本账换掉，不是「退回到某一刻」。确认没挑错（--list 看每份里有谁、几笔）。",
+        ]
+    names = dict(live.execute("select id, display_name from member"))
+    out: list[str] = []
+    new = [r for r in live.execute(
+        "select id, date, amount_jpy, title, payer_id from entry where deleted_at is null order by id"
+    ) if r[0] not in be]
+    if new:
+        dates = sorted(r[1] for r in new)
+        out.append(f"备份之后新记的 {len(new)} 笔会没有（合计 ¥{sum(r[2] for r in new):,}，"
+                   f"日期 {dates[0]} 〜 {dates[-1]}）：")
+        for eid, on, amount, title, payer in new[:5]:
+            out.append(f"    #{eid}  {on}  ¥{amount:,}  {title or '—'}  {names.get(payer, payer)}")
+        if len(new) > 5:
+            out.append(f"    …… 还有 {len(new) - 5} 笔")
+    back_rows = {r[0]: r[1:] for r in back.execute(f"select id, deleted_at, {_CONTENT} from entry")}
+    edited = gone = 0
+    for row in live.execute(f"select id, deleted_at, {_CONTENT} from entry"):
+        was = back_rows.get(row[0])
+        if was is None:
+            continue
+        if (row[1] is None) != (was[0] is None):
+            gone += 1
+        elif row[2:] != was[1:]:
+            edited += 1
+    if edited:
+        out.append(f"备份之后改过的 {edited} 笔会退回改之前（含出账时归进账单的）")
+    if gone:
+        out.append(f"备份之后删掉 / 撤销删除的 {gone} 笔会退回原来的状态")
+    back_st = {r[0] for r in back.execute("select id from statement")}
+    cuts = [r[1] for r in live.execute("select id, cut_at from statement order by id") if r[0] not in back_st]
+    if cuts:
+        out.append(f"备份之后出的 {len(cuts)} 张账单会消失（{', '.join(_jst(c) for c in cuts)}）")
+    return out or ["两边的账目一样：恢复不会丢账（设置、成员、密码照样回到备份那一刻）"]
+
+
+def _compare(ready: Path) -> None:
+    """确认之前把「这一下会丢掉什么」摆出来。全程只读，读不出来就说读不出来 —— 绝不印成 0 笔"""
+    try:
+        live = _ro(DB_PATH)
+    except sqlite3.Error as e:
+        print(f"现在的账本打不开（{e}），没法对比 —— 这不是「0 笔」，是不知道。")
+        return
+    back = _ro(ready)   # 刚验过、升过的那份，打得开
+    try:
+        print(f"  现在的账本：{_facts(live)}")
+        print(f"  要恢复的这份：{_facts(back)}")
+        print("恢复之后：")
+        for line in _what_goes(live, back):
+            print(f"  {line}")
+        broken = backup_svc.ledger_problems(back)
+        if broken:
+            print(f"  **注意：这份备份里的账本自检没通过**（账目 {broken['entries'][:10]} 分摊合计对不上）")
+    except sqlite3.Error as e:
+        print(f"现在的账本读不出来（{e}），没法对比 —— 这不是「0 笔」，是不知道。")
+    finally:
+        live.close()
+        back.close()
+
+
 def main(argv: list[str]) -> None:
     if "--list" in argv:
         folder = _dir(argv)
@@ -155,12 +299,16 @@ def main(argv: list[str]) -> None:
         sys.exit(f"升级之后这几张表的行数变了：{lost} —— 什么都没动。")
 
     if DB_PATH.exists():
-        # 这句 --yes 时也要印：服务没停的话它还开着旧库的文件句柄，
-        # 换完之后它写的仍然是被挪走的那一份，而屏幕上一切正常
+        # 这些 --yes 时也要印：恢复是这个系统里最危险的一次人工确认，
+        # 拍板的时候得看得见「这一下会丢掉什么」，而不只是一个文件名
         print(f"\n现在的账本：{DB_PATH}")
+        _compare(ready)
         print("**先把服务停掉**（run.sh 那个进程），否则它还在往旧库里写。")
+        # 停没停不靠人自觉：探一下。问之前探一次（没停就别让人白读一遍），输完 yes 再探一次
+        _refuse_if_in_use()
         if "--yes" not in argv and input("停好了？输 yes 继续：").strip().lower() != "yes":
             sys.exit("没动任何东西。")
+        _refuse_if_in_use()
 
     # ② 先在账本旁边拷好、落盘，**再**动现有的：拷到一半盘满或者 Ctrl-C，原来那本一点没动。
     # 原来是先把原件挪走、再直接往正式名字上拷 —— 半截的 nagaya.db 留在原地，
@@ -212,7 +360,9 @@ def main(argv: list[str]) -> None:
         "起服务就行。**成员和密码也跟着回滚到这份备份那一刻**：\n"
         " · 备份之后改过密码的人，要用**当时那个**密码登录，手上的登录状态也会失效；\n"
         " · 反过来，备份之前靠改密码踢掉的设备会重新生效 —— 真是为了踢人改的，恢复完再改一次。\n"
-        "换了机器的话所有人都要重登（签名密钥 data/.secret 不在备份里）。"
+        "换了机器的话所有人都要重登（签名密钥 data/.secret 不在备份里）。\n"
+        "**手机上开着的编辑页退出去重进**：恢复之后新记的账会接着备份里的编号往下排，"
+        "旧页面上那一笔的编号可能已经指着别人刚记的另一笔了。"
     )
 
 

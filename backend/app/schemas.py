@@ -68,6 +68,13 @@ class MemberIn(SQLModel):
     #: 改自己的密码时要先验一遍旧的。手机放桌上被人顺手改掉，自己就进不来了
     old_password: Optional[str] = None
 
+    @field_validator("name", "display_name")
+    @classmethod
+    def _strip(cls, v: Optional[str]) -> Optional[str]:
+        """两头的空格去掉。界面上一直是去掉了再发的，接口这边原来照收：
+        建出一个叫「 ren 」的账号，登录时打 ren 永远是 401。长度和空串在路由里查（要出码）"""
+        return v.strip() if isinstance(v, str) else v
+
 
 class CategoryIn(SQLModel):
     name: Optional[str] = None
@@ -123,6 +130,8 @@ class EntryIn(SQLModel):
     rule: Optional[dict[str, Any]] = None
     #: 幂等键（见 models.RequestKey）。同一个键只记一次，不落在 entry 上
     client_key: Optional[str] = Field(default=None, min_length=8, max_length=64)
+    #: 固定费金额和上一期差了好几倍（409 amount_jump）之后，人看过、点了「确定」再重发时带 true
+    confirm_jump: Optional[bool] = None
 
     _amount_not_bool = field_validator("amount_jpy", mode="before")(_no_bool_amount)
 
@@ -145,6 +154,8 @@ class EntryPatch(SQLModel):
     to_member_id: Optional[int] = None
     member_ids: Optional[list[int]] = None
     rule: Optional[dict[str, Any]] = None
+    #: 同 EntryIn.confirm_jump。只改分摊、垫付人，金额没动的不会被问
+    confirm_jump: Optional[bool] = None
 
     _amount_not_bool = field_validator("amount_jpy", mode="before")(_no_bool_amount)
 
@@ -224,6 +235,10 @@ class CarryIn(SQLModel):
     （旧版前端打开账单页就不带 body 调一次，见 routers/bill.carry_monthly）"""
 
     category_ids: Optional[list[int]] = None
+    #: 点的那一刻手机上看到的「最近一张账单」的 id（没出过账给 0）。和服务器上的对不上
+    #: ＝ 刚有人出过账，这一下会把房租记进**下一期**，于是 409 bill_changed、什么都不记。
+    #: 不带就不核（旧版前端）
+    after_statement_id: Optional[int] = None
 
 
 class SettingIn(SQLModel):

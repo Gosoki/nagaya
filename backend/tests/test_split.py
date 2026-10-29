@@ -188,3 +188,13 @@ def test_random_fixture_is_up_to_date() -> None:
         "随机用例文件过期了，请重跑 `.venv/bin/python -m tools.gen_random_cases`：\n"
         + "\n".join(stale[:5])
     )
+
+
+def test_a_default_rule_with_fixed_amounts_is_refused_by_name() -> None:
+    """默认规则（全局 / 分类）要套在每一笔不同的金额上，定额模式不可能对得上 ——
+    存的时候就点名拒绝（exact_default），而不是落到笼统的「合计对不上」"""
+    from app.core.split import try_default_rule
+
+    with pytest.raises(SplitError) as e:
+        try_default_rule({"mode": "exact", "exact": {"1": 500, "2": 500}}, [1, 2])
+    assert e.value.code == "exact_default"

@@ -113,6 +113,12 @@ def update_category(
     data = body.model_dump(exclude_unset=True)
     reject_nulls(data, ("name", "icon", "color", "monthly", "display_order",
                         "archived", "same_as_last", "note"))
+    # **固定费 / 日常是建分类那一刻定下的，之后不许改。** 已出的账单上「本期固定费」
+    # 和「含帮买」都是按它现分的：把一个分类翻个面，每张旧账单的固定费合计和帮买就跟着变，
+    # 而且不挂「出账后被改过」（钱没动，那个判据看不见它）。界面上从来不发这一项；
+    # 真要换，建一个新分类、把旧的归档
+    if "monthly" in data and data["monthly"] != row.monthly:
+        raise AppError("monthly_immutable", "category monthly flag cannot change", status=409)
     before = row.model_copy()
     for key, value in data.items():
         setattr(row, key, value)

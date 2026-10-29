@@ -77,8 +77,14 @@ def update_setting(
         if value is not None:
             if not isinstance(value, int) or isinstance(value, bool):
                 raise _bad(key, "id")
-            if session.get(model, value) is None:
+            target = session.get(model, value)
+            if target is None:
                 raise AppError("not_found", f"{key} points nowhere", what="setting_ref", key=key)
+            # 兜底分类只能是**还在用的日常分类**。界面上那个下拉本来就只列日常的，接口原来不查：
+            # 指到房租的话，日常支出落进固定费 —— 出账时日期被盖成出账日，固定费面板上
+            # 平白多出一笔「另有 N 笔」；指到归档的，记账那屏连这个分类都看不到
+            if isinstance(target, Category) and (target.archived or target.monthly):
+                raise _bad(key, "daily category")
     elif spec["type"] == "str" and not isinstance(value, str):
         raise _bad(key, "str")
     elif key == "backup_path":

@@ -9,6 +9,8 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
+from pathlib import Path
 
 import pytest
 from sqlmodel import Session, select
@@ -148,6 +150,32 @@ def test_pairwise_mode(session: Session, members) -> None:
     bill = build_bill(session, None)
     assert bill["simplified"] is False
     assert all(t["amount"] > 0 for t in bill["transfers"])
+
+
+def test_pairwise_mode_with_a_transfer_and_a_cut(session: Session, members) -> None:
+    """「按原始债权结算」跟真实账目连起来的那条路：转账要**反向**抵掉债权，
+    出账冻结的方案要把这张**自己的**账也算上。
+
+    原来只验「每笔 > 0」：把抵消的方向写反（B 已经两清，却被叫去再转 20,000）、
+    或者已出账单的范围漏掉本张（冻结出一个空方案，群里那张单子上一笔转账都没有），
+    全套测试照样全绿。"""
+    a, b, c = members
+    settings_svc.set_(session, "simplify_debts", False)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=30_000, payer_id=a.id)
+    create_entry(session, actor_id=b.id, kind=EntryKind.settlement, on=SEP, amount=10_000,
+                 payer_id=b.id, to_member_id=a.id)
+    want = [{"from_id": c.id, "to_id": a.id, "amount": 10_000}]
+    assert build_bill(session, None)["transfers"] == want
+    st = cut_statement(session, actor_id=a.id)
+    assert st.snapshot_json["transfers"] == want, "冻结下来的就是群里大家照着转的那份"
+    assert build_bill(session, st)["live_transfers"] == want
+
+    # 第二张：C 垫了一笔，更早那张的账也得在范围里
+    create_entry(session, actor_id=c.id, kind=EntryKind.expense, on=OCT, amount=6_000, payer_id=c.id)
+    st2 = cut_statement(session, actor_id=a.id)
+    plan = st2.snapshot_json["transfers"]
+    assert plan == [{"from_id": c.id, "to_id": a.id, "amount": 8_000},
+                    {"from_id": b.id, "to_id": c.id, "amount": 2_000}], plan
 
 
 def test_statements_are_ordered_and_labelled(session: Session, members) -> None:
@@ -585,6 +613,12 @@ def test_the_list_endpoint_agrees_with_the_per_bill_one(session: Session, member
     for i, day in enumerate((SEP, OCT)):
         create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=day,
                      amount=30_000 + i, payer_id=a.id, category_id=cat.id)
+        if i == 0:
+            # 收入和转账也归在这张上：列表那个数是「支出合计」，它俩不许混进去
+            create_entry(session, actor_id=b.id, kind=EntryKind.income, on=day,
+                         amount=-2_000, payer_id=b.id)
+            create_entry(session, actor_id=b.id, kind=EntryKind.settlement, on=day,
+                         amount=1_500, payer_id=b.id, to_member_id=a.id)
         sts.append(cut_statement(session, actor_id=a.id))
     # 把第一张的方案转掉一部分，让两张的结清状态不一样
     plan = (sts[0].snapshot_json or {})["transfers"]
@@ -592,6 +626,7 @@ def test_the_list_endpoint_agrees_with_the_per_bill_one(session: Session, member
                  amount=plan[0]["amount"], payer_id=plan[0]["from_id"], to_member_id=plan[0]["to_id"])
 
     totals = list_totals(session)
+    assert totals[sts[0].id] == 30_000, "收入、转账混进了支出合计"
     settled = list_settled(session, sts)
     for st in sts:
         expense = sum(e.amount_jpy for e in entries_of(session, st.id) if e.kind == EntryKind.expense)
@@ -759,3 +794,351 @@ def test_help_buy_counts_rows_borne_by_nobody_but_not_fixed_costs(session: Sessi
     bill = build_bill(session, None)
     assert [(h["for_id"], h["amount"]) for h in bill["help_items"]] == [(b.id, 2_000)]
     assert bill["help_total"] == 2_000
+
+
+# ------------------------------------------------ 两台手机同时出账（#5，出账那一半）
+
+
+def test_cutting_with_a_stale_view_of_the_last_bill_cuts_nothing(session: Session, members) -> None:
+    """对话框打开时看到的「最近一张」已经不是最近一张了 ＝ 刚有人出过账。
+    后到的这一下不许再出一张（多半只剩被它自己的照上期记进来的房租）。"""
+    a, *_ = members
+    rent = Category(name="房租", monthly=True)
+    session.add(rent)
+    session.commit()
+    session.refresh(rent)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=1_000, payer_id=a.id)
+    first = cut_statement(session, actor_id=a.id, after_statement_id=0)        # 头一张：看到的是「没出过」
+    late = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=120_000,
+                        payer_id=a.id, category_id=rent.id)
+
+    with pytest.raises(BillError) as e:
+        cut_statement(session, actor_id=a.id, after_statement_id=0)            # 还拿着出账前那一份
+    assert e.value.code == "bill_changed" and e.value.detail["latest"] == first.id
+    assert len(list(session.exec(select(Statement)))) == 1, "一张都不许多出"
+    session.refresh(late)
+    assert late.statement_id is None and late.date == SEP, "固定费的日期也不许被盖"
+
+    second = cut_statement(session, actor_id=a.id, after_statement_id=first.id)
+    assert second.id != first.id
+    # 不带这个参数（旧前端）照旧能出
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=500, payer_id=a.id)
+    cut_statement(session, actor_id=a.id)
+
+
+def test_cut_endpoint_takes_the_view_it_was_opened_with(client, auth, session, members) -> None:
+    a, *_ = members
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=1_000, payer_id=a.id)
+    r = client.post("/api/statements?after_statement_id=7", headers=auth)
+    assert r.status_code == 409 and r.json()["code"] == "bill_changed"
+    assert client.get("/api/statements", headers=auth).json() == []
+    seen = client.get("/api/bill", headers=auth).json()["prev_statement_id"]
+    assert client.post(f"/api/statements?after_statement_id={seen}", headers=auth).status_code == 201
+
+
+# ------------------------------------------- 出账时刻在写锁之内盖（#41）
+
+
+def test_an_edit_committed_just_before_the_cut_does_not_flag_the_new_bill(
+    session: Session, members, monkeypatch
+) -> None:
+    """出账时刻原来在锁外取：正好有人在改一笔草稿，他的审计时间晚于这个时刻、却先拿到锁提交了 ——
+    刚出的账单永久挂着「出账后被改过 1 处：当初 ¥9,000，现在 ¥9,000」。
+    这里把「锁外取的那个时刻」钉成比那条审计早 1ms，模拟那次交错。"""
+    from app.models import AuditLog
+    from app.services import bill as bill_mod
+
+    a, *_ = members
+    e = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=9_000, payer_id=a.id)
+    update_entry(session, e, actor_id=a.id, version=e.version, fields={"amount_jpy": 13_000})
+    edited_at = session.exec(select(AuditLog.at).where(AuditLog.action == "update")).one()
+
+    early = iter([edited_at - dt.timedelta(milliseconds=1)])
+    monkeypatch.setattr(bill_mod, "now_utc", lambda: next(early, None) or now_utc())
+    st = cut_statement(session, actor_id=a.id)
+    assert st.cut_at > edited_at
+    assert build_bill(session, st)["edited_after_cut"] is None
+
+
+# ---------------------------------------------- 出账后被改过：说清楚改了什么（#12 / #20）
+
+
+def test_edited_after_cut_says_who_changed_what_and_by_how_much(session: Session, members) -> None:
+    """只改分摊的话，「当初 ¥30,000，现在 ¥30,000」什么都没说。逐人给出当初 / 现在的结余，
+    逐笔给出改了哪笔、前后金额、谁改的（出账后动过它的所有人）。"""
+    a, b, c = members
+    e = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=30_000, payer_id=a.id)
+    gone = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=900, payer_id=a.id)
+    st = cut_statement(session, actor_id=a.id)
+
+    rule = {"mode": "ratio", "weights": {str(a.id): 1, str(b.id): 1, str(c.id): 1},
+            "adjustments": {str(b.id): 3_000, str(c.id): -3_000}}
+    e = update_entry(session, e, actor_id=b.id, version=e.version, fields={}, rule=rule)
+    e = update_entry(session, e, actor_id=c.id, version=e.version, fields={"title": "超市"})
+    e = update_entry(session, e, actor_id=b.id, version=e.version, fields={"title": "超市 2"})
+    delete_entry(session, gone, actor_id=c.id)
+
+    flagged = build_bill(session, st)["edited_after_cut"]
+    assert flagged["count"] == 2 and flagged["from_earlier"] is False
+    by_id = {x["entry_id"]: x for x in flagged["entries"]}
+    assert by_id[e.id] == {"entry_id": e.id, "title": "超市 2", "category_id": None,
+                           "before_amount": 30_000, "after_amount": 30_000, "deleted": False,
+                           "by": [b.id, c.id]}
+    assert by_id[gone.id]["deleted"] is True and by_id[gone.id]["by"] == [c.id]
+    moved = {m["member_id"]: (m["frozen_closing"], m["live_closing"]) for m in flagged["members"]}
+    assert moved == {a.id: (20_600, 20_000), b.id: (-10_300, -13_000), c.id: (-10_300, -7_000)}
+    assert flagged["sources"] == []
+
+
+def test_a_later_bill_names_the_earlier_one_that_was_edited(session: Session, members) -> None:
+    """更早那张被改，后面每张都挂签 —— 得说出是哪张。改了又改回的那张不算来源。"""
+    a, b, c = members
+    e1 = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=3_000, payer_id=a.id)
+    s1 = cut_statement(session, actor_id=a.id)
+    e2 = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=6_000, payer_id=b.id)
+    s2 = cut_statement(session, actor_id=a.id)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=1_500, payer_id=c.id)
+    s3 = cut_statement(session, actor_id=a.id)
+
+    e1 = update_entry(session, e1, actor_id=a.id, version=e1.version, fields={"amount_jpy": 4_000})
+    update_entry(session, e1, actor_id=a.id, version=e1.version, fields={"amount_jpy": 3_000})   # 改回去
+    update_entry(session, e2, actor_id=b.id, version=e2.version, fields={"amount_jpy": 9_000})
+
+    third = build_bill(session, s3)["edited_after_cut"]
+    assert third["from_earlier"] is True and third["count"] == 0
+    assert third["sources"] == [s2.id], "s1 那笔改了又改回，不是来源"
+    assert build_bill(session, s1)["edited_after_cut"] is None
+
+
+def test_drift_between_two_people_who_already_left_still_flags_the_bill(session: Session, members) -> None:
+    """出账时已经搬走又结清的两个人不占快照的行。原来只比快照里有的人：他俩之间一笔旧账被改，
+    这张会凭空多出两行而不标。成员取并集、缺的按 0（#12）。"""
+    a, b, c = members
+    help_buy = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=3_000,
+                            payer_id=a.id, member_ids=[c.id], rule={"mode": "ratio", "weights": {str(c.id): 1}})
+    create_entry(session, actor_id=c.id, kind=EntryKind.settlement, on=SEP, amount=3_000,
+                 payer_id=c.id, to_member_id=a.id)
+    s1 = cut_statement(session, actor_id=a.id)
+    for m in (a, c):
+        m.left_on = SEP
+        session.add(m)
+    session.commit()
+    create_entry(session, actor_id=b.id, kind=EntryKind.expense, on=SEP + dt.timedelta(days=1),
+                 amount=700, payer_id=b.id)
+    s2 = cut_statement(session, actor_id=b.id)
+    assert [r["member_id"] for r in s2.snapshot_json["members"]] == [b.id]
+
+    update_entry(session, help_buy, actor_id=b.id, version=help_buy.version, fields={"amount_jpy": 4_000})
+    flagged = build_bill(session, s2)["edited_after_cut"]
+    assert flagged is not None and flagged["from_earlier"] is True
+    assert {m["member_id"]: (m["frozen_closing"], m["live_closing"]) for m in flagged["members"]} == {
+        a.id: (0, 1_000), c.id: (0, -1_000),
+    }
+    assert flagged["sources"] == [s1.id]
+
+
+# ------------------------------------------------ 审计里的来历（#46）
+
+
+def test_cut_and_confirm_leave_their_traces_in_the_audit(session: Session, members) -> None:
+    """出账把固定费的日期盖成出账日（D30）：原来是哪天、盖了哪几笔，记在出账那一条里 ——
+    不给每笔另写 update（那条的时间晚于出账，每张都会挂上「出账后被改过」）。
+    「确认已完成」记的转账，审计里写明是在哪张单子上、看到还差多少时点的。"""
+    from app.models import AuditLog
+    from app.services.bill import confirm_transfer
+
+    a, b, _ = members
+    rent = Category(name="房租", monthly=True)
+    session.add(rent)
+    session.commit()
+    session.refresh(rent)
+    early = dt.date(2026, 9, 1)
+    fixed = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=early, amount=90_000,
+                         payer_id=a.id, category_id=rent.id)
+    st = cut_statement(session, actor_id=a.id, on=SEP)
+    cut_log = session.exec(select(AuditLog).where(AuditLog.action == "cut_statement")).one()
+    assert cut_log.after_json["stamped"] == {str(fixed.id): early.isoformat()}
+    assert build_bill(session, st)["edited_after_cut"] is None
+
+    t = build_bill(session, st)["transfers"][0]
+    made = confirm_transfer(session, statement=st, from_id=t["from_id"], to_id=t["to_id"],
+                            amount=t["amount"], expect_left=t["amount"], on=SEP, actor_id=b.id)
+    log = session.exec(select(AuditLog).where(AuditLog.target_id == made.id, AuditLog.action == "create")).one()
+    assert log.after_json["via"] == {"kind": "confirm", "statement_id": st.id, "expect_left": t["amount"]}
+
+
+# ------------------------------------------------ 账不平时：两种模式一个样（#25）
+
+
+def _break_one_share(session: Session, entry_id: int) -> None:
+    from app.models import EntryShare
+
+    share = session.exec(select(EntryShare).where(EntryShare.entry_id == entry_id)).first()
+    share.amount_jpy += 1
+    session.add(share)
+    session.commit()
+
+
+@pytest.mark.parametrize("simplify", [True, False])
+def test_a_broken_entry_is_named_in_the_log_in_both_settlement_modes(
+    session: Session, members, simplify: bool
+) -> None:
+    """一笔分摊合计 ≠ 金额的坏账：最少转账模式原来 500、只报一个总数；按原始债权模式原来照常 200，
+    每人结余加起来不是 0、转账方案也加不平，悄悄错着。现在两种都 500，日志里点名是哪一笔。"""
+    import logging
+
+    from app.core.settle import SettleError
+
+    a, *_ = members
+    settings_svc.set_(session, "simplify_debts", simplify)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=900, payer_id=a.id)
+    bad = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=3_000, payer_id=a.id)
+    _break_one_share(session, bad.id)
+
+    seen: list[str] = []
+    handler = logging.Handler()
+    handler.emit = lambda record: seen.append(record.getMessage())   # type: ignore[method-assign]
+    log = logging.getLogger("nagaya")
+    log.addHandler(handler)
+    try:
+        with pytest.raises(SettleError):
+            build_bill(session, None)
+    finally:
+        log.removeHandler(handler)
+    assert any(f"[{bad.id}]" in m for m in seen), seen
+
+
+# ------------------------------------------------ 已出账单的上期结转 / 每人结余（#10）
+
+
+def _rows(bill: dict, ids: list[int], key: str) -> list[int]:
+    """每人那一列；搬走且结清的人不占行，按 0 算"""
+    by = {r["member_id"]: r[key] for r in bill["members"]}
+    return [by.get(i, 0) for i in ids]
+
+
+def test_issued_bills_carry_forward_through_a_delete_and_a_restore(session: Session, members) -> None:
+    """三张账单，中间删掉第一张里的一笔、出第三张之前又恢复它，最后再删一笔第二张的：
+    逐人钉住每张的上期结转、结余、此刻余额，和草稿的上期结转。
+
+    原来断言 opening 的只有草稿那两处：已出账单的 opening 把自己和后面几张也算进去、
+    或者草稿的结转把**删掉的**账也算上，全套照样全绿 —— 每人结余加起来照样是 0。"""
+    a, b, c = members
+    ids = [a.id, b.id, c.id]
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=30_000, payer_id=a.id)
+    e2 = create_entry(session, actor_id=b.id, kind=EntryKind.expense, on=SEP, amount=6_000, payer_id=b.id)
+    s1 = cut_statement(session, actor_id=a.id)
+    delete_entry(session, e2, actor_id=a.id)
+    e3 = create_entry(session, actor_id=c.id, kind=EntryKind.expense, on=OCT, amount=9_000, payer_id=c.id)
+    s2 = cut_statement(session, actor_id=a.id)
+    restore_entry(session, e2, actor_id=a.id)
+    create_entry(session, actor_id=b.id, kind=EntryKind.expense, on=OCT, amount=3_000, payer_id=b.id)
+    s3 = cut_statement(session, actor_id=a.id)
+    delete_entry(session, e3, actor_id=a.id)
+
+    want = {
+        s1.id: ([0, 0, 0], [18_000, -6_000, -12_000]),
+        s2.id: ([18_000, -6_000, -12_000], [18_000, -6_000, -12_000]),     # 它自己那笔删了
+        s3.id: ([18_000, -6_000, -12_000], [17_000, -4_000, -13_000]),
+    }
+    now = [17_000, -4_000, -13_000]
+    assert [balances(session)[i] for i in ids] == now
+    for st in (s1, s2, s3):
+        bill = build_bill(session, st)
+        assert (_rows(bill, ids, "opening"), _rows(bill, ids, "closing")) == want[st.id], st.id
+        assert [bill["live_closing"][i] for i in ids] == now, st.id
+    draft = build_bill(session, None)
+    assert _rows(draft, ids, "opening") == now, "草稿的上期结转 ＝ 全部没删的出过账的账"
+    assert [draft["live_closing"][i] for i in ids] == now
+
+
+# ------------------------------------------------ 出账前的预付不算进度（#32）
+
+
+def test_transfers_before_the_cut_are_prepayment_not_progress(session: Session, members) -> None:
+    """出账之前记的转账已经进了这张单子自己的「已预付」（方案因此只剩 6,000），
+    结算进度只认**出账之后**的转账 —— 两边不重不漏。
+
+    这条下界原来没人钉：删掉之后预付被算两遍，屏幕叫 B 只转 2,000（少 4,000），
+    账单还会提前亮「已结清」。列表那份（list_settled）有自己的一份下界，一起钉。"""
+    from app.services.bill import list_settled, pair_left
+
+    a, b, c = members
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=30_000, payer_id=a.id)
+    create_entry(session, actor_id=b.id, kind=EntryKind.settlement, on=SEP, amount=4_000,
+                 payer_id=b.id, to_member_id=a.id)
+    st = cut_statement(session, actor_id=a.id)
+    plan = {(t["from_id"], t["to_id"]): t["amount"] for t in st.snapshot_json["transfers"]}
+    assert plan == {(b.id, a.id): 6_000, (c.id, a.id): 10_000}
+
+    bill = build_bill(session, st)
+    assert bill["settled_paid"] == [0, 0] and bill["settled"] is False
+    assert pair_left(session, st, b.id, a.id) == 6_000
+    assert list_settled(session, [st])[st.id] is False
+
+    create_entry(session, actor_id=b.id, kind=EntryKind.settlement, on=OCT, amount=2_000,
+                 payer_id=b.id, to_member_id=a.id)
+    create_entry(session, actor_id=c.id, kind=EntryKind.settlement, on=OCT, amount=10_000,
+                 payer_id=c.id, to_member_id=a.id)
+    assert build_bill(session, st)["settled"] is False, "B 只转了 6,000 里的 2,000"
+    assert list_settled(session, [st])[st.id] is False
+    assert balances(session)[b.id] == -4_000
+
+
+# ------------------------------------------------ 显示上的几个边界（#79）
+
+
+def test_covers_from_reaches_back_to_a_backdated_entry(session: Session, members) -> None:
+    """改日期改到上次出账之前的（补录、回收站里捞回来的），覆盖期从它算起 ——
+    否则账单顶上是「10/29 〜 9/01」这种头尾颠倒的区间"""
+    a, *_ = members
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=1_000, payer_id=a.id)
+    st = cut_statement(session, actor_id=a.id)
+    e = create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=jst_date(st.cut_at),
+                     amount=2_000, payer_id=a.id)
+    assert build_bill(session, None)["covers_from"] == jst_date(st.cut_at).isoformat()
+    early = dt.date(2026, 8, 3)
+    update_entry(session, e, actor_id=a.id, version=e.version, fields={"date": early})
+    assert build_bill(session, None)["covers_from"] == early.isoformat()
+
+
+def test_suggest_monthly_flips_exactly_at_the_threshold(session: Session, members) -> None:
+    """「距上次出账**不足** N 天」才默认不勾：正好 N 天就该勾上（D29）。按日本时间的自然日数"""
+    a, *_ = members
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=SEP, amount=1_000, payer_id=a.id)
+    st = cut_statement(session, actor_id=a.id)
+    create_entry(session, actor_id=a.id, kind=EntryKind.expense, on=OCT, amount=2_000, payer_id=a.id)
+    n = int(settings_svc.get(session, "monthly_gap_days"))
+
+    def after(days: int) -> dict:
+        st.cut_at = now_utc() - dt.timedelta(days=days)
+        session.add(st)
+        session.commit()
+        return build_bill(session, None)
+
+    assert after(n)["days_since_prev_cut"] == n and after(n)["suggest_monthly"] is True
+    assert after(n - 1)["suggest_monthly"] is False
+
+
+# ------------------------------------------------ 帮买：前后端跑同一份用例（#83）
+
+_HELP_BUY = json.loads(
+    (Path(__file__).parents[2] / "tests" / "fixtures" / "help_buy_cases.json").read_text(encoding="utf-8")
+)["cases"]
+
+
+def test_the_help_buy_fixture_is_not_empty() -> None:
+    assert len(_HELP_BUY) > 5
+
+
+@pytest.mark.parametrize("case", _HELP_BUY, ids=[c["name"] for c in _HELP_BUY])
+def test_help_buy_matches_the_shared_fixture(case: dict) -> None:
+    """help_buy_for 和前端 helpBuyFor 跑这同一份（tests/fixtures/help_buy_cases.json）。
+    原来两边各手抄一份镜像用例、只靠注释同步：加一条规则只改一边，另一边照样绿"""
+    from app.services.bill import help_buy_for
+
+    got = help_buy_for(
+        EntryKind(case["kind"]), case["payer_id"], {int(k): v for k, v in case["shares"].items()},
+        fixed_cost=case.get("fixed_cost", False),
+    )
+    assert got == case["expected"]

@@ -21,6 +21,7 @@ from app.models import (
     EntryShare,
     Member,
     RequestKey,
+    Statement,
     now_utc,
     today_jst,
 )
@@ -104,6 +105,85 @@ def _validate_date(on: dt.date) -> None:
         raise LedgerError("bad_date", f"日期超出范围：{on}", min=MIN_DATE.isoformat())
 
 
+def ratio_label(num: int, den: int) -> int | float:
+    """两个金额差几倍，**给人看的那个数**：留两位有效数字（10.4 → 10、4.44 → 4.4、
+    0.0333 → 0.033），是整数就给整数。只进提示文案，不参与任何算钱 ——
+    判「够不够倍数」一律在调用方用整数乘法比，别拿这个数去比"""
+    x = float(f"{num / den:.2g}")
+    return int(x) if x.is_integer() else x
+
+
+def _check_fixed_jump(
+    session: Session,
+    *,
+    kind: EntryKind,
+    category_id: int | None,
+    amount: int,
+    statement_id: int | None,
+    exclude_id: int | None = None,
+) -> None:
+    """固定费的量级闸：这一期这一项的合计和上一期差了 fixed_jump_ratio 倍以上，就先问一句。
+
+    固定费面板离开输入框就保存，多打一个 0（电费 87,000）或者少打一个 0
+    （房租 12,000）会原样记进去，屏幕上和填对了一模一样。**不拦，只要人确认一次**：
+    抛 409 amount_jump，前端问「约是上期的 10 倍，对吗」，点了确定带 confirm_jump 重发。
+
+    比的是**分类合计**，不是单笔：上期房租分两笔记（8,700 + 300）的话，拿其中一笔比，
+    下期正常的 9,000 会被当成 30 倍。两边都只数支出（收入是押金退款这种，另一回事）：
+      * 这一期 ＝ 草稿（或者这笔所在的那张单子）里这一项的合计，**算上这一次写入**；
+      * 上一期 ＝ 在那之前最近一张**有这一项**的账单上的合计 —— 水费隔月收，
+        上一张本来就没有它。从来没出过账的项不问（没东西可比）。
+    """
+    limit = int(settings_svc.get(session, "fixed_jump_ratio") or 0)
+    if limit <= 0 or kind != EntryKind.expense or category_id is None:
+        return
+    category = session.get(Category, category_id)
+    if category is None or not category.monthly:
+        return
+    same_item = (
+        Entry.category_id == category_id,
+        Entry.kind == EntryKind.expense,
+        Entry.deleted_at.is_(None),
+    )
+    here = select(func.coalesce(func.sum(Entry.amount_jpy), 0)).where(
+        *same_item,
+        Entry.statement_id.is_(None) if statement_id is None else Entry.statement_id == statement_id,
+    )
+    if exclude_id is not None:
+        here = here.where(Entry.id != exclude_id)      # 改的这一笔：旧金额换成新的
+    now_total = int(session.exec(here).one()) + amount
+    before = (
+        select(func.sum(Entry.amount_jpy))
+        .join(Statement, Statement.id == Entry.statement_id)
+        .where(*same_item)
+        .group_by(Entry.statement_id, Statement.cut_at)
+        .order_by(Statement.cut_at.desc())
+        .limit(1)
+    )
+    if statement_id is not None:
+        # 改一张旧账单上的固定费：跟**它的**上一期比，不是跟最新那张比
+        own = session.get(Statement, statement_id)
+        if own is not None:
+            before = before.where(Statement.cut_at < own.cut_at)
+    was = session.exec(before).first()
+    if not was:
+        return
+    was = int(was)
+    # 整数乘法比，不用除出来的倍数（那个只给人看）
+    if now_total >= limit * was:
+        direction, big, small = "up", now_total, was
+    elif now_total * limit <= was:
+        direction, big, small = "down", was, now_total
+    else:
+        return
+    raise LedgerError(
+        "amount_jump",
+        f"固定费合计 {now_total} 和上期 {was} 差了 {limit} 倍以上，请确认",
+        ratio=ratio_label(big, small),
+        direction=direction,
+    )
+
+
 def _check_refs(
     session: Session,
     *,
@@ -137,7 +217,9 @@ def _inherit(
 
     后两条是**继承来的**，当初按那时候的人写：点名了这笔里没有的人（搬走了、这次没参与），
     就把他剔掉再用，别让 expand() 以 unknown_member 整笔拒收 —— 前端预览（core/seed.ts）
-    本来就把这些人剔掉了，屏幕上一份好好的分摊，点保存却报错。**这次送来的规则不剔**，照旧严格校验
+    本来就把这些人剔掉了，屏幕上一份好好的分摊，点保存却报错。**这次送来的规则不剔**，照旧严格校验。
+    点名的人**全都**不在了的话，剔完没人分：拒收（weights_all_zero），不替人退回均分 ——
+    和前端预览同一个口径（见 _prune_rule）
     """
     keep = set(ids)
     return pick_rule(rule, _prune_rule(category_rule, keep), _prune_rule(global_rule, keep))
@@ -159,16 +241,26 @@ def create_entry(
     title: str = "",
     note: str = "",
     client_key: str | None = None,
+    jump_check: bool = False,
+    audit_via: dict[str, Any] | None = None,
 ) -> Entry:
     """记一笔，并把分摊结果**固化**成 entry_share。
 
     分摊只在这一刻算一次。之后改默认比例、加成员、删分类，这条账都不会变。
+
+    `jump_check`：过一遍固定费的量级闸（_check_fixed_jump）。只有接口那一路开
+    （人手填的金额）；照上期、确认已完成、种子和测试直接调这里，不问。
+    `audit_via`：这一笔是从哪条路记进来的（照上期抄自哪一笔、确认的是哪张单子），
+    并进审计那一条的 after_json。不进 entry_snapshot —— 那个形状和「出账后被改过」
+    逐键比的那份必须一致（见 audit.py 开头）。
     """
     _check_refs(session, payer_id=payer_id, to_member_id=to_member_id,
                 member_ids=member_ids, category_id=category_id)
     _validate_amount(kind, amount)
     _validate_text(title, note)
     _validate_date(on)
+    if jump_check:
+        _check_fixed_jump(session, kind=kind, category_id=category_id, amount=amount, statement_id=None)
 
     if kind == EntryKind.settlement:
         if to_member_id is None:
@@ -205,7 +297,10 @@ def create_entry(
     session.flush()
 
     _write_shares(session, entry, expanded, payer_id)
-    audit.write(session, actor_id, "create", "entry", entry.id, None, audit.snapshot(session, entry))
+    after = audit.snapshot(session, entry)
+    if audit_via is not None:
+        after = after | {"via": audit_via}
+    audit.write(session, actor_id, "create", "entry", entry.id, None, after)
     if client_key is not None:
         # 幂等键和这笔账**同一个事务**落库：分两次 commit 的话，第二次撞上锁超时或者
         # 进程重启，账记上了键却没存下，补交时照样再记一遍
@@ -311,11 +406,14 @@ def update_entry(
     rule: dict[str, Any] | None = None,
     category_rule: dict[str, Any] | None = None,
     member_ids: Sequence[int] | None = None,
+    jump_check: bool = False,
 ) -> Entry:
     """改一笔账。改完**当场重算这一笔**的分摊，其它账一概不动。
 
     version 是乐观锁：两个人同时改同一笔时，后提交的那个会被挡下来，
     而不是悄悄覆盖掉对方的修改。
+
+    `jump_check` 同 create_entry；**金额没变的不问**（改垫付人、改分摊不是打错数）。
     """
     # PATCH 里**显式传 null** 的字段：不能留空的那几个一律当成错误挡下来。
     # 原来是直接 setattr 下去，title=None 撞 NOT NULL、kind=None 撞 _validate_amount，
@@ -368,6 +466,11 @@ def update_entry(
     _validate_amount(kind, amount)
     _validate_text(fields.get("title", entry.title), fields.get("note", entry.note))
     _validate_date(on)
+    if jump_check and amount != entry.amount_jpy:
+        _check_fixed_jump(
+            session, kind=kind, category_id=fields.get("category_id", entry.category_id),
+            amount=amount, statement_id=entry.statement_id, exclude_id=entry.id,
+        )
 
     for key in ("title", "note", "category_id"):
         if key in fields:
