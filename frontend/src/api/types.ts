@@ -106,6 +106,12 @@ export interface Bill {
     live_total: number
     /** 这张单子自己一笔没动，是更早那张被改了才漂的 */
     from_earlier: boolean
+    /** 谁受影响、差多少：冻结时的 closing 和此刻的不一样的那几个人（一样的不列） */
+    members?: { member_id: number; frozen_closing: number; live_closing: number }[]
+    /** 改了哪几笔、谁改的。只改了分摊的那笔前后金额一样 —— 别再写成「当初 ¥X，现在 ¥X」 */
+    entries?: EditedEntry[]
+    /** from_earlier 时是被哪几张更早的单子带着漂的；查不出来是空列表 */
+    sources?: number[]
   } | null
   /** 已出的账单上「本期固定费」列哪几项（没记钱的按 ¥0 列）。草稿是 null —— 那页用面板 */
   monthly_ids?: number[] | null
@@ -136,6 +142,49 @@ export interface Bill {
   help_total?: number
   help_items?: { entry_id: number; payer_id: number; for_id: number; amount: number; title: string }[]
   simplified: boolean
+  /**
+   * 最近出的那张账单的 id，一张都没出过是 0。出账、出账前的「先按上期记上」带着它回去
+   * （after_statement_id）：两台手机同时出账时，后到的那台撞 409 bill_changed，不再多出一张只有房租的单子
+   */
+  prev_statement_id?: number
+  /** 出账前请人看一眼的几类疑点。**只有草稿有**，出过的单子是 null。只提示，不替人改 */
+  review?: BillReview | null
+  /** 「上期结转」跟着一张已出的账单漂了（那张出账后被改过）：指向它。只有草稿有 */
+  opening_drift?: { statement_id: number; label: string } | null
+}
+
+/** 「出账后被改过」里的一笔 */
+export interface EditedEntry {
+  entry_id: number
+  title: string
+  category_id: number | null
+  /** 出账那一刻 / 此刻的金额。审计日志里查不到就是 null */
+  before_amount: number | null
+  after_amount: number | null
+  deleted: boolean
+  /** 谁改的（member_id） */
+  by: number[]
+}
+
+/** 草稿账单上的疑点。每一类都是弱证据 —— 只亮出来请人看，不拦、不改 */
+export interface BillReview {
+  /** 搬走之后还在分摊里（left_but_charged），或入住之后没算进去（joined_not_charged） */
+  membership_gaps: {
+    entry_id: number
+    member_id: number
+    type: 'left_but_charged' | 'joined_not_charged'
+    share: number
+  }[]
+  /** 同类、同金额、日期挨着的两笔（两台手机各记了同一张小票） */
+  possible_duplicates: { a: number; b: number }[]
+  /** 比同分类近期中位数大出好几倍的那笔（多打一个 0、把房租记进「其他」）。只判偏大那一侧 */
+  outliers: { entry_id: number; median: number; ratio: number }[]
+}
+
+/** POST /api/monthly/carry 的回应：记了哪几笔（垫付人一起说出来）、哪几项没敢记 */
+export interface CarryResult {
+  created: { category_id: number; name: string; amount: number; payer_id?: number | null }[]
+  failed: { category_id: number; name: string; reason: string; detail?: Record<string, unknown> }[]
 }
 
 /** 固定费面板的一行。`amount === null` ＝ 本期还没录，灰色占位不算数 */
@@ -162,10 +211,29 @@ export interface MonthlyRow {
   entry_count: number
   /** 点「按上期记上」会记多少。草稿里开了「和上期一样」、本期还没处理过的才有 */
   carry_amount?: number | null
-  /** 开了「和上期一样」却不能照抄的原因（payer_left / rule_stale），得人自己填 */
+  /**
+   * 开了「和上期一样」却不能照抄的原因，得人自己填：
+   * payer_left（上期垫付人搬走了）/ rule_stale（人变了，上期分摊对不上）/
+   * last_multi（上期这一项记了好几笔，不知道该照哪一笔）
+   */
   carry_blocked?: string | null
+  /** last_multi 时上期那几笔的笔数和合计（只给开了「和上期一样」的项，D21） */
+  carry_blocked_detail?: { count: number; total: number } | null
+  /** 点「照上期」会记成谁垫的 —— 后端照着它记，界面别自己推算 */
+  carry_payer_id?: number | null
   /** 上期这一项多少钱。只有开了「和上期一样」的才给，本期填没填都给（展开区那颗按钮一直在） */
   last_amount?: number | null
+  /** 本期已录那一笔是谁垫的（没录是 null）。和 entry_id 同一次查出来，不再去流水里借 */
+  payer_id?: number | null
+  /** 没录的行：起步分摊点了名、却没写到这几个今天在籍的人（照这样存他们担 0） */
+  rule_missing_member_ids?: number[]
+  /** 最近几期金额都一样、却没开「和上期一样」：提示一下（不带金额，D21）。只有草稿有 */
+  suggest_same_as_last?: boolean
+  /** 草稿里记在日常分类、备注带着这一项名字的账 —— 可能就是它，别再填一遍。只有草稿有 */
+  maybe_elsewhere?: { entry_id: number; amount: number; category_name: string | null; title: string }[]
+  /** 上次记这一项之后出过几次账 / 这一项平常隔几次出账才有一笔（出账时区分「忘了」和「这期本来没有」） */
+  cuts_since_last?: number | null
+  typical_gap?: number | null
 }
 
 export interface MonthlyData {
@@ -201,6 +269,8 @@ export interface EntryPayload {
   rule?: Record<string, unknown> | null
   /** 幂等键：离线草稿补交时带着同一个，后端认出来就不再记第二遍 */
   client_key?: string
+  /** 固定费金额和上期差出好几倍（409 amount_jump）之后，人确认过就带上它再发一次 */
+  confirm_jump?: boolean
 }
 
 /** 备份现在什么情况。**全部现场探**，不是读一条存下来的结论 —— 存的那种会过期 */
@@ -221,6 +291,15 @@ export interface BackupStatus {
   last_ok: boolean | null
   /** 备份和账本在同一块盘上 —— 挡不住盘坏 */
   same_disk: boolean | null
+  /** data/ 里升级前快照、恢复时挪走的旧账本：一直不清理，在这儿亮出来 */
+  stale_copies?: { count: number; bytes: number; oldest: string | null }
+  /** 备份目录是不是人改过的（不是默认那个） */
+  custom_path?: boolean
+}
+
+/** GET /api/backup/alert：平时页面上要不要亮一句「备份出问题了」。null ＝ 没事 */
+export interface BackupAlert {
+  alert: string | null
 }
 
 export interface BackupMade {

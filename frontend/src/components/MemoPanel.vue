@@ -37,9 +37,9 @@
             <textarea
               class="note"
               rows="1"
-              :value="c.note"
+              :value="typed.get(`cat:${c.id}`) ?? c.note"
               :placeholder="t('memo.notePlaceholder')"
-              @input="grow"
+              @input="onType(`cat:${c.id}`, $event)"
               @blur="saveCategory(c, ($event.target as HTMLTextAreaElement).value)"
             />
           </q-item-section>
@@ -59,8 +59,9 @@
             <q-item-label class="row items-center no-wrap">
               <input
                 class="memo-title col"
-                :value="m.title"
+                :value="typed.get(`memo:${m.id}:title`) ?? m.title"
                 :placeholder="t('memo.namePlaceholder')"
+                @input="onType(`memo:${m.id}:title`, $event)"
                 @blur="saveTitle(m, $event.target as HTMLInputElement)"
               />
               <q-btn
@@ -72,9 +73,9 @@
             <textarea
               class="note"
               rows="1"
-              :value="m.body"
+              :value="typed.get(`memo:${m.id}:body`) ?? m.body"
               :placeholder="t('memo.notePlaceholder')"
-              @input="grow"
+              @input="onType(`memo:${m.id}:body`, $event)"
               @blur="saveBody(m, ($event.target as HTMLTextAreaElement).value)"
             />
           </q-item-section>
@@ -129,6 +130,31 @@ const busy = ref(false)
  */
 const failing = reactive(new Set<string>())
 const failed = computed(() => failing.size)
+/**
+ * 每一格里**打了还没存上**的字，键名和 failing 同一套（`memo:${id}:body` 之类）。
+ * 框是 `:value` 绑定的：备忘列表或分类列表一换成新数组（随便哪一格存成了、列表重取了），
+ * 同一屏所有框都会被强制写回绑定值 —— 存正文时接着打的字、另一格正在打的字、
+ * 上一次没存上还留在框里等重试的字，全被冲掉（没存上那一格标题条还挂着「1 项没存上」，原文却没了）。
+ * 绑定改成「有草稿就显示草稿」：存成了、而且这期间没再改过，才把草稿放掉；存失败就一直留着
+ */
+const typed = reactive(new Map<string, string>())
+
+function onType(key: string, e: Event) {
+  const el = e.target as HTMLInputElement | HTMLTextAreaElement
+  typed.set(key, el.value)
+  if (el.tagName === 'TEXTAREA') size(el as HTMLTextAreaElement)
+}
+
+/**
+ * 存一格。发出去的那份记下来：存成了，而且框里还是它（途中没接着打字），才把草稿放掉 ——
+ * 接着打的那几个字留在草稿里，下次失焦再存
+ */
+async function saveTyped(key: string, value: string, run: () => Promise<unknown>): Promise<boolean> {
+  typed.set(key, value)
+  const ok = await save(key, run)
+  if (ok && typed.get(key) === value) typed.delete(key)
+  return ok
+}
 const newTitle = ref('')
 const adding = ref(false)
 
@@ -145,10 +171,6 @@ const root = ref<HTMLElement | null>(null)
 function size(el: HTMLTextAreaElement) {
   el.style.height = 'auto'
   el.style.height = `${el.scrollHeight}px`
-}
-
-function grow(e: Event) {
-  size(e.target as HTMLTextAreaElement)
 }
 
 /**
@@ -177,26 +199,42 @@ async function save(key: string, run: () => Promise<unknown>): Promise<boolean> 
 }
 
 function saveCategory(c: Category, note: string) {
-  if (note === c.note) return
-  void save(`cat:${c.id}`, async () => {
+  const key = `cat:${c.id}`
+  if (note === c.note) {
+    typed.delete(key)
+    return
+  }
+  void saveTyped(key, note, async () => {
     const saved = await api.patch<Category>(`/api/categories/${c.id}`, { note })
     meta.categories = meta.categories.map((x) => (x.id === c.id ? saved : x))
   })
 }
 
-/** 标题清空了、或者没存上，框里写回原来的 —— 空着的框看上去像这条备忘没了名字 */
+/**
+ * 标题清空了、或者没存上，框里写回原来的 —— 空着的框看上去像这条备忘没了名字。
+ * 标题和正文不一样：没存上就退回原名，不留草稿（一条备忘总得有个叫得出的名字）
+ */
 async function saveTitle(m: Memo, el: HTMLInputElement) {
+  const key = `memo:${m.id}:title`
   const title = el.value.trim()
   if (!title || title === m.title) {
+    typed.delete(key)
     el.value = m.title
     return
   }
-  if (!(await save(`memo:${m.id}:title`, () => memos.update(m.id, { title })))) el.value = m.title
+  if (!(await saveTyped(key, el.value, () => memos.update(m.id, { title })))) {
+    typed.delete(key)
+    el.value = m.title
+  }
 }
 
 function saveBody(m: Memo, body: string) {
-  if (body === m.body) return
-  void save(`memo:${m.id}:body`, () => memos.update(m.id, { body }))
+  const key = `memo:${m.id}:body`
+  if (body === m.body) {
+    typed.delete(key)
+    return
+  }
+  void saveTyped(key, body, () => memos.update(m.id, { body }))
 }
 
 async function addMemo() {
@@ -223,8 +261,9 @@ function removeMemo(m: Memo) {
       fired = true
       void save(`memo:${m.id}:del`, async () => {
         await memos.remove(m.id)
-        // 这条都没了，它那几格之前没存上的也就不用再记着
+        // 这条都没了，它那几格之前没存上的、打了还没存的也就不用再记着
         for (const k of [...failing]) if (k.startsWith(`memo:${m.id}:`)) failing.delete(k)
+        for (const k of [...typed.keys()]) if (k.startsWith(`memo:${m.id}:`)) typed.delete(k)
         $q.notify({ type: 'positive', message: t('memo.removed', { name: m.title }), timeout: 1500 })
       })
     })

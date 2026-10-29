@@ -69,11 +69,28 @@
                    正好用来说清**这笔算谁垫的** —— 这是这一屏唯一会悄悄出错的地方 -->
               <!-- 「照上期」不在这一行上，在展开区里（见下面 carry-row）：这一行一点就是记钱，
                    滚动时拇指一蹭就记上一个月房租。出账对话框里那个「先按上期记上」的勾还在，忘了点也漏不掉 -->
-              <!-- 开了开关却照抄不了（垫付人搬走了、来了新室友）：一直写在这儿，填了就消失 -->
+              <!-- 服务器上这一项在我没看见时被记了 / 被改了，和我没存上的不一样：最要紧，排第一。
+                   是个入口 —— 点了问用哪个，不替人选（见 mergeHeld） -->
+              <button
+                v-if="row.conflict"
+                class="state dup-link text-warning"
+                @click.stop="saveQueued(row)"
+              >{{ t('monthly.conflictShort', { amount: formatYen(row.conflict.amount ?? 0) }) }}</button>
+              <!-- 开了开关却照抄不了（垫付人搬走了、来了新室友、上期有好几笔）：一直写在这儿，填了就消失 -->
               <span
-                v-if="!stateText(row) && isCarryBlocked(row)"
+                v-else-if="!stateText(row) && isCarryBlocked(row)"
                 class="state text-warning"
-              >{{ t('monthly.carryStale') }}</span>
+              >{{ blockedText(row) }}</span>
+              <!-- 起步分摊没写到新室友、日常分类里可能已经记过这一项：都是「请看一眼」，
+                   排在垫付人前面（垫付人在展开区的「谁付的」里照样看得到）。展开区里说全 -->
+              <span
+                v-else-if="!stateText(row) && missingNames(row)"
+                class="state text-warning"
+              >{{ t('monthly.ruleMissingShort', { names: missingNames(row) }) }}</span>
+              <span
+                v-else-if="!stateText(row) && elsewhere(row).length"
+                class="state text-warning"
+              >{{ row.entry_id === null ? t('monthly.elsewhereShort') : t('monthly.dupElsewhereShort') }}</span>
               <span
                 v-else-if="!stateText(row) && payerName(row)"
                 class="state text-grey-6"
@@ -124,6 +141,27 @@
               }}
             </button>
           </div>
+          <!-- 最近几期都一样、却没开「和上期一样」：提示一下，点了只开开关、不记钱 ——
+               开了之后上面那颗「照上期 ¥…」才出现，记不记还是人再点一次（D36）。
+               **不写金额**：没开的项上期多少一分都不许漏过来（D21） -->
+          <div v-if="suggestShown(row)" class="carry-row">
+            <button class="hint-chip" :disabled="busy" @click="turnOnSameAsLast(row)">
+              {{ t('monthly.suggestSameAsLast', { k: hintK }) }}
+            </button>
+          </div>
+          <!-- 行头只放得下几个字，为什么要人看一眼在这里说全 -->
+          <div v-if="lastMultiText(row)" class="text-caption text-warning q-mb-sm">{{ lastMultiText(row) }}</div>
+          <div v-if="missingNames(row)" class="text-caption text-warning q-mb-sm">
+            {{ t('monthly.ruleMissing', { names: missingNames(row) }) }}
+          </div>
+          <!-- 记在日常分类里、备注带着这一项名字的账：点了去那一笔看。只是「是不是它」，
+               不替人搬分类，也不因此把这一项当成已经填过 -->
+          <button
+            v-for="m in elsewhere(row)"
+            :key="m.entry_id"
+            class="elsewhere-link text-caption text-warning q-mb-sm"
+            @click="openEntry(m.entry_id)"
+          >{{ elsewhereText(row, m) }}</button>
           <!-- 谁付的。改它 ＝ 定下「这一项以后都算谁垫的」，同时把本期已录的那笔
                一并改过来 —— 这两件事在固定费上本来就是一回事 -->
           <div class="payer-row">
@@ -165,10 +203,23 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 
 import { ApiError, api, errorText } from 'src/api/client'
-import type { Category, Member, MonthlyData, MonthlyRow } from 'src/api/types'
+import type { CarryResult, Category, Member, MonthlyData, MonthlyRow } from 'src/api/types'
 import MemberPicker from 'src/components/MemberPicker.vue'
 import SplitEditor from 'src/components/SplitEditor.vue'
 import { newClientKey } from 'src/clientKey'
+import {
+  amountOf,
+  carryShown as carryShownIn,
+  eachLive,
+  isAtLast,
+  isCarryBlocked as carryBlockedIn,
+  jumpFactor,
+  lastAction,
+  mergeHeld,
+  payerOf as payerIn,
+  saveSig,
+  settleSaved,
+} from 'src/core/monthlyRows'
 import { seedToRatio } from 'src/core/seed'
 import { todayJst } from 'src/date'
 import { digitsOf, yenOf } from 'src/digits'
@@ -176,6 +227,7 @@ import { formatYen } from 'src/i18n'
 import { useBills } from 'src/stores/bills'
 import { useLedger } from 'src/stores/ledger'
 import { useMeta } from 'src/stores/meta'
+import { holdReload } from 'src/unsaved'
 
 interface Row extends MonthlyRow {
   text: string
@@ -183,8 +235,18 @@ interface Row extends MonthlyRow {
   rule_override: Record<string, unknown> | null
   rule_valid: boolean
   rule_diff: number
-  /** 已录账目的原始付款人。面板不改它，只拿来喂给分摊预览 */
+  /** 已录那一笔是谁垫的（后端随行给的，和 entry_id 同一次查出来）。分摊预览按它算余数 */
   payer_id: number | null
+  /**
+   * 服务器上这一项在我没看见的时候变了（室友刚记了一笔、或者同一笔被人改过），
+   * 而且和我没存上的不一样 —— 这里是服务器那边现在的样子。挂着它的行**不自动写**，
+   * 要人选用哪个（core/monthlyRows.mergeHeld）
+   */
+  conflict: { amount: number | null; payer_id: number | null } | null
+  /** 上一次撞量级闸（409 amount_jump）时后端给的倍数和方向。存上了就清 */
+  jump: { ratio?: unknown; direction?: unknown } | null
+  /** 人确认过「就是这个数」的那个金额。框里还是它才带 confirm_jump —— 改了数要重新确认 */
+  jump_ok: number | null
   /**
    * 刚被「清空＝删除」那一笔的分摊规则和日期。
    *
@@ -256,30 +318,11 @@ const busy = ref(false)
 
 /** 没给这一项定过、也没有全局设置时的兜底（全局那位得今天还住在这儿） */
 const fallbackPayerId = computed(() => meta.defaultPayerOn(todayJst()))
+const activeIds = computed(() => meta.activeMembers.map((m) => m.id))
 
-/**
- * 这一笔算谁垫的。按「谁最有发言权」排：
- *   1. 本期已经录了 → 就是当初记的那个人，谁也别动它
- *   2. 这一项定过默认垫付人 → 用它（房租永远从同一张卡扣）
- *   3. 上期那一笔是谁垫的（和「和上期一样」同一个口径）
- *   4. 全局的「默认垫付人」设置（他今天还住在这儿的话）
- *   5. 当前登录的人
- *
- * 少了第 2 条的话，这一屏就是「谁填的算谁」：别人刷的卡被随手填进去，
- * 账本当场错一整笔房租的钱，而屏幕上一点提示都没有。
- */
-function payerOf(row: Row): number | null {
-  if (row.payer_id !== null) return row.payer_id
-  // 翻旧账单时，已录的那几行**宁可不显示垫付人，也别显示一个猜的**：
-  // 后面两级回退给的是「今天的默认垫付人」，跟当初谁真掏的钱没关系 ——
-  // 而这一屏正是靠这个名字告诉人「这笔房租是谁垫的」
-  if (historic.value && row.entry_id !== null) return null
-  // 分类上定的默认垫付人已经搬走了：跳过他往下退（和记一笔那边同一个口径）。
-  // 照用的话，手填的房租就记成了已经不住这儿的人垫的。设置里他会标红
-  const living = (id: number | null | undefined) =>
-    id != null && meta.activeMembers.some((m) => m.id === id) ? id : null
-  return living(row.default_payer_id) ?? row.last_payer_id ?? fallbackPayerId.value
-}
+/** 这一笔算谁垫的。按「谁最有发言权」排，次序和理由见 core/monthlyRows.payerOf */
+const payerOf = (row: Row): number | null =>
+  payerIn(row, { historic: historic.value, active: activeIds.value, fallback: fallbackPayerId.value })
 
 const payerName = (row: Row) => {
   const id = payerOf(row)
@@ -287,7 +330,7 @@ const payerName = (row: Row) => {
 }
 
 const formatPlain = (n: number) => n.toLocaleString('en-US')
-const valueOf = (row: Row) => Number(digitsOf(row.text)) || 0
+const valueOf = (row: Row) => amountOf(row.text)
 
 /**
  * 重新拉数据。**保留还没保存的输入。**
@@ -308,6 +351,8 @@ function build(d: MonthlyData) {
     rows.value.filter((r) => r.dirty || r.deleted_rule).map((r) => [r.category_id, r]),
   )
   const taken: string[] = []
+  const same: string[] = []
+  const conflicted: string[] = []
   data.value = d
   rows.value = d.rows.map((r) => {
     let held = keep.get(r.category_id)
@@ -315,13 +360,27 @@ function build(d: MonthlyData) {
     // 存完的结果写回的是旧对象，新的这一行还是 dirty、没有 entry_id ——
     // 下一次失焦或离屏就把同一笔钱再 POST 一遍
     if (held && saving.has(r.category_id)) return held
-    // **手里那一笔被出账带走了**（有人在另一台上出了账）：这一行现在是新一期的
-    // 空行。没存上的输入不能留 —— 留着的话，下一次失焦/离开这一屏就把它当成
-    // 新的一笔记进下一期，而人以为自己改的是刚才那笔
-    if (held?.dirty && held.entry_id !== null && held.entry_id !== r.entry_id) {
+    const merge = mergeHeld(held, r)
+    if (merge === 'taken') {
+      // **手里那一笔被出账带走了**（有人在另一台上出了账）：这一行现在是新一期的
+      // 空行。没存上的输入不能留 —— 留着的话，下一次失焦/离开这一屏就把它当成
+      // 新的一笔记进下一期，而人以为自己改的是刚才那笔
       taken.push(r.name)
       held = undefined
+    } else if (merge === 'same') {
+      // 服务器上已经是我要填的那个数了（室友记了同一个数，或者我自己的 POST 其实成功了、
+      // 只是回应丢在路上）：用服务器那份，不再写
+      same.push(`${r.name} ${formatYen(r.amount ?? 0)}`)
+      held = undefined
+    } else if (merge === 'server' && held?.dirty) {
+      held = undefined             // 我这边是个空着的新行，服务器上有了：没什么要留的
+    } else if (merge === 'conflict' && !held?.conflict) {
+      conflicted.push(r.name)
     }
+    // 冲突的行：输入留着、标红，entry_id/version 换成服务器那一笔现在的 ——
+    // 但**不自动写**（saveRow 见到 conflict 就停下来问人）。人选「用我这边的」，
+    // 写的就是服务器上现在那一笔、带着它现在的 version，乐观锁照样守着
+    const conflict = merge === 'conflict' ? { amount: r.amount, payer_id: r.payer_id ?? null } : null
     return reactive({
       ...r,
       // 这期刚清空删掉的那一笔：重打金额是「改个金额」，起步规则就是它自己的，
@@ -332,43 +391,34 @@ function build(d: MonthlyData) {
       rule_override: held?.rule_override ?? null,
       rule_valid: held?.rule_valid ?? true,
       rule_diff: held?.rule_diff ?? 0,
-      payer_id: null,
+      // 已录那一笔是谁垫的：后端和 entry_id 同一次查出来。原来是从账单页的明细缓存里借
+      // （最多 200 笔、还可能是旧的），借不到就退回去猜 —— 屏幕上写着一个猜的人，
+      // 照着它点「改正」还会顺手改掉分类的默认垫付人
+      payer_id: r.payer_id ?? null,
       deleted_rule: held?.deleted_rule ?? null,
       deleted_date: held?.deleted_date ?? null,
       post_key: held?.dirty ? held.post_key : null,
       post_sig: held?.dirty ? held.post_sig : '',
+      conflict,
+      jump: held?.dirty ? held.jump : null,
+      jump_ok: held?.dirty ? held.jump_ok : null,
     })
   })
   if (taken.length) {
     $q.notify({ type: 'warning', timeout: 6000, message: t('monthly.takenByCut', { names: taken.join('、') }) })
   }
+  if (same.length) {
+    $q.notify({ type: 'info', timeout: 6000, message: t('monthly.sameAsServer', { list: same.join('、') }) })
+  }
+  // 离屏途中（leave 的兜底存撞了 409 → 重取）就不叫人「点那一行」了：那一行已经不在屏幕上，
+  // 最后那条「没存上」的提示会把它列出来
+  if (conflicted.length && !leaving) {
+    $q.notify({ type: 'warning', timeout: 8000, message: t('monthly.conflictFound', { names: conflicted.join('、') }) })
+  }
 }
 
 async function load() {
   build(await bills.loadMonthly(cacheKey.value))
-  await hydratePayers()
-}
-
-/**
- * 已录行的原始付款人：分摊预览要按它算余数，否则预览和落库差 1 円。
- *
- * 账单页早就把这张单子的明细取过了，能直接借来用 —— 借得到就一个请求都不发，
- * 面板整块同步出来。借不到（比如直接进固定费那一屏）才自己去取。
- */
-async function hydratePayers() {
-  const ids = rows.value.filter((r) => r.entry_id !== null).map((r) => r.entry_id)
-  if (!ids.length) return
-  const shared = bills.views[cacheKey.value]?.entries
-  // 借不到就自己取 —— 但必须**跟当前这张单子对齐**。原来打的是全局最近 200 笔，
-  // 翻半年前那张单子时一条都对不上，于是每一行的垫付人都退回「今天的默认垫付人」
-  const url = historic.value
-    ? `/api/entries?statement_id=${props.statementId}&limit=1000`
-    : '/api/entries?unbilled_only=true&limit=1000'
-  const entries = shared ?? (await api.get<{ id: number; payer_id: number }[]>(url))
-  const byId = new Map(entries.map((e) => [e.id, e.payer_id]))
-  for (const r of rows.value) {
-    if (r.entry_id !== null) r.payer_id = byId.get(r.entry_id) ?? null
-  }
 }
 
 /**
@@ -381,46 +431,88 @@ watch(
   (d) => {
     if (!d || d === data.value) return
     build(d)
-    void hydratePayers()
   },
 )
 
 onMounted(() => {
   // 缓存先上屏，再后台校正。load() 本身会保留还没保存的输入，所以校正不会抹掉手输的值
   const cached = bills.monthly[cacheKey.value]
-  if (cached) {
-    build(cached)
-    void hydratePayers()
-  }
+  if (cached) build(cached)
   void load()
 })
 
-/**
- * 这一行能不能「照上期」一键记上。正在手填的行不算 —— 人已经在填了，
- * 再给一个按钮只会记出两笔（后端也只记传过去的那几项）
- */
-const isCarryReady = (r: Row) =>
-  !historic.value && Boolean(r.carry_amount) && r.entry_id === null && !r.dirty && !r.text
-const isCarryBlocked = (r: Row) =>
-  !historic.value && Boolean(r.carry_blocked) && r.entry_id === null && !r.dirty && !r.text
+/** 抄不了、还空着的行（行头写着为什么）/ 展开区那颗「照上期 ¥…」露不露 —— 判据见 core/monthlyRows */
+const isCarryBlocked = (r: Row) => carryBlockedIn(r, historic.value)
+const carryShown = (r: Row) => carryShownIn(r, historic.value)
 const carrying = ref(false)
 
-/**
- * 展开区那颗「照上期 ¥…」露不露：开了「和上期一样」、上期有数就一直在 —— 本期填过了也在，
- * 好让人看得见这一期是不是照上期记的。抄不了的（垫付人搬走了、来了新室友）还没填时不露：
- * 行头上写着「人变了，要重填」
- */
-const carryShown = (r: Row) =>
-  !historic.value && Boolean(r.last_amount) && !(r.entry_id === null && isCarryBlocked(r))
-/** 框里的数已经就是上期的数 */
-const isAtLast = (r: Row) => r.text !== '' && valueOf(r) === r.last_amount
+/** 行头那句「为什么要自己填」。上期有好几笔的单说 —— 写成「人变了」是错的提示 */
+const blockedText = (row: Row) =>
+  row.carry_blocked === 'last_multi' ? t('monthly.carryLastMulti') : t('monthly.carryStale')
+
+/** 上期这一项记了好几笔：展开区说全（几笔、合计多少）。只对还没录的行说 */
+function lastMultiText(row: Row): string {
+  const d = row.carry_blocked_detail
+  if (historic.value || row.carry_blocked !== 'last_multi' || !d || row.entry_id !== null) return ''
+  return t('monthly.lastMultiDetail', { n: d.count, total: formatYen(d.total) })
+}
 
 /**
- * 点「照上期」。还没填（也没在填）的走 carry：后端照上期那一笔的垫付人和分摊记一笔，当场报出来。
- * 填过的、正在填的、本期删掉过的：等于替人把上期的数敲进框里再存 —— 垫付人和分摊都不动
+ * 起步分摊点了名、却没写到的今天在籍的人（新室友）—— 照这样存，他在这一项上担 0。
+ * 只对还没录、也没动过分摊的行说；补多少只有住的人知道，这里不替人补
+ */
+function missingNames(row: Row): string {
+  if (historic.value || row.entry_id !== null || row.rule_override !== null) return ''
+  return (row.rule_missing_member_ids ?? [])
+    .map((id) => meta.byId[id]?.display_name)
+    .filter(Boolean)
+    .join('、')
+}
+
+type Elsewhere = NonNullable<MonthlyRow['maybe_elsewhere']>[number]
+/** 草稿里记在日常分类、备注带着这一项名字的那几笔（翻旧账单时后端不给） */
+const elsewhere = (row: Row): Elsewhere[] => (historic.value ? [] : (row.maybe_elsewhere ?? []))
+function elsewhereText(row: Row, m: Elsewhere): string {
+  // 没挂分类的支出（兜底分类没设时记的）就叫它「支出」，别留个空的「·电费」
+  const p = { category: m.category_name ?? t('kind.expense'), title: m.title, amount: formatYen(m.amount) }
+  return row.entry_id === null ? t('monthly.elsewhereEmpty', p) : t('monthly.elsewhereFilled', p)
+}
+function openEntry(id: number) {
+  void router.push({ name: 'entry-edit', params: { id: String(id) } })
+}
+
+/** 「最近 k 期都一样 —— 以后照上期？」露不露。k 在设置里（0 ＝ 关，后端就不给） */
+const hintK = computed(() => meta.setting<number>('same_as_last_hint_k', 3))
+const suggestShown = (row: Row) =>
+  !historic.value && Boolean(row.suggest_same_as_last) && !row.same_as_last && !row.archived
+
+/**
+ * 照提示打开「和上期一样」。**只开开关，不记钱**：开了之后这一行展开区里出现「照上期 ¥…」，
+ * 记不记仍由人再点一次（D36）。最近几期一样不等于下期也一样（涨租那期就不一样），
+ * 所以这一步也不替人做
+ */
+async function turnOnSameAsLast(row: Row) {
+  busy.value = true
+  try {
+    const saved = await api.patch<Category>(`/api/categories/${row.category_id}`, { same_as_last: true })
+    meta.categories = meta.categories.map((c) => (c.id === saved.id ? saved : c))
+    bills.monthlyWritten()       // 在这之前发出去的 /monthly 回来，没有「照上期」那颗按钮
+    await load()
+    $q.notify({ type: 'positive', timeout: 6000, message: t('monthly.sameAsLastOn', { name: row.name }) })
+  } catch (e) {
+    $q.notify({ type: 'negative', message: errorText(e), timeout: 5000 })
+  } finally {
+    busy.value = false
+  }
+}
+
+/**
+ * 点「照上期」。还没填（也没在填、也没在存）的走 carry：后端照上期那一笔的垫付人和分摊记一笔，当场报出来。
+ * 填过的、正在填的、本期删掉过的：等于替人把上期的数敲进框里再存 —— 垫付人和分摊都不动。
+ * 打完数直接点它时，失焦那次保存已经发出去了：这里改的框、排上的保存不会被它吞掉（settleSaved）
  */
 function applyLast(row: Row) {
-  if (isCarryReady(row)) {
+  if (lastAction(row, historic.value, saving.has(row.category_id)) === 'carry') {
     void carry([row])
     return
   }
@@ -440,10 +532,9 @@ async function carry(list: Row[]) {
   if (historic.value || carrying.value || !list.length) return
   carrying.value = true
   try {
-    const { created, failed } = await api.post<{
-      created: { name: string; amount: number }[]
-      failed: { name: string }[]
-    }>('/api/monthly/carry', { category_ids: list.map((r) => r.category_id) })
+    const { created, failed } = await api.post<CarryResult>('/api/monthly/carry', {
+      category_ids: list.map((r) => r.category_id),
+    })
     bills.monthlyWritten()
     await load()
     if (created.length) {
@@ -452,19 +543,27 @@ async function carry(list: Row[]) {
       $q.notify({
         type: 'info',
         timeout: 6000,
-        message: t('monthly.carried', {
-          list: created.map((c) => `${c.name} ${formatYen(c.amount)}`).join('、'),
-        }),
+        message: t('monthly.carried', { list: created.map((c) => carriedText(c, list)).join('、') }),
       })
     }
     // **搬不过来的也必须说出来。** 这个开关存在的全部理由是「自动记的钱要看得见」，
     // 那么「自动记账已经停了」同样要看得见 —— 原来这里是个空 catch，
-    // 有人搬走之后它就一声不吭地失效了，而屏幕上只是几个空框
-    if (failed.length) {
+    // 有人搬走之后它就一声不吭地失效了，而屏幕上只是几个空框。
+    // 上期有好几笔的单说：那句「人变了，得重新定怎么分」放在它身上是错的
+    const multi = failed.filter((f) => f.reason === 'last_multi')
+    const other = failed.filter((f) => f.reason !== 'last_multi')
+    if (other.length) {
       $q.notify({
         type: 'warning',
         timeout: 8000,
-        message: t('monthly.carryFailed', { list: failed.map((f) => f.name).join('、') }),
+        message: t('monthly.carryFailed', { list: other.map((f) => f.name).join('、') }),
+      })
+    }
+    if (multi.length) {
+      $q.notify({
+        type: 'warning',
+        timeout: 8000,
+        message: t('monthly.carryFailedMulti', { list: multi.map((f) => f.name).join('、') }),
       })
     }
   } catch (e) {
@@ -481,9 +580,26 @@ async function carry(list: Row[]) {
   }
 }
 
-/** 去账目页看这个分类本期的全部几笔 —— 面板上只显示得下一笔 */
+/**
+ * 通知里那一笔「记成了谁垫的」。照上期的垫付人是分类的常驻默认（面板上改过一次「谁付的」
+ * 就跟着变）或者上期那一笔的 —— 一笔房租记给错的人就是十几万的错，所以要说出来。
+ * 照后端实际记的说（created.payer_id；老后端没有就用行上的 carry_payer_id），不自己推算
+ */
+function carriedText(c: CarryResult['created'][number], list: Row[]): string {
+  const payer = c.payer_id ?? list.find((r) => r.category_id === c.category_id)?.carry_payer_id ?? null
+  const who = payer === null ? '' : (meta.byId[payer]?.display_name ?? '')
+  const amount = formatYen(c.amount)
+  return who ? t('monthly.carriedItem', { name: c.name, amount, payer: who }) : `${c.name} ${amount}`
+}
+
+/**
+ * 去账目页看这个分类**本期**的全部几笔 —— 面板上只显示得下一笔。
+ * 带上范围（草稿 ＝ 还没出账的，翻旧账单 ＝ 那一张上的）：只带分类的话列出来的是
+ * 这个分类的全部历史，几十笔房租里分不出本期到哪笔为止
+ */
 function openCategoryEntries(row: Row) {
-  void router.push({ name: 'entries', query: { category: String(row.category_id) } })
+  const scope = historic.value ? { statement: String(props.statementId) } : { unbilled: '1' }
+  void router.push({ name: 'entries', query: { category: String(row.category_id), ...scope } })
 }
 
 function onInput(row: Row, e: Event) {
@@ -574,12 +690,21 @@ let queue: Promise<void> = Promise.resolve()
 /** 正在存的那几行（分类 id）。build() 重建时不许换掉它们 */
 const saving = new Set<number>()
 
-function saveQueued(row: Row): Promise<void> {
-  queue = queue.then(() => saveRow(row)).catch(() => {})
+/**
+ * 保存从哪儿来，决定撞上「要人拿主意」的情况时能不能问：
+ *   'ask'   —— 人刚动过这一行（失焦、收起、点了「照上期」、点了冲突那句提示）：弹框问；
+ *   'flush' —— 出账之前兜底存（BillView.doCut）：量级闸照样问（问的就是他刚填的数）；
+ *              冲突的行不问也不写，留着 dirty —— 出账那边按「有没存上的」拦下；
+ *   'leave' —— 离开这一屏：组件在卸载，什么都不问，存不上的最后列成一条不会自己消失的提示
+ */
+type SaveHow = 'ask' | 'flush' | 'leave'
+
+function saveQueued(row: Row, how: SaveHow = 'ask'): Promise<void> {
+  queue = queue.then(() => saveRow(row, how)).catch(() => {})
   return queue
 }
 
-async function saveRow(row: Row) {
+async function saveRow(row: Row, how: SaveHow) {
   if (!row.dirty) return
   if (!row.rule_valid) {
     $q.notify({
@@ -598,13 +723,44 @@ async function saveRow(row: Row) {
     $q.notify({ type: 'warning', message: t('monthly.historicAmountOnly'), timeout: 5000 })
     return
   }
+  let stale = false
+  // 从这儿起到存完（包括等人在对话框里拿主意）都算「正在存」：build() 不许换掉这个对象，
+  // 否则人选完、写回的是一个已经不在屏幕上的旧对象
+  saving.add(row.category_id)
+  try {
+    // 服务器上这一项在我没看见的时候变了（build 认出来的）：**不自动写**，问人用哪个
+    if (row.conflict && (how !== 'ask' || !(await askConflict(row)))) return
+    for (;;) {
+      const r = await sendRow(row, how)
+      if (r === 'stale') stale = true
+      if (r !== 'again') break
+    }
+  } finally {
+    saving.delete(row.category_id)
+  }
+  // 版本冲突：手里这份 version 已经过期，不重新取的话再点多少次都是同一个 409。
+  // **要等这一行出了 saving 再取**：还在 saving 里的话 build() 原样留着这个对象，
+  // 过期的 version 一点不变（原来在 catch 里直接 load，等于白取）。
+  // 取回来 build() 会把它认成「被人改过」：和我填的一样就采用，不一样就标出来让人选
+  if (stale) await load().catch(() => {})
+}
+
+/**
+ * 发一次请求。返回 'again' ＝ 撞了量级闸、人确认了，带着确认再发一次；
+ * 'stale' ＝ version 过期（409），要重新取。
+ */
+async function sendRow(row: Row, how: SaveHow): Promise<'done' | 'again' | 'stale'> {
   const value = valueOf(row)
   // 合计的底数是后端给的那个，而它只在 load() 时刷新。存成功之后这一行的差额
   // 从 pending 里消失、底数却没动 —— 合计当场掉回挂载时的数（删除时则不减）。
   // 在这儿把底数跟着改：新增 before=0、改金额取差、删除 row.amount=null 就是减掉
   const before = row.amount ?? 0
+  // 这一次发出去的是什么。存完**只有这一行没再被改过**才清 dirty（core/monthlyRows.settleSaved）
+  const sent = saveSig(row)
+  // 人确认过「就是这个数」、框里也还是它，才带确认
+  const confirm = row.jump_ok === value ? { confirm_jump: true } : {}
+  let jump: Row['jump'] = null
   busy.value = true
-  saving.add(row.category_id)
   try {
     if (willDelete(row)) {
       // 带上 version：这一笔要是刚被出账带走了（或者被人改过），不能把刚发进群里的
@@ -632,6 +788,7 @@ async function saveRow(row: Row) {
                 member_ids: (rowMembers.value.get(row.category_id) ?? meta.activeMembers).map((m) => m.id),
               }
             : {}),
+          ...confirm,
         },
       )
       row.version = saved.version
@@ -658,17 +815,18 @@ async function saveRow(row: Row) {
       }
       const saved = await api.post<{ id: number; version: number; amount_jpy: number }>(
         '/api/entries',
-        { ...body, client_key: row.post_key },
+        { ...body, ...confirm, client_key: row.post_key },
       )
       row.post_key = null
       row.entry_id = saved.id
       row.version = saved.version
       row.amount = saved.amount_jpy
+      row.payer_id = body.payer_id   // 记下的就是这个人垫的，别再按回退链去猜
       row.deleted_rule = null
       row.deleted_date = null
     } else {
       row.dirty = false          // 空着又没录过：没什么可存的
-      return
+      return 'done'
     }
     if (data.value) {
       data.value.total += (row.amount ?? 0) - before
@@ -680,38 +838,137 @@ async function saveRow(row: Row) {
         cached.amount = row.amount
         cached.entry_id = row.entry_id
         cached.version = row.version
+        // 垫付人也跟着（和服务器那份一个口径：没录就没有）—— 不改的话从缓存重新挂载，
+        // 这一行又退回去猜
+        cached.payer_id = row.entry_id === null ? null : row.payer_id
       }
     }
-    row.dirty = false
-    row.rule_override = null
+    // 请求在路上时这一行又被改了（重打了金额、点了「照上期」、动了分摊）：
+    // 不清 dirty，排着的那次接着存最新的；没排着的照常标红，收起/离屏/出账时存上
+    settleSaved(row, sent)
+    row.jump = null
+    row.jump_ok = null
     bills.monthlyWritten()       // 在这之前发出去的 /monthly 回来就是旧的了
     emit('saved')                // 账单总额/转账方案跟着刷新
     // 账目页那份列表是另一个 store 管的。这一屏从头到尾直接打 /api/entries，
     // 不通知它的话，刚录的固定费在账目页整个 session 都看不见
     void ledger.refresh().catch(() => {})
   } catch (e) {
-    // 失败就留在 dirty，输入原样保着，人能看见也能改了重来
-    $q.notify({
-      type: 'negative',
-      message: `${row.name}: ${errorText(e)}`,
-      timeout: 5000,
-    })
-    // 版本冲突：手里这份 version 已经过期，不重新取的话再点多少次都是同一个 409。
-    // load() 会保留还没保存的输入，所以刷一下不会把人填的东西抹掉
-    if (e instanceof ApiError && e.code === 'version_conflict') {
-      await load().catch(() => {})
+    if (e instanceof ApiError && e.code === 'amount_jump') {
+      // 量级闸：和上期差出好几倍（多打/少打一个 0）。这不是「存失败」，是要人确认一句 ——
+      // 不弹红字。离屏时问不了，留着 dirty，由最后那条提示列出来
+      row.jump = { ratio: e.detail.ratio, direction: e.detail.direction }
+      if (how !== 'leave') jump = row.jump
+    } else {
+      // 失败就留在 dirty，输入原样保着，人能看见也能改了重来
+      $q.notify({
+        type: 'negative',
+        message: `${row.name}: ${errorText(e)}`,
+        timeout: 5000,
+      })
+      if (e instanceof ApiError && e.code === 'version_conflict') return 'stale'
     }
   } finally {
-    saving.delete(row.category_id)
     busy.value = false
   }
+  if (!jump || !(await confirmJump(row, value, jump))) return 'done'
+  row.jump_ok = value
+  // 框里已经不是人确认的那个数了（对话框是模态的，不该发生）：不替他发
+  return row.dirty && valueOf(row) === value ? 'again' : 'done'
 }
 
-/** 离开这一屏时把还没存的行兜底存掉 —— 比如填完直接切了 Tab */
-async function flush() {
-  for (const row of rows.value) await saveQueued(row)
+/**
+ * 冲突的这一行用哪个。两个按钮都得点一下才关（persistent）：点空白处就关的话，
+ * 分不清是「用刚记的」还是「先不管」，而「用刚记的」会丢掉人的输入。
+ *   用我这边的 —— 写的是服务器上现在那一笔、带着它现在的 version（build 时已经换上），
+ *                 只改金额（和动过的分摊），垫付人不动；
+ *   用刚记的   —— 丢掉手里的输入。
+ * 返回 true ＝ 接着把我这边的存上
+ */
+function askConflict(row: Row): Promise<boolean> {
+  const theirs = formatYen(row.conflict?.amount ?? 0)
+  const value = valueOf(row)
+  const mine = value ? formatYen(value) : t('monthly.conflictDeleteWhat')
+  return new Promise((resolve) => {
+    $q.dialog({
+      message: t('monthly.conflictAsk', { name: row.name, theirs, mine }),
+      persistent: true,
+      ok: { label: t('monthly.conflictMine'), flat: true },
+      cancel: { label: t('monthly.conflictTheirs', { amount: theirs }), flat: true },
+    })
+      .onOk(() => {
+        row.conflict = null
+        resolve(true)
+      })
+      .onCancel(() => {
+        row.text = row.amount === null ? '' : formatPlain(row.amount)
+        row.dirty = false
+        row.rule_override = null
+        row.conflict = null
+        row.jump = null
+        row.jump_ok = null
+        resolve(false)
+      })
+  })
 }
-onBeforeUnmount(flush)
+
+/**
+ * 量级闸问一句「真是这个数？」。倍数是后端拿本期这一项的合计和上次出账时的比出来的。
+ * 点空白处关掉＝回去改：留在 dirty、框还红着，什么都没写
+ */
+function confirmJump(row: Row, value: number, jump: NonNullable<Row['jump']>): Promise<boolean> {
+  const n = jumpFactor(jump.ratio)
+  const down = jump.direction === undefined ? Number(jump.ratio) < 1 : jump.direction === 'down'
+  const p = { name: row.name, amount: formatYen(value), n }
+  const message = n === null ? t('errors.amount_jump') : down ? t('monthly.jumpDown', p) : t('monthly.jumpUp', p)
+  return new Promise((resolve) => {
+    $q.dialog({
+      message,
+      ok: { label: t('monthly.jumpOk'), flat: true },
+      cancel: { label: t('monthly.jumpFix'), flat: true },
+    })
+      .onOk(() => resolve(true))
+      .onCancel(() => resolve(false))
+  })
+}
+
+/** 出账之前把还没存的行兜底存掉（BillView.doCut 调它，之后看 dirtyCount） */
+async function flush() {
+  await eachLive(() => rows.value, (row) => saveQueued(row, 'flush'))
+}
+
+/**
+ * 离开这一屏：兜底存一遍（比如填完直接切了 Tab）。**还存不上的必须留下一句不会自己消失的话。**
+ *
+ * 原来存不上只有那条 5 秒的红字，回来时这一行是空框、标题写着「改完自动保存」——
+ * 人以为已经填过了。不在回来时把它恢复成 dirty：恢复出来的数会在失焦/离屏时自动写，
+ * 而那时它可能已经过期（中间出过账、室友记过同一项），等于替人写钱
+ */
+let leaving = false
+async function leave() {
+  leaving = true
+  await eachLive(() => rows.value, (row) => saveQueued(row, 'leave'))
+  const left = rows.value.filter((r) => r.dirty)
+  if (!left.length) return
+  const list = left.map((r) => {
+    const v = valueOf(r)
+    const what = `${r.name} ${v ? formatYen(v) : t('monthly.willDelete')}`
+    if (r.conflict) return what + t('monthly.leftConflict', { amount: formatYen(r.conflict.amount ?? 0) })
+    if (r.jump) return what + t('monthly.leftJump')
+    return what
+  })
+  $q.notify({
+    type: 'warning',
+    timeout: 0,
+    message: t('monthly.leftUnsaved', { list: list.join('、') }),
+    actions: [{ icon: 'close', color: 'white', round: true }],
+  })
+}
+onBeforeUnmount(() => void leave())
+
+// 整页重载（换 chunk）不跑上面那个 leave()：正在存、在等人答量级闸 / 冲突的框、存失败还 dirty 的行，
+// 都得挡着它（src/unsaved，router.onError 看）。saving 覆盖了询问框开着的那段：行一直留在里面直到人答完
+onBeforeUnmount(holdReload(() => saving.size > 0 || dirtyCount.value > 0))
 
 /**
  * 删掉一项固定费 —— **归档，不是真删**。
@@ -791,10 +1048,13 @@ async function setPayer(row: Row, payerId: number) {
       )
       row.version = e.version
       row.payer_id = payerId
-      // 缓存里那一行的 version 跟着改（理由同 saveRow）：面板重新挂载时拿它建行，
-      // 留着旧的话下一次改金额先撞一个 409。付款人不在这份缓存里，是从流水拼上来的
+      // 缓存里那一行的 version 和垫付人跟着改（理由同 sendRow）：面板重新挂载时拿它建行，
+      // 留着旧 version 的话下一次改金额先撞一个 409；留着旧垫付人，行头就写回原来那个人
       const cached = data.value?.rows.find((r) => r.category_id === row.category_id)
-      if (cached) cached.version = e.version
+      if (cached) {
+        cached.version = e.version
+        cached.payer_id = payerId
+      }
       bills.monthlyWritten()
       emit('saved')             // 谁垫的变了，账单上的应收应付跟着变
       void ledger.refresh().catch(() => {})   // 流水那一行的付款人也得换
@@ -890,4 +1150,26 @@ defineExpose({ flush, dirtyCount })
   cursor: pointer;
 }
 .carry-chip:disabled { opacity: 0.5; }
+/* 「以后照上期？」：和「照上期」同一个位置、同一个形状，但不用主色 —— 它不记钱，只是开个开关 */
+.hint-chip {
+  border: none;
+  border-radius: var(--nagaya-r-pill);
+  padding: 6px 12px;
+  background: var(--nagaya-fill);
+  color: var(--nagaya-ink);
+  font-family: inherit;
+  cursor: pointer;
+}
+.hint-chip:disabled { opacity: 0.5; }
+/* 「草稿里有一笔…是不是它？」：点了去那一笔，长得要像能点 */
+.elsewhere-link {
+  display: block;
+  border: none;
+  background: none;
+  padding: 0;
+  font-family: inherit;
+  text-align: left;
+  text-decoration: underline;
+  cursor: pointer;
+}
 </style>

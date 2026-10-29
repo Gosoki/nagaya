@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
 import { api } from 'src/api/client'
-import type { Category, Member, Setting } from 'src/api/types'
+import type { BackupAlert, Category, Member, Setting } from 'src/api/types'
 import { forgetAvatars } from 'src/avatars'
 import { useAuth } from 'src/stores/auth'
 
@@ -76,6 +76,7 @@ export const useMeta = defineStore('meta', () => {
     members.value = []
     categories.value = []
     settings.value = []
+    backupAlert.value = null
     last = ''
     forgetAvatars()
     try {
@@ -156,10 +157,29 @@ export const useMeta = defineStore('meta', () => {
     return auth.me?.id ?? null
   }
 
+  /**
+   * 备份出问题了没有（GET /api/backup/alert 给的码，null ＝ 没事）。
+   *
+   * 备份失败、停摆原来只在「更多 → 设置 → 备份」那一块看得见，而平时没人会去看 ——
+   * 这屋没有邮件也没有推送，盘满了、目录没了，备份就一声不吭地停着。底栏「更多」和
+   * 「设置」页签上亮一个红点，人顺手点进去就看到那一块。**每次现场问，不存结论**：
+   * 开 App 一次、切回前台一次。哪些情况算「出问题」是后端判的（同盘、刚改完目录、
+   * 自己关了自动备份都不算，否则红点常亮，到真出事那天没人当回事）
+   */
+  const backupAlert = ref<string | null>(null)
+  async function loadBackupAlert(): Promise<void> {
+    try {
+      backupAlert.value = (await api.get<BackupAlert>('/api/backup/alert')).alert ?? null
+    } catch {
+      /* 问不到（断网、老后端没有这个接口）就当这次没消息：不亮红点，也不报错 */
+    }
+  }
+
   return {
     members, categories, settings,
     activeMembers, activeMembersSelfFirst, membersOn, byId, defaultPayerOn,
     dailyCategories, monthlyCategories, categoryById,
     setting, load, useCached, forget,
+    backupAlert, loadBackupAlert,
   }
 })

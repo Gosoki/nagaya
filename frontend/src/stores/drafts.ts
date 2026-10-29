@@ -11,13 +11,13 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
 import { ApiError } from 'src/api/client'
-import type { EntryPayload } from 'src/api/types'
+import type { Entry, EntryPayload } from 'src/api/types'
 import { useAuth } from 'src/stores/auth'
 import { useLedger } from 'src/stores/ledger'
 
 const KEY = 'nagaya.drafts'
 
-interface Draft {
+export interface Draft {
   id: string
   savedAt: string
   payload: EntryPayload
@@ -38,11 +38,13 @@ function read(): Draft[] {
   }
 }
 
-function write(list: Draft[]) {
+/** 写进本机。**写没写进去要说出来**（见 add）：别的调用方存不了就算了，至少别把页面弄崩 */
+function write(list: Draft[]): boolean {
   try {
     localStorage.setItem(KEY, JSON.stringify(list))
+    return true
   } catch {
-    /* 存不了就算了，至少别把页面弄崩 */
+    return false
   }
 }
 
@@ -57,8 +59,14 @@ export const useDrafts = defineStore('drafts', () => {
   )
   const count = computed(() => mine.value.length)
 
-  function add(payload: EntryPayload, memberId: number | null) {
-    items.value = [
+  /**
+   * 存一笔草稿。**写不进本机就返回 false，而且不留只活在内存里的那一份。**
+   * 站点存储被整个禁用时（iOS「阻止所有 Cookie」）setItem 会抛：原来照样提示
+   * 「先存在本地了」、清空表单，横幅也挂着 —— 可那一笔只在内存里，PWA 被系统杀掉、
+   * 或者整页重载换新版之后就没了。现在调用方据此把表单留着，钱还在人眼前
+   */
+  function add(payload: EntryPayload, memberId: number | null): boolean {
+    const next = [
       ...items.value,
       {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -67,7 +75,9 @@ export const useDrafts = defineStore('drafts', () => {
         memberId,
       },
     ]
-    write(items.value)
+    if (!write(next)) return false
+    items.value = next
+    return true
   }
 
   function remove(id: string) {
@@ -86,18 +96,21 @@ export const useDrafts = defineStore('drafts', () => {
    * 补交。逐条提交，成功一条删一条 —— 中途再断网也不会重复提交已成功的。
    *
    * **区分「没网」和「后端不收」。** 原来一律算失败、一律报「连不上服务器」：
-   * 一条被后端明确拒绝的草稿（金额为 0、分类被归档了、日期落进已出账范围）
-   * 会永远卡在那儿，横幅一直挂着「有 1 笔没提交」，点多少次都是同一句错话，
-   * 而真正的原因一个字都看不到。
+   * 一条被后端明确拒绝的草稿（金额为 0、分类被归档了）会永远卡在那儿，
+   * 横幅一直挂着「有 1 笔没提交」，点多少次都是同一句错话，而真正的原因一个字都看不到。
+   * **日期早于上次出账不在其中**：后端照收，这笔进的是当前草稿账单、不是那张已出的
+   * （DraftBanner 补交完会说一句）。
    *
    * 被拒的那条照样留着（里面是用户真填过的钱，不能替他扔掉），但要把后端那句话
    * 带回去说清楚，让人知道该去改哪儿。
    */
-  async function submitAll(): Promise<{ ok: number; offline: number; rejected: string[] }> {
+  async function submitAll(): Promise<{ ok: number; offline: number; rejected: string[]; saved: Entry[] }> {
     const ledger = useLedger()
     let ok = 0
     let offline = 0
     const rejected: string[] = []
+    /** 交上去的那几笔（后端回的样子）：横幅逐笔报「已记下 · 日用 ¥1,234」并给撤销 */
+    const saved: Entry[] = []
     for (const draft of [...mine.value]) {
       // 补交进行中被丢弃了（点了「丢弃」、或者别的入口清过）：不许再交出去
       if (!items.value.some((d) => d.id === draft.id)) continue
@@ -105,7 +118,7 @@ export const useDrafts = defineStore('drafts', () => {
         // 走 ledger.create 而不是自己打接口：**「写完要刷哪几份缓存」只该有一处定义**。
         // 自己打的话账单缓存一份都不刷，而这个横幅在 /bill 上也挂着 ——
         // 补交完成，账单页原地停在旧数字，一键复制就把错的合计发进群了
-        await ledger.create(draft.payload)
+        saved.push(await ledger.create(draft.payload))
         remove(draft.id)
         ok += 1
       } catch (e) {
@@ -113,8 +126,8 @@ export const useDrafts = defineStore('drafts', () => {
         else offline += 1
       }
     }
-    return { ok, offline, rejected }
+    return { ok, offline, rejected, saved }
   }
 
-  return { count, add, clear, submitAll }
+  return { mine, count, add, remove, clear, submitAll }
 })

@@ -123,7 +123,19 @@
           <!-- 这一格就是「这张单子现在什么状态」：草稿报笔数，出过的账单
                结清了给绿签、没结清给橙字 -->
           <div v-if="bill.is_draft" class="no-wrap">
-            <span v-if="bill.prev_cut_at" class="q-mr-sm">
+            <!-- 「上期结转」跟着一张已出的账单变了（那张出账后被改过）：草稿页上的数字变了，
+                 却一句不说、也不指路 —— 而这是打开 App 默认停的那一页。「上次 …」那一格换成
+                 一颗橙色的签，点过去看那张（那儿有完整的说明）。**同一行里换，不另起一行**：两页要一样高 -->
+            <button
+              v-if="bill.opening_drift"
+              class="chip warn drift q-mr-sm"
+              type="button"
+              @click="openDrift(bill.opening_drift.statement_id)"
+            >
+              <q-icon name="error_outline" size="14px" />
+              {{ t('bill.openingDrift') }}
+            </button>
+            <span v-else-if="bill.prev_cut_at" class="q-mr-sm">
               {{ t('bill.lastCut', { label: statementLabel({ label: bill.prev_label, cut_at: bill.prev_cut_at }) }) }}
             </span>
             {{ t('bill.entryCount', { n: bill.entry_count }) }}
@@ -172,11 +184,71 @@
             <div class="text-subtitle1 text-weight-medium">{{ t('bill.editedChip') }}</div>
           </q-card-section>
           <q-card-section>{{ editedText }}</q-card-section>
+          <!-- 只给件数和合计说不清事：只改了分摊时合计一分不差，可每个人的结余都变了。
+               **谁受影响、差多少**逐人写出来（一样的不列） -->
+          <q-card-section v-if="editedMoved.length" class="q-pt-none">
+            <div class="text-caption text-grey-7">{{ t('bill.editedMembersTitle') }}</div>
+            <div v-for="m in editedMoved" :key="m.member_id" class="edited-member">
+              {{ t('bill.editedMember', { name: nameOf(m.member_id), before: closingText(m.frozen_closing), now: closingText(m.live_closing) }) }}
+            </div>
+          </q-card-section>
+          <!-- 改了哪几笔、谁改的。点进去就是那一笔 -->
+          <q-list v-if="editedEntries.length" separator class="edited-entries">
+            <q-item v-for="x in editedEntries" :key="x.id" v-close-popup clickable dense @click="editEntry(x.id, x.category_id)">
+              <q-item-section>
+                <q-item-label>{{ x.label }}</q-item-label>
+                <q-item-label v-if="x.by" caption>{{ x.by }}</q-item-label>
+              </q-item-section>
+              <q-item-section side class="text-grey-9">{{ x.change }}</q-item-section>
+              <q-item-section side><q-icon name="chevron_right" color="grey-5" size="18px" /></q-item-section>
+            </q-item>
+          </q-list>
+          <!-- 更早那张被改了、这张跟着漂：说出是哪张，点过去看。查不出来就只留上面那句笼统的，不瞎指 -->
+          <q-card-section v-if="editedSources.length">
+            <div class="text-caption text-grey-7">{{ t('bill.editedSources') }}</div>
+            <button
+              v-for="s in editedSources"
+              :key="s.id"
+              v-close-popup
+              class="more-link"
+              type="button"
+              @click="pickStatement(s.id)"
+            >{{ s.label }}</button>
+          </q-card-section>
           <q-card-actions align="right">
             <q-btn v-close-popup flat no-caps color="primary" :label="t('common.confirm')" />
           </q-card-actions>
         </q-card>
       </q-dialog>
+
+      <!-- **待核对**：草稿里看着可疑的几笔 —— 参与人和入住/搬走日对不上、两台手机各记了一遍、
+           比这个分类平时大得离谱。**全是弱证据**（搬走的人真吃到了那天、同一天真买了两件、
+           真买了台冰箱），所以只请人点进去看一眼：不拦出账、不改钱、不替人删；
+           看过没问题就不用管，出了账自然消失。一条都没有时整块不出现。.review 是 E2E 的锚点 -->
+      <div v-if="bill.is_draft && reviewItems.length" class="bill-section review">
+        <q-item dense class="section-head">
+          <q-item-section>{{ t('bill.reviewTitle', { n: reviewItems.length }) }}</q-item-section>
+        </q-item>
+        <div class="text-caption text-grey-7 q-px-md">{{ t('bill.reviewHint') }}</div>
+        <q-list separator>
+          <q-item v-for="r in reviewItems" :key="r.key" dense clickable @click="editEntry(r.id, r.entry?.category_id)">
+            <q-item-section avatar>
+              <q-avatar v-if="r.entry" size="30px" :style="{ background: colorOfEntry(r.entry) }" text-color="white">
+                <q-icon :name="iconOfEntry(r.entry)" size="16px" />
+              </q-avatar>
+            </q-item-section>
+            <q-item-section>
+              <q-item-label>{{ r.label }}</q-item-label>
+              <q-item-label v-if="r.entry" caption>
+                {{ r.entry.date.slice(5) }} · {{ meta.byId[r.entry.payer_id]?.display_name }}
+              </q-item-label>
+              <q-item-label caption class="review-why">{{ r.why }}</q-item-label>
+            </q-item-section>
+            <q-item-section v-if="r.entry" side class="text-grey-9">{{ formatYen(r.entry.amount_jpy) }}</q-item-section>
+            <q-item-section side><q-icon name="chevron_right" color="grey-5" size="18px" /></q-item-section>
+          </q-item>
+        </q-list>
+      </div>
 
       <!-- 本期固定费：出账单时顺手把家賃/水电煤网填了，账单跟着重算 -->
       <MonthlyFixed v-if="bill.is_draft" ref="fixedPanel" @saved="load" />
@@ -243,6 +315,11 @@
           </q-item>
         </q-list>
         <div v-else class="text-caption text-grey-6 q-px-md q-pb-md">{{ t('bill.othersEmpty') }}</div>
+        <!-- 一期的明细超过一次拉的上限：头卡片上的笔数和合计是全量的，这儿却少列了最早那几笔 ——
+             说出来，别让人以为就这些 -->
+        <button v-if="othersMissing" class="more-link q-mx-md q-mb-md" type="button" @click="openAllEntries">
+          {{ t('bill.othersMissing', { n: othersMissing }) }}
+        </button>
       </div>
 
       <!-- .per-member 是 E2E 用来指「每人那一块」的锚点，别随手删 -->
@@ -459,7 +536,9 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 
 import { ApiError, api, errorText } from 'src/api/client'
-import type { Bill, BillTransfer, Statement } from 'src/api/types'
+import type { Bill, BillTransfer, CarryResult, Entry, MonthlyRow, Statement } from 'src/api/types'
+import { cutParams, cutRows, shouldStopAfterCarry } from 'src/core/cutHints'
+import { editRoute } from 'src/core/entryEdit'
 import { leftOf as leftOfPlan, mineOf, supersededIn } from 'src/core/transfers'
 import { parseTypedYen } from 'src/digits'
 import { escapeHtml } from 'src/html'
@@ -471,7 +550,8 @@ import { todayJst } from 'src/date'
 import { statementLabel } from 'src/statement'
 import { formatYen } from 'src/i18n'
 import { useAuth } from 'src/stores/auth'
-import { type BillKey, useBills } from 'src/stores/bills'
+import { BILL_ENTRY_LIMIT, type BillKey, useBills } from 'src/stores/bills'
+import { useDrafts } from 'src/stores/drafts'
 import { useLedger } from 'src/stores/ledger'
 import { useMeta } from 'src/stores/meta'
 
@@ -481,13 +561,20 @@ const router = useRouter()
 
 const props = defineProps<{ viewKey: BillKey }>()
 
-/** 点一条明细就去改它。已出账的照样能改：差额自己进下一张的「上期结转」 */
-function editEntry(id: number) {
-  void router.push({ name: 'entry-edit', params: { id: String(id) } })
+/**
+ * 点一条明细就去改它。已出账的照样能改：差额自己进下一张的「上期结转」。
+ * **固定费走这张单子的固定费那一屏**（和账目页 openEntry 一样）：「出账后被改过」「待核对」
+ * 里也会列固定费，进了单笔编辑页撞上量级闸只有一句红字，那一屏才有「没错，就是这个数」的路
+ */
+function editEntry(id: number, categoryId?: number | null) {
+  const monthly = categoryId != null && Boolean(meta.categoryById[categoryId]?.monthly)
+  const sid = bill.value?.is_draft ? null : (bill.value?.statement_id ?? null)
+  void router.push(editRoute(id, monthly, sid))
 }
 const meta = useMeta()
 const auth = useAuth()
 const ledger = useLedger()
+const drafts = useDrafts()
 
 const bills = useBills()
 const viewKey = computed(() => props.viewKey)
@@ -630,19 +717,124 @@ const minePart = computed<MinePart>((): MinePart => {
   }
 })
 
-/** 「出账后改过」那颗签点开之后的全文。和复制出去的文本是同一句 */
-const showEdited = ref(false)
-const editedText = computed(() => {
-  const e = bill.value?.edited_after_cut
+/**
+ * 「出账后改过」那一句。签点开之后的头一句和复制出去的文本是同一句。
+ * **合计没变（只改了分摊）时不写「当初 ¥30,000，现在 ¥30,000」** —— 那句话等于什么都没说，
+ * 还像是没改；那种时候每个人差了多少另起一行逐人写（见 movedText）
+ */
+function editedLine(b: Bill): string {
+  const e = b.edited_after_cut
   if (!e) return ''
-  return e.from_earlier
-    ? t('bill.driftedFromEarlier')
-    : t('bill.editedAfterCut', {
-        n: e.count,
-        frozen: formatYen(e.frozen_total ?? 0),
-        live: formatYen(e.live_total),
-      })
+  if (e.from_earlier) return t('bill.driftedFromEarlier')
+  if (e.frozen_total !== null && e.frozen_total === e.live_total) return t('bill.editedAfterCutSame', { n: e.count })
+  return t('bill.editedAfterCut', {
+    n: e.count,
+    frozen: formatYen(e.frozen_total ?? 0),
+    live: formatYen(e.live_total),
+  })
+}
+
+/** 一个人的结余说成人话：应收 ¥X / 应付 ¥X / 已结清（和「每人」那一块同一套词） */
+function closingText(n: number): string {
+  if (n === 0) return t('bill.settled')
+  return `${n > 0 ? t('bill.toReceive') : t('bill.toPay')} ${formatYen(Math.abs(n))}`
+}
+
+/** 逐人「当初 → 现在」一行（复制出去的文本用）。没人变就是空串 */
+function movedText(b: Bill): string {
+  const list = (b.edited_after_cut?.members ?? []).map((m) =>
+    t('bill.editedMember', { name: nameOf(m.member_id), before: closingText(m.frozen_closing), now: closingText(m.live_closing) }),
+  )
+  return list.length ? t('bill.editedMembers', { list: list.join('、') }) : ''
+}
+
+const showEdited = ref(false)
+const editedText = computed(() => (bill.value ? editedLine(bill.value) : ''))
+/** 签点开之后：谁的结余变了 */
+const editedMoved = computed(() => bill.value?.edited_after_cut?.members ?? [])
+/**
+ * 签点开之后：改了哪几笔（金额前后、谁改的），每笔点得进去。
+ * 名字和明细列表同一套（这张单子的明细在手就用它，删掉的那笔不在列表里就退回备注 / 分类名）
+ */
+const editedEntries = computed(() => {
+  const list = bill.value?.edited_after_cut?.entries ?? []
+  const byId = new Map(draftEntries.value.map((e) => [e.id, e]))
+  return list.map((x) => {
+    const e = byId.get(x.entry_id)
+    const label =
+      (e ? labelOfEntry(e) : '') ||
+      x.title ||
+      (x.category_id !== null ? meta.categoryById[x.category_id]?.name : '') ||
+      `#${x.entry_id}`
+    const now = x.deleted ? t('bill.editedDeleted') : formatYen(x.after_amount ?? 0)
+    const change =
+      x.before_amount === null
+        ? now
+        : !x.deleted && x.before_amount === x.after_amount
+          ? t('bill.editedSameAmount')
+          : `${formatYen(x.before_amount)} → ${now}`
+    const by = x.by.length ? t('bill.editedBy', { names: x.by.map(nameOf).join('、') }) : ''
+    return { id: x.entry_id, category_id: x.category_id, label, change, by }
+  })
 })
+/** 是哪几张更早的单子出账后被改了（这张因此跟着漂） */
+const editedSources = computed(() =>
+  (bill.value?.edited_after_cut?.sources ?? []).map((id) => ({
+    id,
+    label: statementLabel(bills.statements?.find((s) => s.id === id)) || `#${id}`,
+  })),
+)
+
+/**
+ * 草稿上的「待核对」那几行。每一类都是后端只读算出来的弱证据（review），这里只把它说成人话。
+ * 措辞一律是「请核对」：搬走的人可能真吃到了那天、同一天真买了两件、真买了台冰箱 ——
+ * 写成「错了」会催人去改一笔本来对的账
+ */
+type ReviewItem = { key: string; id: number; entry: Entry | undefined; label: string; why: string }
+const reviewItems = computed<ReviewItem[]>(() => {
+  const r = bill.value?.is_draft ? bill.value.review : null
+  if (!r) return []
+  const byId = new Map(draftEntries.value.map((e) => [e.id, e]))
+  const item = (key: string, id: number, why: string): ReviewItem => {
+    const entry = byId.get(id)
+    return { key, id, entry, label: entry ? labelOfEntry(entry) : `#${id}`, why }
+  }
+  const out: ReviewItem[] = []
+  for (const g of r.membership_gaps) {
+    const m = meta.byId[g.member_id]
+    const name = nameOf(g.member_id)
+    out.push(
+      item(
+        `g${g.entry_id}-${g.member_id}`,
+        g.entry_id,
+        g.type === 'left_but_charged'
+          ? t('bill.reviewLeft', { name, date: m?.left_on ?? '', share: formatYen(g.share) })
+          : t('bill.reviewJoined', { name, date: m?.joined_on ?? '' }),
+      ),
+    )
+  }
+  // 一对拆成两行，各自点得进去 —— 要删也是人点进其中一笔去删，这儿不给「删掉重复」那种一键
+  const when = (id: number) => {
+    const e = byId.get(id)
+    return e ? `${e.date.slice(5)} · ${nameOf(e.payer_id)}` : `#${id}`
+  }
+  for (const d of r.possible_duplicates) {
+    out.push(item(`d${d.a}-${d.b}-a`, d.a, t('bill.reviewDuplicate', { other: when(d.b) })))
+    out.push(item(`d${d.a}-${d.b}-b`, d.b, t('bill.reviewDuplicate', { other: when(d.a) })))
+  }
+  // 只有偏大那一侧（后端 review.outliers）：偏小那侧在真实价位上全是 ¥98 的日用小件，吵到人不看这一块
+  for (const o of r.outliers) {
+    const median = formatYen(o.median)
+    out.push(item(`o${o.entry_id}`, o.entry_id, t('bill.reviewOutlierUp', { median, n: o.ratio })))
+  }
+  return out
+})
+
+/** 草稿头上那颗「上期结转变了」：去「已出账」看那一张 */
+function openDrift(id: number) {
+  bills.tab = 'current'
+  pickStatement(id)
+}
 
 /** 改完数据强制重取这一张。进页面用的是 ensure（缓存先上屏） */
 const load = () => bills.reload(viewKey.value)
@@ -713,6 +905,25 @@ const others = computed(() =>
   }),
 )
 
+/**
+ * 明细没拉全时还差几笔（拉全了是 0）。条件里带上「列表已经拉到上限」：
+ * 账单和明细是两个并发的请求，恰好有人在两者之间记了一笔，两边会差 1 —— 那不是没拉全
+ */
+const othersMissing = computed(() => {
+  const n = bill.value?.entry_count ?? 0
+  const got = draftEntries.value.length
+  return got >= BILL_ENTRY_LIMIT && n > got ? n - got : 0
+})
+/** 去流水看这一张的全部（草稿 ＝ 还没出账的那些，出过的 ＝ 这张单子上的） */
+function openAllEntries() {
+  const b = bill.value
+  if (!b) return
+  void router.push({
+    name: 'entries',
+    query: b.is_draft || b.statement_id === null ? { unbilled: '1' } : { statement: String(b.statement_id) },
+  })
+}
+
 // 一笔账长什么样，和流水页同一份（composables/entryLook）
 const {
   categoryOf: categoryOfEntry,
@@ -746,15 +957,13 @@ function textOf(b: Bill): string {
   // 被改过之后两者必然对不上。屏幕上有那颗「出账后改过」的签，
   // 而复制文本才是「大家手里那份」，不能只有屏幕上有
   if (b.edited_after_cut) {
-    lines.push(
-      b.edited_after_cut.from_earlier
-        ? t('bill.driftedFromEarlier')
-        : t('bill.editedAfterCut', {
-            n: b.edited_after_cut.count,
-            frozen: formatYen(b.edited_after_cut.frozen_total ?? 0),
-            live: formatYen(b.edited_after_cut.live_total),
-          }),
-    )
+    const e = b.edited_after_cut
+    lines.push(editedLine(b))
+    // 合计没变（只改了分摊）：「当初 ¥X，现在 ¥X」那句不写了，改成逐人写结余变成了多少 ——
+    // 发进群里的就是这份，而大家要照着转钱的正是每个人那一个数
+    const same = !e.from_earlier && e.frozen_total !== null && e.frozen_total === e.live_total
+    const moved = same ? movedText(b) : ''
+    if (moved) lines.push(moved)
   }
   lines.push('')
   for (const r of b.members) {
@@ -833,7 +1042,7 @@ function confirmReceived(tr: BillTransfer, index: number) {
     // 文本框 + 数字键盘，千分位和空格下面自己擦
     prompt: { model: left.toLocaleString('en-US'), type: 'text', inputmode: 'numeric' },
     cancel: true,
-  }).onOk(async (value: string) => {
+  }).onOk((value: string) => {
     if (fired) return
     fired = true
     // 千分位、全角、空格怎么认，见 parseTypedYen（「5000.00」那个坑也在那儿）
@@ -845,50 +1054,85 @@ function confirmReceived(tr: BillTransfer, index: number) {
       $q.notify({ type: 'warning', message: t('bill.doneNeedAmount'), timeout: 4000 })
       return
     }
-    busy.value = index
-    try {
-      // 转账发生在出账之后，所以它进的是**下一张**草稿 —— 这是对的：
-      // 账单是对「出账那一刻」的陈述，之后收到的钱属于下一轮。
-      // 但记账的入口留在这张单子上，因为方案就在这儿。
-      await ledger.confirmTransfer({
-        statement_id: statementId,
-        from_id: tr.from_id,
-        to_id: tr.to_id,
-        amount,
-        expect_left: left,
-        date: todayJst(),
+    // **比还差的多：再问一次。** 预填的就是还差多少，照方案走的人填的只会 ≤ 它；
+    // 多出来的多半是误触多了一位 ——「53,047」后面多按一个 0 成了「53,0470」，
+    // parseTypedYen 照样认成 530,470。照记的话余额当场翻向，卡片上只剩一个绿勾，事后看不出来。
+    // 不设阈值、不拦：判据就是 amount > left，正常流程一次都碰不到；真要多转（顺手预付）点确定就记
+    if (amount > left) {
+      busy.value = index          // 第二个框开着时，卡片上那颗按钮别再开出第一个框
+      let sure = false            // 第二个框的「确定」连点两下，同样只认第一下
+      $q.dialog({
+        title: t('bill.done'),
+        // 只陈述「比还差的多多少」，不说多出来的变成谁欠谁：left 会被冻结额卡住，同方向又欠了新钱时
+        // 多填的只是提前付了下一期；三个人时真超付了，倒过来欠的也常常是第三个人
+        message: t('bill.doneOver', {
+          amount: formatYen(amount),
+          left: formatYen(left),
+          over: formatYen(amount - left),
+        }),
+        cancel: true,
       })
-    } catch (e) {
-      // 有人刚记过这一笔（另一方也点了、或者另一台设备）：不重复记，
-      // 重取之后把「现在还差多少」说出来
-      if (e instanceof ApiError && e.code === 'transfer_changed') {
-        await load().catch(() => {})
-        const now = Number((e.detail as { left?: number } | undefined)?.left ?? 0)
-        $q.notify({
-          type: 'warning',
-          timeout: 5000,
-          message: now > 0 ? t('bill.transferChanged', { left: formatYen(now) }) : t('bill.transferDoneElsewhere'),
+        .onOk(() => {
+          if (sure) return
+          sure = true
+          void record(tr, amount, left, statementId, index)
         })
-      } else {
-        $q.notify({ type: 'negative', message: errorText(e) })
-      }
-      busy.value = null
+        .onCancel(() => {
+          busy.value = null
+          // 同一个坑：框关了、页面一个字不变，和「刚才没点上」一模一样 —— 说一句这次没记
+          $q.notify({ type: 'warning', message: t('bill.doneNotRecorded'), timeout: 4000 })
+        })
       return
     }
-    // **记上了就是记上了。** 后面那次重取失败（断网）不许报成「没记上」——
-    // 那样人会再按一次，又是一笔
-    $q.notify({
-      type: 'positive',
-      timeout: 3000,
-      message: t('bill.doneRecorded', {
-        from: nameOf(tr.from_id),
-        to: nameOf(tr.to_id),
-        amount: formatYen(amount),
-      }),
-    })
-    await load().catch(() => {})
-    busy.value = null
+    void record(tr, amount, left, statementId, index)
   })
+}
+
+/** 记下这一笔「已完成」。left 是**打开对话框时**看到的还差多少，后端拿它核（expect_left） */
+async function record(tr: BillTransfer, amount: number, left: number, statementId: number | null, index: number) {
+  busy.value = index
+  try {
+    // 转账发生在出账之后，所以它进的是**下一张**草稿 —— 这是对的：
+    // 账单是对「出账那一刻」的陈述，之后收到的钱属于下一轮。
+    // 但记账的入口留在这张单子上，因为方案就在这儿。
+    await ledger.confirmTransfer({
+      statement_id: statementId,
+      from_id: tr.from_id,
+      to_id: tr.to_id,
+      amount,
+      expect_left: left,
+      date: todayJst(),
+    })
+  } catch (e) {
+    // 有人刚记过这一笔（另一方也点了、或者另一台设备）：不重复记，
+    // 重取之后把「现在还差多少」说出来
+    if (e instanceof ApiError && e.code === 'transfer_changed') {
+      await load().catch(() => {})
+      const now = Number((e.detail as { left?: number } | undefined)?.left ?? 0)
+      $q.notify({
+        type: 'warning',
+        timeout: 5000,
+        message: now > 0 ? t('bill.transferChanged', { left: formatYen(now) }) : t('bill.transferDoneElsewhere'),
+      })
+    } else {
+      $q.notify({ type: 'negative', message: errorText(e) })
+    }
+    busy.value = null
+    return
+  }
+  // **记上了就是记上了。** 后面那次重取失败（断网）不许报成「没记上」——
+  // 那样人会再按一次，又是一笔
+  $q.notify({
+    type: 'positive',
+    timeout: 3000,
+    message: t('bill.doneRecorded', {
+      from: nameOf(tr.from_id),
+      to: nameOf(tr.to_id),
+      amount: formatYen(amount),
+    }),
+  })
+  await load().catch(() => {})
+  busy.value = null
 }
 
 /** 固定费面板。出账之前要先让它把没存完的存掉 */
@@ -916,15 +1160,46 @@ async function doCut() {
     cutting.value = false
     return
   }
+  // **弹框之前先重取。** 面板和账单都是缓存先上屏的：室友刚删了一项、刚记重了一笔、
+  // 刚有人出过账，这边一概不知（切回前台才重取，还有 30 秒节流）。确认框是出账前
+  // 最后一道人工核对，拿旧缓存拼出来的「还空着」「先按上期记上」等于替人看错了。
+  // 一次 /api/monthly 加一次草稿账单，手机上一两百毫秒；按钮已经在转圈占着锁。
+  // 取不到就别出账 —— 断网时出账本来也出不成
+  try {
+    bills.monthlyWritten()          // 别复用这之前发出去的那一发：它回来的可能是存之前的样子
+    await Promise.all([bills.loadMonthly('draft'), load()])
+  } catch (e) {
+    $q.notify({ type: 'negative', message: errorText(e) })
+    cutting.value = false
+    return
+  }
+  const b = bill.value
+  if (!b?.entry_count) {
+    // 重取之后草稿空了：刚被别人出掉了
+    $q.notify({ type: 'warning', message: t('errors.nothing_to_cut') })
+    cutting.value = false
+    return
+  }
+  // 弹框这一刻看到的最近一张。「先按上期记上」和出账都带着它回去：两台手机同时出账时，
+  // 后到的那台撞 409 bill_changed、什么都不动 —— 原来它会把房租再记一遍，多出一张只有房租的单子。
+  // 老后端不给这个字段就不带，行为和原来一样（core/cutHints.cutParams）
+  const after = cutParams(b.prev_statement_id)
   // 默认勾上＝这张单子把固定费也结了。不勾＝把固定费留在草稿里，只结日常那部分。
   // 刚出过账又出一张（后端按设置里的天数判定），固定费那轮还没到，默认就别带上 ——
   // 但得把理由写出来，不然框子自己跳成没勾会让人以为坏了。
-  const withMonthlyByDefault = bill.value?.suggest_monthly !== false
-  // 只有默认没勾上时才多说一句。Quasar 的对话框不认换行，要换行就得开 html
-  const gap = bill.value?.days_since_prev_cut ?? 0
+  const withMonthlyByDefault = b.suggest_monthly !== false
+  // 只有默认没勾上时才多说一句。Quasar 的对话框不认换行，要换行就得开 html。
+  // 开 html 只为换行（和灰字那一段的颜色），每一段都先转义：固定费的名字是用户起的，
+  // 带个 `<` 就会被当标签吞掉（见 src/html.ts）
+  const gap = b.days_since_prev_cut ?? 0
   const hints: string[] = []
+  const say = (text: string, cls?: string) =>
+    hints.push(cls ? `<span class="${cls}">${escapeHtml(text)}</span>` : escapeHtml(text))
+  // **这台手机上还有没补交的离线草稿**：出账之后补交，它们进的是下一张，群里那张就少了它们。
+  // 只劝先补交，不替人交、不拦 —— 响应丢在路上的那种其实已经记上了，「会进下一张」对它不成立
+  if (drafts.count) say(t('bill.cutPendingDrafts', { n: drafts.count }))
   if (!withMonthlyByDefault) {
-    hints.push(gap === 0 ? t('bill.monthlyOffHintToday') : t('bill.monthlyOffHint', { n: gap }))
+    say(gap === 0 ? t('bill.monthlyOffHintToday') : t('bill.monthlyOffHint', { n: gap }))
   }
   // **哪几项固定费还空着，出账前说一声。**
   // 电、气、水在日本是三张分开寄的账单，到得不齐是常态；漏一项就是这张单子
@@ -933,14 +1208,38 @@ async function doCut() {
   // 开了「和上期一样」、这期还没记的：出账这一步多给一个勾（默认勾上）替人按上期记上。
   // 这一步原来是打开账单页就自动做的，改成人点之后，忘了点就是房租按 0 出账 ——
   // 所以在出账这道门口再问一次，而不是只在上面列成一个空框
-  const carryable = (bills.monthly.draft?.rows ?? []).filter((r) => r.carry_amount && !r.amount)
-  const blank = (bills.monthly.draft?.rows ?? [])
-    .filter((r) => !r.archived && !r.amount && !r.carry_amount)
-    .map((r) => r.name)
-  if (blank.length) hints.push(t('bill.cutBlankFixed', { names: blank.join('、') }))
-  // 开 html 只为换行，每一段都先转义：固定费的名字是用户起的，
-  // 带个 `<` 就会被当标签吞掉（见 src/html.ts）
-  const hint = hints.map(escapeHtml).join('<br><br>')
+  const rows = bills.monthly.draft?.rows ?? []
+  const { carryable, due, waiting, multi } = cutRows(rows)
+  if (due.length) say(t('bill.cutBlankFixed', { names: due.map((r) => r.name).join('、') }))
+  // 隔几期才来一次、这期还没轮到的（隔月的水费）：**照样列出来**，只是灰字、只陈述事实。
+  // 节奏是从历史猜的，猜错了那笔真忘了的账单就按 0 出账 —— 所以不藏、也不说「这期本来没有」
+  if (waiting.length) {
+    const list = waiting.map((r) => t('bill.waitingItem', { name: r.name, n: r.typical_gap ?? 0 })).join('、')
+    // 前面没有「还空着」那句时（最常见：别的都填了、只剩隔月的水费）就别说「也」「同样」—— 没有可接的前文
+    say(due.length ? t('bill.cutBlankWaiting', { list }) : t('bill.cutBlankWaitingOnly', { list }), 'text-grey-7')
+  }
+  // 「别处可能记过」：草稿里记在日常分类、备注带着这一项名字的那几笔。只问「是不是它」——
+  // 不算已填、不取消照上期的勾（证据弱，子串匹配会配错）
+  for (const r of [...due, ...waiting, ...carryable]) {
+    const hits = (r.maybe_elsewhere ?? []).map(
+      (m) => `${m.category_name ?? t('kind.expense')}·${m.title} ${formatYen(m.amount)}`,
+    )
+    if (hits.length) say(t('bill.cutElsewhere', { name: r.name, list: hits.join('、') }))
+  }
+  // 本期同一项不止一笔：可能是两台手机各记了一遍，也可能真是两张账单 —— 只说一句
+  if (multi.length) {
+    say(t('bill.cutDupFixed', { list: multi.map((r) => t('bill.cutDupItem', { name: r.name, n: r.entry_count })).join('、') }))
+  }
+  // 账单页上那块「待核对」：出账前再提一句有几处（看不看由人）。数的和那块标题上的是同一个数
+  if (reviewItems.value.length) say(t('bill.cutReview', { n: reviewItems.value.length }))
+  const hint = hints.join('<br><br>')
+  // 「先按上期记上」那个勾上写出**记成谁垫的**：一笔房租记给错的人就是十几万的错。
+  // 照后端的 carry_payer_id 说（它就是照上期真会用的那个人），前端不自己推算
+  const carryText = (r: MonthlyRow) => {
+    const amount = formatYen(r.carry_amount ?? 0)
+    const payer = r.carry_payer_id == null ? '' : (meta.byId[r.carry_payer_id]?.display_name ?? '')
+    return payer ? t('monthly.carriedItem', { name: r.name, amount, payer }) : `${r.name} ${amount}`
+  }
   const dialog = $q.dialog({
     title: t('bill.cut'),
     message: hint ? `${escapeHtml(t('bill.cutConfirm'))}<br><br>${hint}` : t('bill.cutConfirm'),
@@ -955,9 +1254,7 @@ async function doCut() {
         { label: t('bill.includeMonthly'), value: 'monthly' },
         ...(carryable.length
           ? [{
-              label: t('bill.cutCarry', {
-                list: carryable.map((r) => `${r.name} ${formatYen(r.carry_amount ?? 0)}`).join('、'),
-              }),
+              label: t('bill.cutCarry', { list: carryable.map(carryText).join('、') }),
               value: 'carry',
             }]
           : []),
@@ -971,22 +1268,23 @@ async function doCut() {
     fired = true
     try {
       if (picked.includes('carry')) {
-        // 先记上再出账。记不上（断网、后端出错）就整个停下：
-        // 带着一个空的房租把账单出掉，比晚一步出账糟糕得多
-        const { failed } = await api.post<{ failed: { name: string }[] }>('/api/monthly/carry', {
+        // 先记上再出账。**没全记上就整个停下**：带着一个空的房租把账单出掉，比晚一步出账糟糕得多。
+        // 原来只拦了异常：carry 回一句 failed（垫付人刚被标搬走、上期有好几笔）照样出账，
+        // 房租按 0 冻结进一张已经发出去的单子。后端静默跳过的（刚被关掉「和上期一样」、
+        // 刚归档）连 failed 都不进 —— 所以逐项对，不只看 failed（core/cutHints.shouldStopAfterCarry）
+        const { created, failed } = await api.post<CarryResult>('/api/monthly/carry', {
           category_ids: carryable.map((r) => r.category_id),
+          ...after.carry,
         })
         bills.monthlyWritten()
-        if (failed.length) {
-          $q.notify({
-            type: 'warning',
-            timeout: 8000,
-            message: t('monthly.carryFailed', { list: failed.map((f) => f.name).join('、') }),
-          })
+        const carried = shouldStopAfterCarry(carryable, created, failed)
+        if (carried.stop) {
+          stopAfterCarry(carried.skipped, created, failed)
+          return
         }
       }
       const withMonthly = picked.includes('monthly')
-      const st = await api.post<Statement>(`/api/statements?include_monthly=${withMonthly}`)
+      const st = await api.post<Statement>(`/api/statements?include_monthly=${withMonthly}${after.query}`)
       // 出完账立刻把「谁给谁多少」摆出来 —— 这是出账之后马上要做的事，
       // 不该让人再自己翻回去找
       const cut = await api.get<Bill>(`/api/statements/${st.id}/bill`)
@@ -1004,6 +1302,8 @@ async function doCut() {
       // 出完账不刷新的话它还是出账前的旧值，锁就形同虚设
       await ledger.refresh().catch(() => {})
     } catch (e) {
+      // 409 bill_changed（刚有人在别的手机上出过账）也走这儿：什么都没动，重取之后
+      // 草稿多半空了、按钮自己灰掉；还有新账的话人看过新的再点
       $q.notify({ type: 'negative', message: errorText(e) })
       // 半路失败时服务器那边可能已经动过了（「先按上期记上」记进去了、出账出了、
       // 只是后面那个取数断了）。不重取的话面板上房租还是空框，人再填一遍就是两笔
@@ -1014,6 +1314,31 @@ async function doCut() {
       cutting.value = false
     }
   })
+}
+
+/**
+ * 「先按上期记上」没全记上：停下、**不出账**，把面板和草稿重取一遍，让那一行自己说为什么
+ * （「人变了，要重填」「上期有好几笔，要自己填」）。已经记上的那几笔留在草稿里，重取之后看得见；
+ * 再点出账时后端认得它们已经处理过，不会再记一遍
+ */
+function stopAfterCarry(skipped: MonthlyRow[], created: CarryResult['created'], failed: CarryResult['failed']) {
+  const lines: string[] = []
+  const multi = failed.filter((f) => f.reason === 'last_multi')
+  const other = failed.filter((f) => f.reason !== 'last_multi')
+  if (other.length) lines.push(t('monthly.carryFailed', { list: other.map((f) => f.name).join('、') }))
+  if (multi.length) lines.push(t('monthly.carryFailedMulti', { list: multi.map((f) => f.name).join('、') }))
+  if (skipped.length) lines.push(t('bill.cutCarrySkipped', { list: skipped.map((r) => r.name).join('、') }))
+  lines.push(t('bill.cutStopped'))
+  $q.notify({
+    type: 'warning',
+    timeout: 10000,
+    multiLine: true,
+    html: true,
+    message: lines.map(escapeHtml).join('<br>'),
+  })
+  void bills.loadMonthly('draft').catch(() => {})
+  void load().catch(() => {})
+  if (created.length) void ledger.refresh().catch(() => {})
 }
 </script>
 
@@ -1096,7 +1421,24 @@ async function doCut() {
 }
 .chip.ok { background: color-mix(in srgb, var(--nagaya-pos) 14%, transparent); color: var(--nagaya-pos); }
 .chip.warn { background: var(--nagaya-warn-bg); color: var(--nagaya-warn); }
-.chip.edited { cursor: pointer; }
+.chip.edited,
+.chip.drift { cursor: pointer; }
+/* 「还有 N 笔没列出 ›」、「是这几张单子」：一行能点的小字，看着是链接不是按钮 */
+.more-link {
+  display: inline-block;
+  border: none;
+  background: none;
+  padding: 4px 0;
+  margin-right: 12px;
+  font-family: inherit;
+  font-size: var(--nagaya-fs-meta);
+  color: var(--nagaya-accent);
+  text-align: left;
+  cursor: pointer;
+}
+/* 待核对那几行「为什么要看一眼」：琥珀色（要人注意），不用红 —— 不是错，是请人核对 */
+.review-why { color: var(--nagaya-warn); white-space: normal; }
+.edited-member { font-size: var(--nagaya-fs-meta); line-height: 1.6; }
 /* 标题当按钮用，但看着还得是标题。
    **只中和浏览器给 button 的默认字体族**，别写 `font: inherit` */
 .pick {

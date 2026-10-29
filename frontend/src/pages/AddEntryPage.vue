@@ -261,10 +261,13 @@ import { digitsOf } from 'src/digits'
 import { isSubmitEnter } from 'src/html'
 import { formatYen } from 'src/i18n'
 import { statementLabel } from 'src/statement'
-import type { Entry, EntryKind, EntryPayload, Member } from 'src/api/types'
+import type { Bill, BillTransfer, Entry, EntryKind, EntryPayload, Member } from 'src/api/types'
 import AmountInput from 'src/components/AmountInput.vue'
-import { useEntryLook } from 'src/composables/entryLook'
+import { useSavedNotice } from 'src/composables/savedNotice'
+import { payerAbsence, recentTwin, transferDoubt } from 'src/core/entryChecks'
 import { helpBuyFor } from 'src/core/helpBuy'
+import { sendConfirmingJump } from 'src/core/entryEdit'
+import { jumpFactor } from 'src/core/monthlyRows'
 import MemberPicker from 'src/components/MemberPicker.vue'
 import MemoPanel from 'src/components/MemoPanel.vue'
 import SplitEditor from 'src/components/SplitEditor.vue'
@@ -284,7 +287,7 @@ const ledger = useLedger()
 const nav = useNav()
 const drafts = useDrafts()
 const auth = useAuth()
-const { labelOf } = useEntryLook()
+const { notifySaved } = useSavedNotice()
 
 /** 改一笔已有的账时，类型是那笔账自己的 —— 不能去动记新账那边存着的选择 */
 const editKind = ref<EntryKind>('expense')
@@ -634,7 +637,11 @@ async function saveEdit() {
   busy.value = true
   try {
     if (!isHelpBuy.value && !(await ensureCategory())) return
-    await ledger.update(editingId.value, version.value, isHelpBuy.value ? helpBuyBody() : {
+    // 只在付款人或日期真改了时问：left_on 常常是事后补标的，原样打开一笔老账再存不该被拦着问
+    const before = loaded.value
+    if ((!before || before.payer_id !== payerId.value || before.date !== date.value) && !(await payerHereOk())) return
+    const id = editingId.value
+    const body: Partial<EntryPayload> = isHelpBuy.value ? helpBuyBody() : {
       kind: kind.value,
       date: date.value,
       amount_jpy: signedAmount.value,
@@ -646,7 +653,11 @@ async function saveEdit() {
       // 的判据：换过分类又换回来、支出改收入、改过余数设置 …… 那套判据前端总有
       // 一处对不上，屏幕上的分摊和存下去的就成了两回事
       rule: kind.value === 'settlement' ? null : (rule.value ?? splitEl.value?.currentRule() ?? null),
-    })
+    }
+    // **固定费撞上量级闸**（和上期差出好几倍）：不是存失败，是要人确认一句（core/entryEdit）。
+    // 点「回去改」＝什么都没写，留在这一页
+    const saved = await sendConfirmingJump((extra) => ledger.update(id, version.value, { ...body, ...extra }), confirmJump)
+    if (saved === null) return
     // 改上了就是改上了：后面这次刷新失败（断网）不许报成「没存上」
     await ledger.refresh().catch(() => {})
     $q.notify({ type: 'positive', message: t('entry.saved'), timeout: 1200 })
@@ -665,6 +676,27 @@ async function saveEdit() {
   } finally {
     busy.value = false
   }
+}
+
+/**
+ * 量级闸问一句「真是这个数？」—— 和固定费面板（MonthlyFixed.confirmJump）同一个框、同一套话。
+ * 倍数是后端拿本期这一项的合计和上次出账时的比出来的。点空白处关掉＝回去改
+ */
+function confirmJump(jump: { ratio?: unknown; direction?: unknown }): Promise<boolean> {
+  const n = jumpFactor(jump.ratio)
+  const down = jump.direction === undefined ? Number(jump.ratio) < 1 : jump.direction === 'down'
+  const name = (categoryId.value === null ? undefined : meta.categoryById[categoryId.value]?.name) ?? ''
+  const p = { name, amount: formatYen(Math.abs(signedAmount.value)), n }
+  const message = n === null ? t('errors.amount_jump') : down ? t('monthly.jumpDown', p) : t('monthly.jumpUp', p)
+  return new Promise((resolve) => {
+    $q.dialog({
+      message,
+      ok: { label: t('monthly.jumpOk'), flat: true },
+      cancel: { label: t('monthly.jumpFix'), flat: true },
+    })
+      .onOk(() => resolve(true))
+      .onCancel(() => resolve(false))
+  })
 }
 
 /**
@@ -902,6 +934,9 @@ async function save() {
       title: title.value,
       rule: kind.value === 'settlement' ? null : rule.value,
     }
+    // 存之前多问一句的那几条：都只问、默认按钮是「照记」，取消就回表单（填的一个字不动）
+    if (!(await payerHereOk())) return
+    if (kind.value === 'settlement' && !isHelpBuy.value && !(await transferOk(body))) return
     const payload = {
       ...body,
       // 响应丢在路上时这笔会转成离线草稿，补交带着同一个键 —— 后端认得出，不记第二遍。
@@ -917,7 +952,13 @@ async function save() {
       // 只有「连不上服务器」才转存草稿。金额方向错、账期已关这类是**服务器明确拒绝**，
       // 存成草稿只会让人以后反复补交同一笔失败的账（D15）
       if (e instanceof ApiError && e.code === 'network') {
-        drafts.add(payload, auth.me?.id ?? null)
+        // **本机也存不进去**（站点存储被整个禁用）：别说「先存在本地了」、别清表单 ——
+        // 那一笔只会活在内存里，切到后台被杀掉就没了。表单原样留着（幂等键也不换），
+        // 有网了再点一次「记入账」就是这一笔
+        if (!drafts.add(payload, auth.me?.id ?? null)) {
+          $q.notify({ type: 'negative', message: t('draft.notStored'), timeout: 6000 })
+          return
+        }
         $q.notify({ type: 'warning', message: t('draft.savedOffline'), timeout: 2500 })
         reset()
       } else {
@@ -934,33 +975,115 @@ async function save() {
 }
 
 /**
- * 记下了。**说清记的是哪一笔，并给一次后悔的机会。**
- *
- * 原来只有一句「已记下」、1.2 秒就没了：连着录一串小票时，点错分类、多打一个 0，
- * 要翻去流水里找出来再删。现在提示里写着「日用 ¥1,234」，旁边就是「撤销」——
- * 撤销走的是软删（和编辑页的删除同一条路），流水和账单缓存一并刷新
+ * 问一句、等人答：「照记」→ true，「回去改」（或点框外）→ false。
+ * 默认按钮是「照记」—— 这几条都是弱证据（预付、拖了一轮再还、搬走的人回来还钱都正当），
+ * 只是让人看一眼，不该把正常的账拦在门外
  */
-function notifySaved(saved: Entry) {
-  const what = labelOf(saved)   // 和流水同一套名字：备注 → 「替 Kan 买」→ 分类 → 类型
-  $q.notify({
-    type: 'positive',
-    message: t('entry.savedWhat', { what, amount: formatYen(Math.abs(saved.amount_jpy)) }),
-    timeout: 3500,
-    actions: [
-      {
-        label: t('common.undo'),
-        color: 'white',
-        handler: async () => {
-          try {
-            await ledger.remove(saved)
-            $q.notify({ type: 'info', message: t('entry.undone'), timeout: 1500 })
-          } catch (e) {
-            $q.notify({ type: 'negative', message: errorText(e) })
-          }
-        },
-      },
-    ],
+function ask(message: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    $q.dialog({
+      title: t('entry.checkTitle'),
+      message,
+      ok: { label: t('entry.recordAnyway'), unelevated: true, noCaps: true },
+      cancel: { label: t('entry.goBackEdit'), flat: true, noCaps: true },
+      focus: 'ok',
+    })
+      .onOk(() => resolve(true))
+      .onCancel(() => resolve(false))
   })
+}
+
+/**
+ * 付款人在这笔的日期当天住不住这儿。后端照收：搬走的人那天之后垫的钱，另外两个人要全担 ——
+ * 多半是搬走的人自己的手机默认填了自己，或者日期点错了一年。
+ * 只管支出 / 收入（帮买存下去也是支出）。**转账不问**：搬走的人回来把最后那笔还清是常事。
+ * **固定费不问**：出账时日期统一盖成出账日（D30），月中搬走的人交的房租在结构上必然「不在籍」
+ */
+async function payerHereOk(): Promise<boolean> {
+  if (payerId.value === null) return true
+  if (kind.value === 'settlement' && !isHelpBuy.value) return true
+  if (categoryId.value !== null && meta.categoryById[categoryId.value]?.monthly) return true
+  const m = meta.byId[payerId.value]
+  const away = m ? payerAbsence(m, date.value) : null
+  if (!m || away === null) return true
+  return ask(
+    away === 'left'
+      ? t('entry.payerLeft', { name: m.display_name, left: m.left_on ?? '', date: date.value })
+      : t('entry.payerNotYet', { name: m.display_name, joined: m.joined_on, date: date.value }),
+  )
+}
+
+/**
+ * 记一笔转账前的两条核对（帮买不走这儿，账单上「确认已完成」那条路也不走 —— 那边后端在锁里核过）：
+ *
+ * 1. **刚才是不是有人记过一模一样的**（同一对人、同金额，duplicate_transfer_hours 小时内）。
+ *    收款人在账单上点了「确认已完成」、付款人又在这儿记一次，两笔都进账，余额动两倍。
+ *    看的是本机的流水（ledger.entries）；离线草稿补交不走这儿 —— 那时问了也没人答。
+ * 2. **方向和量级**：照此刻的余额和此刻的方案（现取 /api/balances 和草稿账单 /api/bill；
+ *    余额取不到就不问 —— 拿缓存的旧数提示，说的数字可能早就不对了；方案取不到就只看余额）。
+ *    付款人是被欠钱的那个、收款人是欠钱的那个、方案里也没有这一对：方向多半记反了；
+ *    比付款人此刻欠的、方案里这一对的额（取大的）多出 transfer_check_tolerance 以上：
+ *    多打了一个 0，或者是预付。关掉「算最少转账」时照方案付的那几笔不该被问（见 transferDoubt）。
+ * 都只问一句，措辞是「方向对吗」而不是「方向错了」：Go 借现金给 Kan 也长这样
+ */
+async function transferOk(body: EntryPayload): Promise<boolean> {
+  const name = (id: number | null | undefined) => (id == null ? '' : (meta.byId[id]?.display_name ?? String(id)))
+  const twin = recentTwin(ledger.entries, {
+    payer_id: body.payer_id,
+    to_member_id: body.to_member_id ?? null,
+    amount_jpy: body.amount_jpy,
+  }, meta.setting<number>('duplicate_transfer_hours', 48))
+  if (twin) {
+    const by = twin.created_by === null ? '' : name(twin.created_by)
+    const ok = await ask(
+      t('entry.checkTwin', {
+        by: by || t('entry.someone'),
+        from: name(twin.payer_id),
+        to: name(twin.to_member_id),
+        amount: formatYen(twin.amount_jpy),
+        date: twin.date.slice(5),
+      }),
+    )
+    if (!ok) return false
+  }
+  // 明知断网就别去取（取不到也要等它报错）：这一笔马上要转成离线草稿，别挡着它
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true
+  let balances: Record<string, number>
+  let plan: BillTransfer[]
+  try {
+    const [bal, draft] = await Promise.all([
+      api.get<{ balances: Record<string, number> }>('/api/balances'),
+      // 草稿账单的 transfers 就是「此刻方案」（全部流水、按此刻的「算最少转账」设置算）
+      api.get<Bill>('/api/bill').catch(() => null),
+    ])
+    balances = bal.balances
+    plan = draft?.transfers ?? []
+  } catch {
+    return true
+  }
+  const toId = body.to_member_id ?? -1
+  const doubt = transferDoubt(
+    balances,
+    body.payer_id,
+    toId,
+    body.amount_jpy,
+    meta.setting<number>('transfer_check_tolerance', 1000),
+    plan.find((x) => x.from_id === body.payer_id && x.to_id === toId)?.amount ?? 0,
+  )
+  if (!doubt) return true
+  const from = name(body.payer_id)
+  const to = name(body.to_member_id)
+  return ask(
+    doubt.kind === 'direction'
+      ? t('entry.checkDirection', {
+          from,
+          to,
+          owed: formatYen(doubt.payerOwed),
+          owes: formatYen(doubt.toOwes),
+          amount: formatYen(body.amount_jpy),
+        })
+      : t('entry.checkOver', { from, owe: formatYen(doubt.owe), over: formatYen(doubt.over) }),
+  )
 }
 
 /** 这一笔的幂等键：内容没变就沿用（重试），变了就换新的（见 save 里那段） */

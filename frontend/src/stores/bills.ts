@@ -16,7 +16,7 @@
  * 缓存的是钱，所以规矩是「可以旧一个来回，不能旧一整屏」：每次进页面必发请求。
  */
 import { defineStore } from 'pinia'
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 import { api, errorText } from 'src/api/client'
 import type { Bill, Entry, MonthlyData, Statement } from 'src/api/types'
@@ -32,6 +32,13 @@ export type BillKey = 'draft' | 'current' | `st:${number}`
 /** 两个页签。**它们是同一个地址上的状态**，点页签不改 URL、不走路由。
     出过的单子不再单独占一页 —— 全在「已出账」里，点标题那个名字翻 */
 export type BillTab = 'draft' | 'current'
+
+/**
+ * 账单页的明细一次拉多少笔（后端上限）。原来是 200：一期超过 200 笔时「本期其他」
+ * 悄悄少列最早那几十笔，头卡片的笔数和合计却是全量的。拉满了还对不上，
+ * BillView 在列表底下说「还有 N 笔没列出」
+ */
+export const BILL_ENTRY_LIMIT = 1000
 const TAB_STORE_KEY = 'nagaya.billTab'
 
 const DETAIL_KEY = 'nagaya.billDetail'
@@ -92,10 +99,25 @@ export const useBills = defineStore('bills', () => {
   /** 在飞的请求数。为 0 且没数据，才敢说「这儿是空的」 */
   const pending = ref(0)
   /**
-   * 上一次取数失败的原因。**「取不到」和「没有」是两件事** ——
+   * 取数失败的原因，**按缓存 key 记**（'draft' / 'st:N'；单子列表都没取到、认不出
+   * 'current' 是哪一张时记在 'current' 上）。**「取不到」和「没有」是两件事** ——
    * 少了它，断网时账单页会说「这屋里还没出过账」，那是句假话。
+   *
+   * 原来是一个全局的 lastError，**哪个槽取成功都把它清掉**：屏幕上那张（st:5）快速失败
+   * （连接被重置、服务器重启时的 502），随后后台的 'draft' 或 'current' 校正成功，
+   * 离线细带就消失了，屏幕上那张其实还是旧数；没有缓存时（点开群里贴的 /bill/5）
+   * 还会说「还没有账目」，而不是报错加重试。现在谁成功只清谁自己那一格
    */
-  const lastError = ref<string | null>(null)
+  const errors = ref<Record<string, string>>({})
+  /** 屏幕上正在看的那一张有没有取数失败。账单页的空态和顶上的离线细带都看它 */
+  const lastError = computed<string | null>(() => {
+    const e = errors.value
+    if (tab.value === 'draft') return e.draft ?? null
+    if (detail.value !== null) return e[`st:${detail.value}`] ?? null
+    // 「已出账」的最近那张：'current' 和 'st:N' 写的是同一份缓存，两头记的都算
+    const ck = cacheKey('current')
+    return (ck !== null ? e[ck] : undefined) ?? e.current ?? null
+  })
   const inflight = new Map<string, Promise<void>>()
   /**
    * 每个槽位发出去的第几发。用来认「我是不是已经过时了」——
@@ -166,8 +188,8 @@ export const useBills = defineStore('bills', () => {
       api.get<Bill>(id === null ? '/api/bill' : `/api/statements/${id}/bill`),
       api.get<Entry[]>(
         id === null
-          ? '/api/entries?unbilled_only=true&limit=200'
-          : `/api/entries?statement_id=${id}&limit=200`,
+          ? `/api/entries?unbilled_only=true&limit=${BILL_ENTRY_LIMIT}`
+          : `/api/entries?statement_id=${id}&limit=${BILL_ENTRY_LIMIT}`,
       ),
     ])
     // 我不是这个槽位上最新的那一发了 —— 别把旧数据盖回去。
@@ -202,10 +224,11 @@ export const useBills = defineStore('bills', () => {
     pending.value += 1
     const task = fetchView(key, slot, my, generation)
       .then(() => {
-        lastError.value = null
+        // 已经被同一个槽上更新的一发顶替了：成没成都不算数，交给新的那一发
+        if (seq.get(slot) === my) clearError(slot, key)
       })
       .catch((e: unknown) => {
-        lastError.value = errorText(e)
+        if (seq.get(slot) === my) errors.value = { ...errors.value, [cacheKey(key) ?? slot]: errorText(e) }
         throw e
       })
       .finally(() => {
@@ -214,6 +237,19 @@ export const useBills = defineStore('bills', () => {
       })
     inflight.set(slot, task)
     return task
+  }
+
+  /**
+   * 这一槽取成了：清掉它自己那一格，别的槽的报错不碰。'current' 成功顺带清它落到的那张
+   * （'st:N'）—— 两个槽写同一份缓存，一边取成了，屏幕上那张就是新的
+   */
+  function clearError(slot: string, key: BillKey): void {
+    const ck = cacheKey(key)
+    const stale = [slot, ck].filter((k): k is string => k !== null && k in errors.value)
+    if (!stale.length) return
+    const next = { ...errors.value }
+    for (const k of stale) delete next[k]
+    errors.value = next
   }
 
   /** 进页面调它：有缓存立刻返回（请求照发，在后台校正），没缓存才需要等 */
@@ -230,7 +266,7 @@ export const useBills = defineStore('bills', () => {
   const reload = (key: BillKey) => run(key, true)
 
   /**
-   * 固定费面板每存成一笔（或者「照上期」记了几笔）就加一。
+   * 固定费面板每存成一笔（或者「照上期」记了几笔、改了谁垫的、开了「和上期一样」）就加一。
    * 在这之前发出去的 /monthly，回来的是**存之前**的样子：照写的话刚存好的那一行
    * 变回空框、「照上期」又冒出来，人再填一遍就是同一项两笔
    */
@@ -261,8 +297,12 @@ export const useBills = defineStore('bills', () => {
     const d = await api.get<MonthlyData>(
       ck === 'draft' ? '/api/monthly' : `/api/monthly?statement_id=${ck.slice(3)}`,
     )
-    // 我出发之后面板存过：这份是旧的。缓存里那份（面板存的时候已经跟着改了）才是对的
-    if (stamp !== monthlyStamp) return monthly.value[ck] ?? d
+    // 我出发之后面板存过：这份是旧的，**再取一次**（和 ledger.refresh 同一个写法），
+    // 直到这期间没人写过为止。原来是把缓存那份还回去，指望面板存的时候已经就地改好了 ——
+    // 可「照上期」不改缓存里的行（POST /carry 不回 entry_id/version）：照上期之后另一行恰好存完，刚记上的那行
+    // 就画回空框、按钮又亮着，人照着空框再填一遍，同一项就是两笔（还不报重复，
+    // entry_count 也是旧的）。新的这一发在那次写入之后才出门，两边的改动都在里头
+    if (stamp !== monthlyStamp) return loadMonthly(ck)
     // 和账单那边同一条规矩：出账之前发出去的这一发，回来的是已经归进新单子的
     // 那批固定费。写进去的话，「未出账」那页会把它们当本期草稿画出来，还可点可改
     if (gen === generation) monthly.value = { ...monthly.value, [ck]: d }
@@ -309,6 +349,7 @@ export const useBills = defineStore('bills', () => {
     statementsTask = null
     views.value = {}
     written.clear()          // 缓存都丢了，「谁写过它」的记录也跟着作废
+    errors.value = {}
     monthly.value = {}
     statements.value = null
     detail.value = null

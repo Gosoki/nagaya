@@ -1599,6 +1599,16 @@ test('出账后改一笔：那张账单要打出「被改过」，而且复制�
   await page.request.patch(`/api/entries/${mine.id}?version=${mine.version}`,
     { headers, data: { amount_jpy: 9_000 } })
 
+  // 剪贴板换成替身：复制出去的字存进 window.__copied。原来是复制完再 readText 读回来，
+  // 可 WebKit 下 readText 一律 NotAllowedError —— 断言写成了 `if (text)`，于是这条从来没真断过
+  await page.addInitScript(() => {
+    const w = window as unknown as { __copied: string[] }
+    w.__copied = []
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: async (s: string) => void w.__copied.push(s) },
+    })
+  })
   await page.goto('/bill')
   await page.getByRole('tab', { name: '已出账' }).click()
   await expect(page.locator('.head .pick')).toContainText(st.label)
@@ -1616,8 +1626,10 @@ test('出账后改一笔：那张账单要打出「被改过」，而且复制�
 
   // 复制出去的那份才是「用户手里那份」，屏幕上有的它也得有
   await page.getByRole('button', { name: '复制账单' }).click()
-  const text = await page.evaluate(() => navigator.clipboard.readText().catch(() => ''))
-  if (text) expect(text, '复制文本里也要说明这张被改过').toContain('出账后被改过')
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __copied?: string[] }).__copied?.at(-1) ?? ''),
+      { message: '复制文本里也要说明这张被改过' })
+    .toContain('出账后被改过')
 })
 
 test('帮买：转账页里点亮开关，记成只算那个人的支出；再点灭就变回转账', async ({ page }) => {

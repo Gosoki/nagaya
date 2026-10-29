@@ -56,7 +56,15 @@
         <!-- 不能再用 receipt_long：和旁边「账单」的 receipt 长得几乎一样，
              三格底栏里两格一个样，只能靠位置认；而这一格底下装的是
              流水＋设置，跟「小票」也不是一回事 -->
-        <q-tab name="entries" icon="format_list_bulleted" :label="t('nav.entries')" @click="go('entries')" />
+        <!-- 红点 ＝ 备份出问题了（meta.backupAlert）。备份的状态原来只在「更多 → 设置 → 备份」
+             那一块看得见，平时没人会去看 -->
+        <q-tab
+          name="entries"
+          icon="format_list_bulleted"
+          :label="t('nav.entries')"
+          :alert="meta.backupAlert ? 'negative' : false"
+          @click="go('entries')"
+        />
       </q-tabs>
     </q-footer>
     <!-- 布局诊断条：设置页版本号连点 5 下才会出现，平时不渲染 -->
@@ -161,7 +169,7 @@ async function boot() {
   // 原来要等 /auth/me 回来、再等成员三件回来才画 —— 两个来回的白转圈；服务器够不着
   // （手机流量下连家里的局域网地址）时一直转到系统放弃连接
   if (auth.useCached() && meta.useCached()) {
-    void Promise.allSettled([auth.restore(), meta.load(), ledger.refresh(), syncPrefs(true)])
+    void Promise.allSettled([auth.restore(), meta.load(), ledger.refresh(), syncPrefs(true), meta.loadBackupAlert()])
     return
   }
   try {
@@ -173,6 +181,7 @@ async function boot() {
   }
   // 深浅色、主题色：别的设备上可能改过。首帧已经按本机缓存上过色了，不用等它
   void syncPrefs(true).catch(() => {})
+  void meta.loadBackupAlert()
   // 账本刷新失败**不该挡住界面**：离线时照样要能把这一笔填完存成草稿
   try {
     await ledger.refresh()
@@ -196,31 +205,10 @@ function refetch() {
   void ledger.refresh().catch(() => {})
 }
 
-/**
- * 底栏到底多高，**量出来，别算**。
- *
- * 固定操作条（记一笔的「记入账」、账单的「出账单」）要正好压在底栏上沿。
- * 原来是 `calc(常数 57px + env(safe-area-inset-bottom))` —— 两处假设，
- * 任何一处不成立就会在两条之间留一道缝，而缝里会有内容滚过去：
- *   * 57 这个常数曾经写成 50，主按钮和 Tab 只隔 1px（注释里还留着这段）；
- *   * 字体放大、或者安全区在某些机型/显示模式下没算进底栏的 padding，
- *     两边对 env() 的理解就不一致了。
- * 量一次就都没有了：拿到的 height 本来就含它自己的安全区内边距。
- */
+/** 底栏。只给 remeasure() 做冷启动那一下的重排用（操作条画在底栏里之后，它的高度已经没人读了） */
 const footEl = ref<{ $el: HTMLElement } | null>(null)
 const headEl = ref<{ $el: HTMLElement } | null>(null)
-let footWatch: ResizeObserver | null = null
 let headWatch: ResizeObserver | null = null
-
-function measureFooter() {
-  const el = footEl.value?.$el
-  if (!el) return
-  // **向下取整**。真实高度常常带小数（安全区一掺进来就有），四舍五入可能比真值
-  // 大半像素 —— 固定操作条就被顶高那么一点，和底栏之间露出一条发丝缝，
-  // 而缝里是正在滚的内容。宁可小一点：小了是压在底栏底下（它 z-index 2000，盖得住）
-  const h = Math.floor(el.getBoundingClientRect().height)
-  if (h > 0) document.documentElement.style.setProperty('--nagaya-footer-h', `${h}px`)
-}
 
 /**
  * 顶栏的真实高度（含刘海安全区）。它随页面变：记一笔那屏只有安全区，
@@ -321,7 +309,6 @@ function remeasure() {
     void el.offsetHeight
     el.style.position = ''
   }
-  measureFooter()
   measureHeader()
 }
 
@@ -343,17 +330,12 @@ onMounted(() => {
   document.addEventListener('touchstart', onTouchStart, { passive: true })
   document.addEventListener('touchmove', onTouchMove, { passive: true })
   if (typeof ResizeObserver === 'undefined') return
-  if (footEl.value?.$el) {
-    footWatch = new ResizeObserver(measureFooter)
-    footWatch.observe(footEl.value.$el)
-  }
   if (headEl.value?.$el) {
     headWatch = new ResizeObserver(measureHeader)
     headWatch.observe(headEl.value.$el)
   }
 })
 onBeforeUnmount(() => {
-  footWatch?.disconnect()
   headWatch?.disconnect()
   window.removeEventListener('load', remeasure)
   window.removeEventListener('resize', remeasure)
@@ -415,6 +397,8 @@ function onVisible() {
   // 一直要到整页刷新才看得到
   void ledger.refresh().catch(() => {})
   bills.refreshViews()
+  // 备份是挂在后台那几天里停的：切回来顺手再问一次，红点该亮就亮、修好了就灭
+  void meta.loadBackupAlert()
 }
 
 onMounted(() => {
@@ -424,17 +408,9 @@ onMounted(() => {
 onBeforeUnmount(() => document.removeEventListener('visibilitychange', onVisible))
 </script>
 
-<!-- 非 scoped：底栏高度给固定操作条用。
-     两个页面都曾把它写死成 50px，而实际是 57px（56 tabs + 1 border），
-     于是主操作按钮和 Tab 只隔 1px，拇指偏一点就点错。 -->
+<!-- 非 scoped：全局 :root 布局变量，和几屏共用的布局类 -->
 <style>
 :root {
-  /* 底栏真实高度（**含安全区**）。挂载后由 measureFooter() 量出真值写回来，
-     这里是**首帧的兜底**。
-     兜底值必须自己把安全区算进去：写死 57 的话，首帧那一下固定操作条会按
-     57 摆，而带 home indicator 的机器上底栏是 57+34 —— 操作条整条沉到底栏
-     底下，只露出一条边。「第一次进应用下面凸起来」就是它 */
-  --nagaya-footer-h: calc(62px + env(safe-area-inset-bottom));   /* 导航那一条 62（skin.css） */
   /* 手机是主场。平板/电脑上不收一下的话，列表会被拉成「名字贴最左、
      数字贴最右」中间一片空白 —— 收到一个手机宽度居中，全站一致 */
   --nagaya-max-w: 480px;

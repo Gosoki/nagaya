@@ -19,8 +19,9 @@ export const useLedger = defineStore('ledger', () => {
   const prevCutAt = ref<string | null>(null)
   /**
    * 账目是一次性拉这么多笔。筛选和合计都在前端算，所以**拉少了就筛不全**。
-   * 三个人按种子数据的速率大约每年一百笔，500 笔够五年 —— 到那天不能让合计
-   * 悄悄少算，得先说出来。truncated 就是「还有更早的没拉到」
+   * 种子数据是功能演示（每月只有三笔日常），拿它算速率会说成「500 笔够五年」；按「日用品天天有」
+   * 每天约一笔算，500 笔大约够一年 —— 到那天不能让合计悄悄少算，得先说出来。
+   * truncated 就是「还有更早的没拉到」
    */
   const LIMIT = 500
   const truncated = ref(false)

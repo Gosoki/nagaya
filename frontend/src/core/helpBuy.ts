@@ -6,7 +6,8 @@
  * 编辑时停回转账页并把开关点亮。
  * **固定费不算**（fixedCost：这笔挂在固定费分类上）：「Kan 的车位」从 Go 卡上扣，形状一样，
  * 但它在账单的固定费那块已经列着，再认成帮买就是同一笔钱说两遍。
- * **后端 services/bill.help_buy_for 是同一条规则**，改一边要改另一边（各有单测钉着）。
+ * **后端 services/bill.help_buy_for 是同一条规则**，两边跑同一份用例（tests/fixtures/help_buy_cases.json）：
+ * 改规则先加用例，再改两边。
  */
 import type { Entry } from 'src/api/types'
 

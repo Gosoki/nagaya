@@ -29,6 +29,12 @@
         <q-item-label v-if="st.error" class="text-negative">
           {{ statusText(st.error) }}
         </q-item-label>
+        <!-- 手点「立即备份」失败的原因：挂到之后真备上一份为止（core/backupCard.failureStands）。
+             失败时半成品当场删掉，重探一遍目录照样「能写、没报错」—— 不挂的话卡片立刻回到下面那句灰字，
+             原因只在 6 秒的 toast 里。只在这一屏的组件状态里，不存进后端 -->
+        <q-item-label v-if="failed" class="text-negative">
+          {{ t('backup.lastFailed', { reason: failed.text }) }}
+        </q-item-label>
         <!-- 「这儿还没有」不是警报是指令：刚把目录指到别处的人做的是对的事，
              不该被一盏红灯迎接 —— 而按钮就在这一行的右边 -->
         <q-item-label v-if="!st.last_at && !st.error" class="text-grey-7">
@@ -49,9 +55,24 @@
           {{ st.every_hours ? t('backup.auto', { n: st.every_hours }) : t('backup.autoOff') }}
         </q-item-label>
         <!-- 说出来而不是拦住：默认就是同一块盘，而「同一块盘」这件事
-             只有在盘真坏了那天才显出分量，那时候说已经晚了 -->
-        <q-item-label v-if="st.same_disk" caption class="text-grey-6">
+             只有在盘真坏了那天才显出分量，那时候说已经晚了。
+             **目录是人改过的、却还在同一块盘上**就升成警示色：Linux 上 NAS / 外接盘没挂上时，
+             挂载点只是根盘上的一个空目录，备份照样写得进去、状态照样「正常」—— 和默认配置
+             长得一模一样，这一行是唯一的痕迹。只提示，不拦 -->
+        <q-item-label v-if="st.same_disk && st.custom_path" caption class="text-warning">
+          {{ t('backup.sameDiskCustom') }}
+        </q-item-label>
+        <q-item-label v-else-if="st.same_disk" caption class="text-grey-6">
           {{ t('backup.sameDisk') }}
+        </q-item-label>
+        <!-- data/ 里升级前的快照、恢复时挪走的旧账本：一直不清理（里面可能正是唯一还留着的数据），
+             也一直没人知道它们在。亮出来，删不删由人定 -->
+        <q-item-label v-if="st.stale_copies?.count" caption class="text-grey-6">
+          {{ t('backup.staleCopies', {
+            n: st.stale_copies.count,
+            size: mb(st.stale_copies.bytes),
+            oldest: st.stale_copies.oldest ? st.stale_copies.oldest.slice(0, 10) : '—',
+          }) }}
         </q-item-label>
         <!-- 只指路，不写步骤：恢复得在终端做，四步说明摆在手机上占三行还用不上 -->
         <q-item-label caption class="text-grey-6">{{ t('backup.restore') }}</q-item-label>
@@ -67,12 +88,17 @@ import { useI18n } from 'vue-i18n'
 
 import { api, errorText } from 'src/api/client'
 import type { BackupMade, BackupStatus } from 'src/api/types'
+import { alertOf, failureStands } from 'src/core/backupCard'
+import { useMeta } from 'src/stores/meta'
 
 const { t, te } = useI18n()
 const $q = useQuasar()
+const meta = useMeta()
 
 const st = ref<BackupStatus | null>(null)
 const busy = ref(false)
+/** 上一次手点「立即备份」失败的那句，和失败那一刻最新那份的名字（见 failureStands） */
+const failed = ref<{ text: string; lastName: string | null | undefined } | null>(null)
 
 onMounted(() => void load())
 
@@ -81,15 +107,22 @@ async function load() {
     st.value = await api.get<BackupStatus>('/api/backup')
   } catch {
     /* 拉不到状态就先不显示这一块，别在设置页上弹一个跟当前操作无关的错 */
+    return
   }
+  if (failed.value && !failureStands(failed.value.lastName, st.value)) failed.value = null
+  // 底栏「更多」上那个红点跟着这一屏一起重探：点了「立即备份」修好了，红点当场就该灭。
+  // 拿刚探到的状态现算，不再另问一次 /api/backup/alert（那一问在后端又是一整遍探目录）
+  meta.backupAlert = alertOf(st.value)
 }
 
 async function runNow() {
   busy.value = true
   try {
     const made = await api.post<BackupMade>('/api/backup')
+    failed.value = null
     $q.notify({ type: 'positive', timeout: 3000, message: t('backup.made', { name: made.name }) })
   } catch (e) {
+    failed.value = { text: errorText(e), lastName: st.value ? st.value.last_name : undefined }
     $q.notify({ type: 'negative', timeout: 6000, message: errorText(e) })
   } finally {
     busy.value = false
@@ -105,6 +138,8 @@ function statusText(code: string): string {
 
 const when = (iso: string) => iso.replace('T', ' ').slice(5, 16)
 const size = (n: number | null) => (n === null ? '' : `${Math.round(n / 1024).toLocaleString()} KB`)
+/** 旧账本副本一份就是整本账（几 MB），按 MB 说 */
+const mb = (n: number) => `${(n / 1_048_576).toFixed(1)} MB`
 </script>
 
 <style scoped>

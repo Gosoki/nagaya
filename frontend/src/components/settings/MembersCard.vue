@@ -132,18 +132,24 @@
 import { useQuasar } from 'quasar'
 import { computed, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 
 import { api, errorText } from 'src/api/client'
 import type { Member } from 'src/api/types'
 import MemberAvatar from 'src/components/MemberAvatar.vue'
 import { todayJst } from 'src/date'
+import { escapeHtml } from 'src/html'
+import { formatYen } from 'src/i18n'
 import { useAuth } from 'src/stores/auth'
+import { useBills } from 'src/stores/bills'
 import { useMeta } from 'src/stores/meta'
 
 const { t } = useI18n()
 const $q = useQuasar()
 const meta = useMeta()
 const auth = useAuth()
+const bills = useBills()
+const router = useRouter()
 
 const open = ref(false)
 /** 哪个日期弹层开着（同一时刻只开一个） */
@@ -169,11 +175,62 @@ async function save(m: Member, patch: Record<string, unknown>): Promise<boolean>
     meta.members = meta.members.map((x) => (x.id === saved.id ? saved : x))
     // 在籍名单变了：谁付的、分摊、默认垫付人全跟着它走，整份重取
     await meta.load().catch(() => {})
+    void checkGaps(saved)
     return true
   } catch (e) {
     $q.notify({ type: 'negative', message: errorText(e), timeout: 5000 })
     return false
   }
+}
+
+/**
+ * 改完入住日 / 搬走日（或者刚加了一个人），看一眼草稿里有没有因此对不上的账。
+ *
+ * 分摊是记账那一刻落库的：10/15 搬走、10/29 才来标，这半个月的伙食照样算着他一份；
+ * 新室友入住几天后才建账号，那之后的账一笔都没算他。**不替人重算**（当月怎么分得人定），
+ * 只把笔数和钱数说出来，指到账单页的「待核对」。口径是后端草稿账单上的 review.membership_gaps
+ * （固定费、转账、帮买不算），这里只挑跟这个人有关的。取不到就不说 —— 那是锦上添花，不是一道门
+ */
+async function checkGaps(m: Member) {
+  try {
+    await bills.reload('draft')
+  } catch {
+    return
+  }
+  const view = bills.views.draft
+  const gaps = (view?.bill.review?.membership_gaps ?? []).filter((g) => g.member_id === m.id)
+  if (!gaps.length) return
+  const amountOf = new Map((view?.entries ?? []).map((e) => [e.id, Math.abs(e.amount_jpy)]))
+  const left = gaps.filter((g) => g.type === 'left_but_charged')
+  const joined = gaps.filter((g) => g.type === 'joined_not_charged')
+  const lines: string[] = []
+  // 搬走之后还算着他的：钱数是**他在这几笔里担的那份**；入住之后没算他的：这几笔的金额
+  if (left.length) {
+    const share = left.reduce((n, g) => n + g.share, 0)
+    lines.push(t('members.gapLeft', { name: m.display_name, n: left.length, amount: formatYen(share) }))
+  }
+  if (joined.length) {
+    const total = joined.reduce((n, g) => n + (amountOf.get(g.entry_id) ?? 0), 0)
+    lines.push(t('members.gapJoined', { name: m.display_name, n: joined.length, amount: formatYen(total) }))
+  }
+  $q.notify({
+    type: 'warning',
+    timeout: 0,
+    multiLine: true,
+    html: true,                     // 只为换行；名字是用户起的，先转义
+    message: lines.map(escapeHtml).join('<br>'),
+    actions: [
+      {
+        label: t('members.gapGo'),
+        color: 'warning',
+        handler: () => {
+          bills.tab = 'draft'
+          void router.push({ name: 'bill' })
+        },
+      },
+      { label: t('common.confirm'), color: 'warning' },
+    ],
+  })
 }
 
 function pickJoined(m: Member, d: string) {
@@ -238,6 +295,8 @@ async function create() {
       message: t('members.added', { name: made.display_name, login: made.name }),
       actions: [{ label: t('common.confirm'), color: 'white' }],
     })
+    // 入住日填在今天之前的话，那之后已经记下的账都没算他
+    void checkGaps(made)
   } catch (e) {
     $q.notify({ type: 'negative', message: errorText(e), timeout: 5000 })
   } finally {

@@ -22,6 +22,12 @@
           </q-list>
         </q-menu>
       </button>
+      <!-- 范围：从账单 / 固定费面板点进来时带着的「本期未出账」「某张账单」。
+           **必须摆在筛选条上、清得掉**：不摆出来的话人会以为这就是全部账目 -->
+      <button v-if="fScope !== null" class="chip on scope" type="button" @click="fScope = null">
+        {{ scopeLabel }}
+        <q-icon name="close" size="16px" />
+      </button>
       <q-space />
       <!-- 筛完不给合计等于只筛了一半：「伙食这三个月花了多少」才是要问的。
            但一次只拉得到最近 500 笔，更早的没在手里 —— 那就把话说明白，
@@ -128,22 +134,30 @@ const ledger = useLedger()
 const bills = useBills()
 const nav = useNav()
 
-const statements = ref<Statement[]>([])
+/**
+ * 出过的账单，**跟着 store 走**。原来是 onMounted 里抄一份本地拷贝，只赋值一次：
+ * 下拉刷新、切回前台都只更新了 store，室友出完账「出了一次账单」那一行要等页面
+ * 重新挂载才出现。跟 store 走还顺带继承了它的「出账前发出去的旧列表不许写进来」
+ */
+const statements = computed(() => bills.statements ?? [])
 const router = useRouter()
 const route = useRoute()
 
-onMounted(async () => {
-  // 带着 ?category= 进来的（固定费面板上「本期有 N 笔」点进来）：直接筛好。
+onMounted(() => {
+  // 带着 ?category= 进来的（固定费面板上「另有 N 笔」点进来）：直接筛好。
+  // 还可能带着范围（?unbilled=1 ＝ 本期未出账，?statement=7 ＝ 那一张账单上的）：
+  // 「另有 1 笔」要看的是本期那几笔，不是这个分类五年来的每一笔房租。
   // **页签也要拨回流水**：这一屏显示哪块由 nav.entriesTab 决定，而它记在 sessionStorage 里 ——
   // 只要这次会话去过「更多 → 设置」，这个链接就把人送到设置面板上，
   // 一笔账都看不到。而固定费项目的增删改就在设置那一屏，停在 settings 是常态
   const wanted = Number(route.query.category)
-  if (wanted) {
-    nav.entriesTab = 'ledger'
-    fCategory.value = wanted
-  }
-  // 和账单页共用同一份（同时只取一发）
-  statements.value = await bills.loadStatements()
+  const st = Number(route.query.statement)
+  if (wanted) fCategory.value = wanted
+  if (route.query.unbilled === '1') fScope.value = 'unbilled'
+  else if (st) fScope.value = st
+  if (wanted || fScope.value !== null) nav.entriesTab = 'ledger'
+  // 和账单页共用同一份（同时只取一发）。断网进来取不到就算了：下拉刷新会自己报错
+  void bills.loadStatements().catch(() => {})
 })
 
 /**
@@ -194,23 +208,35 @@ function openStatement(id: number) {
 const fKind = ref<EntryKind | null>(null)
 const fCategory = ref<number | null>(null)
 const fPayer = ref<number | null>(null)
+/** 范围：'unbilled' ＝ 还没出账的，数字 ＝ 那一张账单上的。只从链接带进来，筛选条上一颗能清掉的签 */
+const fScope = ref<'unbilled' | number | null>(null)
 
 const anyFilter = computed(
-  () => fKind.value !== null || fCategory.value !== null || fPayer.value !== null,
+  () => fKind.value !== null || fCategory.value !== null || fPayer.value !== null || fScope.value !== null,
 )
 
 function clearFilters() {
   fKind.value = null
   fCategory.value = null
   fPayer.value = null
+  fScope.value = null
 }
+
+const scopeLabel = computed(() => {
+  const s = fScope.value
+  if (s === null) return ''
+  if (s === 'unbilled') return t('filter.scopeUnbilled')
+  return t('filter.scopeStatement', { label: statementLabel(statements.value.find((x) => x.id === s)) || `#${s}` })
+})
 
 const visible = computed(() =>
   ledger.entries.filter(
     (e) =>
       (fKind.value === null || e.kind === fKind.value) &&
       (fCategory.value === null || e.category_id === fCategory.value) &&
-      (fPayer.value === null || e.payer_id === fPayer.value),
+      (fPayer.value === null || e.payer_id === fPayer.value) &&
+      (fScope.value === null ||
+        (fScope.value === 'unbilled' ? e.statement_id === null : e.statement_id === fScope.value)),
   ),
 )
 

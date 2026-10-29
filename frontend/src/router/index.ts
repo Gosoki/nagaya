@@ -1,8 +1,9 @@
 import { Notify } from 'quasar'
 import { createRouter, createWebHistory } from 'vue-router'
 
-import { getToken, setUnauthorizedHandler } from 'src/api/client'
+import { getToken, pendingWrites, setUnauthorizedHandler } from 'src/api/client'
 import { i18n } from 'src/i18n'
+import { pendingUi } from 'src/unsaved'
 import { applyUpdateIfReady, entryChanged } from 'src/update'
 
 export const router = createRouter({
@@ -66,7 +67,14 @@ const RELOADED = 'nagaya.reloadedForChunk'
 // 「Unable to preload CSS」是 Vite 先等页面的 CSS 那一步失败时抛的 —— 每个页面都带 CSS，
 // 第一下失败的总是它。原来认不出，于是发版后第一次点页签照样没反应
 const CHUNK_FAILED = /dynamically imported module|Importing a module script failed|Failed to fetch|Unable to preload CSS/i
-router.onError((err) => {
+/**
+ * 整页重载之前最多等写请求落地、等固定费面板存完（或等人答完它的询问框）多久。
+ * 写请求没有超时（client.ts：超时了它可能已经落库），卡住的那一个不能把整页导航永远挂着；
+ * 存失败、还 dirty 的那几行要人自己处理，也等不来 —— 等不到就不刷，说一句，下一次点页签再试
+ */
+const WRITE_WAIT_MS = 10_000
+
+router.onError((err, to) => {
   if (!CHUNK_FAILED.test(String(err))) return
   void (async () => {
     // **断网和「版本旧了」报的是同一句错**，先问服务器一声：
@@ -80,6 +88,21 @@ router.onError((err) => {
       return
     }
     if (!changed) return
+    // **先等还在路上的写请求落地。** 导航失败时当前页不会卸载：刚点了「记入账」紧接着点底栏，
+    // POST 还在路上就整页重载，账多半已经记上了（后端不因断开而回滚），可「已记下 · 撤销」
+    // 那条提示跟着丢了 —— 人以为没记上再记一遍，就是两笔。
+    // **也等固定费面板**（src/unsaved）：失焦存一行撞上 409，写请求落地了、询问框才弹出来，
+    // 只等写请求的话正好在框底下整页重载，框和填的数一起没了，整页卸载也不跑「这几项没存上」。
+    // 还挂着没存上的行就一直不刷，到点说一句。
+    // 人已经要离开这一页了，多等这几百毫秒不打断什么（和 update.ts 换新版那条是同一个规矩）
+    const deadline = Date.now() + WRITE_WAIT_MS
+    while (pendingWrites() + pendingUi() > 0) {
+      if (Date.now() > deadline) {
+        Notify.create({ type: 'warning', message: i18n.global.t('common.waitingWrite') })
+        return
+      }
+      await new Promise((r) => setTimeout(r, 100))
+    }
     try {
       if (sessionStorage.getItem(RELOADED)) return    // 已经刷过一次还不行，别再刷
       sessionStorage.setItem(RELOADED, '1')
@@ -87,7 +110,9 @@ router.onError((err) => {
       // 存不了就没法防「刷了还是失败」的死循环 —— 那就干脆不自动刷
       return
     }
-    location.reload()
+    // 按**点的那一页**整页打开，不是 reload 当前地址：点了「账单」却落回记一笔，
+    // 人得再点一次（applyUpdateIfReady 也是这么换的）
+    location.replace(to.fullPath)
   })()
 })
 router.afterEach((to) => {

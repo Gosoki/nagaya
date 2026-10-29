@@ -16,15 +16,18 @@
     indicator-color="primary"
   >
     <q-tab name="ledger" :label="t('entries.tabLedger')" />
-    <q-tab name="settings" :label="t('entries.tabSettings')" />
+    <!-- 备份出问题了：底栏「更多」上亮着红点，这儿也亮 —— 指到「设置」里那块备份 -->
+    <q-tab name="settings" :label="t('entries.tabSettings')" :alert="meta.backupAlert ? 'negative' : false" />
   </q-tabs>
 </template>
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 
+import { useMeta } from 'src/stores/meta'
 import { useNav } from 'src/stores/nav'
 
 const { t } = useI18n()
 const nav = useNav()
+const meta = useMeta()
 </script>

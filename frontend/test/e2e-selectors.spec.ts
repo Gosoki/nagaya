@@ -21,19 +21,36 @@ function walk(dir: string): string[] {
 }
 
 /**
- * 源码里**真实存在的 class 名**。两个来源：
+ * 源码里**真实存在的 class 名**（还有 data-* 属性名，见下面）。两个来源：
  *   1. 模板里的 class="..." 和 :class="..."（后者含 `{ on: xxx }` 这种对象写法）
  *   2. 样式里的 .foo 选择器
  * 不能简单地在整份源码里找这个词 —— i18n 里一句 `share: '应担'` 就会让
  * 早已失效的 `.share` 选择器蒙混过关，那正是这条守卫要抓的东西。
  */
 const existing = new Set<string>()
-for (const f of walk(SRC).filter((x) => x.endsWith('.vue') || x.endsWith('.ts'))) {
+/**
+ * 源码里写过的 data-* 属性（`data-name="…"` 或 `:data-name="…"`）。
+ * E2E 按 `[data-name="房租"]` 找行，而这种选择器原来一个都不查：把模板里的 data-name
+ * 改个名，用例只会超时（实测改名之后这道守卫照样绿）
+ */
+const dataAttrs = new Set<string>()
+const sources = walk(SRC).filter((x) => x.endsWith('.vue') || x.endsWith('.ts'))
+for (const f of sources) {
   const text = readFileSync(f, 'utf8')
   for (const m of text.matchAll(/:?class="([^"]*)"/g)) {
     for (const [tok] of m[1]!.matchAll(/[a-zA-Z][\w-]*/g)) existing.add(tok)
   }
   for (const m of text.matchAll(/\.([a-zA-Z][\w-]*)\s*[,{:.\s]/g)) existing.add(m[1]!)
+  for (const m of text.matchAll(/(?<![\w-])(data-[\w-]+)=/g)) dataAttrs.add(m[1]!)
+}
+
+/**
+ * spec 里 locator(…) 的选择器串。**三种引号都认**：原来只认单引号，
+ * `locator(`.fixed-row[data-name="${name}"]`)` 这种模板字符串整个漏过去
+ * （`${…}` 里面不会以 `.` 开头，抽不出假的 class）
+ */
+function locators(spec: string): string[] {
+  return [...spec.matchAll(/locator\(\s*(['"`])((?:(?!\1)[\s\S])+)\1/g)].map((m) => m[2]!)
 }
 
 describe('E2E 选择器', () => {
@@ -41,8 +58,8 @@ describe('E2E 选择器', () => {
     it(`${file.split('/').pop()} 里的 class 在源码里都找得到`, () => {
       const spec = readFileSync(file, 'utf8')
       const missing = new Set<string>()
-      for (const m of spec.matchAll(/locator\(\s*'([^']+)'/g)) {
-        for (const [, cls] of m[1]!.matchAll(/\.([a-zA-Z][\w-]*)/g)) {
+      for (const sel of locators(spec)) {
+        for (const [, cls] of sel.matchAll(/\.([a-zA-Z][\w-]*)/g)) {
           // q-* 是 Quasar 自带的，不在我们源码里
           if (cls!.startsWith('q-') || cls!.startsWith('text-') || cls!.startsWith('bg-')) continue
           if (!existing.has(cls!)) missing.add(cls!)
@@ -50,5 +67,18 @@ describe('E2E 选择器', () => {
       }
       expect([...missing], '这些 class 在 src 里不存在，用例只会超时不会报错').toEqual([])
     })
+
+    it(`${file.split('/').pop()} 里的 data-* 属性在源码里都找得到`, () => {
+      const spec = readFileSync(file, 'utf8')
+      const used = new Set([...spec.matchAll(/\[(data-[\w-]+)/g)].map((m) => m[1]!))
+      expect(used.size, '一个 data-* 都没扫到 —— 多半是正则写错了，别空跑成假绿').toBeGreaterThan(0)
+      const missing = [...used].filter((a) => !dataAttrs.has(a))
+      expect(missing, '这些 data-* 属性在 src 里不存在，用例只会超时不会报错').toEqual([])
+    })
   }
+
+  it('模板字符串里的选择器也认得出来（别让守卫自己漏）', () => {
+    const got = locators("page.locator(`.fixed-row[data-name=\"${name}\"]`); page.locator('.memo-row')")
+    expect(got).toEqual(['.fixed-row[data-name="${name}"]', '.memo-row'])
+  })
 })

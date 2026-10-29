@@ -1,35 +1,37 @@
 /**
  * 「帮买」的认法：一笔支出，付款人自己一分不担、全算在一个别人头上。
- * 和后端 services/bill.help_buy_for 是同一条规则（tests/test_bill.py 也钉着）。
+ * 和后端 services/bill.help_buy_for 是同一条规则，**跑同一份 fixture**（tests/fixtures/help_buy_cases.json）。
+ *
+ * 原来两边各写各的单测、互为镜像，只靠注释同步 —— 和分摊用例共用 fixture 之前是同一种状况：
+ * 以后加一条规则（比如再排除某种分类）只改了一边，另一边的单测照样绿。
  */
-import { expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { describe, expect, it } from 'vitest'
 
 import { helpBuyFor } from '../src/core/helpBuy'
 
-const e = (kind: 'expense' | 'income' | 'settlement', payer: number, shares: Record<string, number>) => ({
-  kind,
-  payer_id: payer,
-  shares,
-})
+const here = dirname(fileURLToPath(import.meta.url))
+const load = (name: string) =>
+  JSON.parse(readFileSync(resolve(here, '../../tests/fixtures', name), 'utf-8'))
 
-it('Go 付钱、全算 Kan 的 ＝ 替 Kan 买', () => {
-  expect(helpBuyFor(e('expense', 1, { '2': 3200 }))).toBe(2)
-  // 别人是 0 的行也算「只有一个人担」
-  expect(helpBuyFor(e('expense', 1, { '1': 0, '2': 3200, '3': 0 }))).toBe(2)
-})
+interface Case {
+  name: string
+  kind: 'expense' | 'income' | 'settlement'
+  payer_id: number
+  shares: Record<string, number>
+  fixed_cost?: boolean
+  expected: number | null
+}
 
-it('付款人自己也担、或者两个人分 —— 普通支出', () => {
-  expect(helpBuyFor(e('expense', 1, { '1': 500, '2': 500 }))).toBeNull()
-  expect(helpBuyFor(e('expense', 1, { '2': 500, '3': 500 }))).toBeNull()
-  // 只有付款人自己担：自己买自己用的，也不是帮买
-  expect(helpBuyFor(e('expense', 1, { '1': 1000 }))).toBeNull()
-})
+describe('共享 fixture（和后端 pytest 同一份文件）', () => {
+  const cases: Case[] = load('help_buy_cases.json').cases
+  it('用例文件不是空的', () => expect(cases.length).toBeGreaterThan(5))
 
-it('转账、收入都不是', () => {
-  expect(helpBuyFor(e('settlement', 1, { '2': 3200 }))).toBeNull()
-  expect(helpBuyFor(e('income', 1, { '2': -3200 }))).toBeNull()
-})
-
-it('挂在固定费上的不算：车位从 Go 卡上扣、只算 Kan 的，固定费那块已经列着', () => {
-  expect(helpBuyFor(e('expense', 1, { '2': 8000 }), true)).toBeNull()
+  for (const c of cases) {
+    it(c.name, () => {
+      expect(helpBuyFor({ kind: c.kind, payer_id: c.payer_id, shares: c.shares }, c.fixed_cost ?? false)).toBe(c.expected)
+    })
+  }
 })
